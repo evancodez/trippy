@@ -1,19 +1,18 @@
-// The film world: one ray-marched scene.
-//   · a membrane (the screen is a sheet of lines) with a height field: silk folds, ripples, a ghost face,
-//     and a media relief (camera, image, video, words) pressing up from underneath
-//   · things pushing through it from behind: jointed hands (which can copy yours), rising orbs, and
-//     objects — a Penrose triangle, a Möbius strip, gyroscope rings — blended with a soft union so the
-//     lines stretch over them like fabric, or a hard one so they break through
-//   · spaces the membrane can melt into and the camera can fly through: a gyroid / Schwarz-P lattice,
-//     an infinite Menger sponge, a field of fractal crystals; and a colonnade rising from the floor
-//   · the line equation painted on every surface: straight lines + rings + tunnel + spiral + cross lines
-//     + moiré + contour slices, all weighted, so one equation morphs into the next
-// Lighting can thin the ink in bright places (engraving), so 3D form is drawn with lines alone.
+// The world: one ray-marched scene that can lie flat (2D op art) or open up into 3D.
+//   · a sheet of lines with a height field: folds, ripples, a ghost face, the sound's landscape, and a
+//     picture (camera, image, video, words) pressing up from underneath
+//   · things pushing through it: jointed hands (a mirrored pair, or yours), rising orbs, objects, and a
+//     chrome ball the lines part around — soft unions, so the lines stretch over them like fabric
+//   · spaces the sheet can melt into and the camera can fly through: a lattice, a Menger sponge, fractal
+//     crystals, a corridor; a colonnade; or the floor drops away and shapes float in the dark
+//   · one line equation painted on every surface: straight lines + rings + tunnel + spiral + checkers +
+//     triangles + moiré + contours, all weighted, so one look re-forms into the next
+// Lighting can thin the ink where it's bright (engraving), so 3D form is drawn with lines alone.
 import { shaderDefines, SHADER_COUNT, SHADER_SLOTS } from './params.js';
 
 const HAND_BASE = SHADER_SLOTS.findIndex(s => s.name === 'h0on');
 
-export const FILM_FRAG = `#version 300 es
+export const WORLD_FRAG = `#version 300 es
 precision highp float;
 out vec4 outColor;
 uniform vec2 uRes;
@@ -30,6 +29,7 @@ uniform float uStepK;          // how boldly the ray marcher may step (smaller w
 uniform float uRealTime;
 uniform float uFinger[15];     // per-finger curl offsets, 5 per hand (thumb, index, middle, ring, pinky)
 uniform float uHandMirror[3];  // 1 or -1: left or right hand
+uniform vec4 uTwists[4];       // the endless twist: centre (screen), angle (keeps growing while held), radius
 
 ${shaderDefines()}
 #define HAND_BASE ${HAND_BASE}
@@ -39,6 +39,8 @@ ${shaderDefines()}
 vec3 gRight, gUp, gBack;       // the camera's frame (the impossible triangle is built from it)
 float gCalm = 1.0;             // 0 inside you when "keep it still inside" is on: the warps leave you alone
 float gAura = 0.0;             // how far the lines are pushed around you
+float gBand = 0.0;             // 0 / 1: which ink this line gets (every other line in the second ink)
+float gBallH = 0.0;            // the sheet's height under the ball (once per pixel)
 
 mat2 rot(float a) { float c = cos(a), s = sin(a); return mat2(c, s, -s, c); }
 float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
@@ -197,7 +199,7 @@ float hands(vec3 p) {
     q.xy = rot(-uP[b + 5]) * q.xy;
     q.yz = rot(-0.3) * q.yz;
     q.x *= uHandMirror[i];
-    d = min(d, handSDF(q, uP[b + 6], uP[b + 7], i * 5) * s);
+    d = smin(d, handSDF(q, uP[b + 6], uP[b + 7], i * 5) * s, 0.06 * s);   // soft, so a pair never creases where they meet
   }
   return d;
 }
@@ -337,6 +339,29 @@ float hallSDF(vec3 p) {
   return mix(box, w - length(q), HALLROUND);
 }
 
+// ---------------------------------------------------------------- the ball (after Tame Impala's Currents)
+// a chrome ball resting in the sheet; the lines part around it like water round a stone, and a turbulent
+// wake trails behind it. Lifted off (a bounce), it lets go of the lines.
+vec3 ballC() { return vec3(BALLX, BALLY, gBallH + BALLZ + BALLR * 0.3); }
+float ballSDF(vec3 p) { return length(p - ballC()) - BALLR * BALL; }
+
+vec2 ballFlow(vec2 q) {
+  if (BALL <= 0.001) return q;
+  vec2 c = vec2(BALLX, BALLY), o = q - c;
+  float R = BALLR * BALL * clamp(1.0 - BALLZ / (BALLR * 1.6), 0.25, 1.0) * 1.2;
+  vec2 rel = o * (1.0 - BALLFLOW * R * R / max(dot(o, o), R * R));   // flow round a cylinder
+  vec2 v = vec2(BALLVX, BALLVY);
+  float sp = length(v);
+  if (BALLWAKE > 0.0 && sp > 1e-3) {
+    vec2 dir = v / sp;
+    float behind = -dot(o, dir), side = dot(o, vec2(-dir.y, dir.x));
+    float b = max(behind, 0.0);
+    float w = smoothstep(0.0, R, behind) * exp(-b / (R * 8.0)) * exp(-side * side / (R * R * (1.5 + b / R)));
+    rel += w * BALLWAKE * R * 0.9 * vec2(fbm(o / R * 0.8 + vec2(TIME * 0.9, 0.0)), fbm(o / R * 0.8 + vec2(5.2, -TIME * 0.9)));
+  }
+  return c + rel;
+}
+
 float map(vec3 p) {
   float d = (p.z - heightField(p.xy) + DROP * DROP * 40.0) * uStepK;
   float sw = GYRO + SPONGE + KIFS + HALL;
@@ -351,6 +376,7 @@ float map(vec3 p) {
   if (ORBS > 0.001) d = smin(d, orbsSDF(p), 0.04);
   if (COLUMNS > 0.001) d = smin(d, columnsSDF(p), 0.03);
   d = smin(d, objects(p), OBJSOFT);
+  if (BALL > 0.001) d = smin(d, ballSDF(p), 0.02);
   return smin(d, hands(p), HANDSOFT);
 }
 
@@ -407,6 +433,7 @@ float lines(vec2 q, float z, out float rr, out vec2 qw) {
   R = mix(R, 0.09 / max(rs, 2e-3), RADINV);
   float base = (WLIN * L + WRAD * R + CONTOUR * z * 2.5) * FREQ - PHASE + gAura;
   float v = sin(base * PI);
+  gBand = mod(floor(base * 0.5), 2.0);
   if (WANG > 0.0) v = mix(v, sin(base * PI + ang * floor(SPOKES + 0.5)), WANG);
   if (CHECK > 0.0) {
     float a2 = dot(q, vec2(cos(LINA + CHECKA), sin(LINA + CHECKA))) * FREQ - PHASE * 0.5;
@@ -438,12 +465,24 @@ vec2 objectUV(vec3 s) {
   return vec2(atan(s.x, s.z) * n / (PI * FREQ), s.y * 0.8 * OBJS);
 }
 
+vec3 hueShift(vec3 c, float a) {
+  const vec3 k = vec3(0.57735);
+  float ca = cos(a);
+  return c * ca + cross(k, c) * sin(a) + k * dot(k, c) * (1.0 - ca);
+}
+
 void main() {
   vec2 px = gl_FragCoord.xy;
   vec2 uv = (px - 0.5 * uRes) / uRes.y;
   uv += texture(uDisp, px / uRes).xy;
+  for (int i = 0; i < 4; i++) {                              // the endless twist: it can wind round as often as you like
+    vec4 tw = uTwists[i];
+    if (tw.z == 0.0) continue;
+    vec2 dd = uv - tw.xy;
+    uv = tw.xy + rot(tw.z * exp(-dot(dd, dd) / (tw.w * tw.w))) * dd;
+  }
 
-  // camera: orbit around the target; FRAME keeps the membrane the same size whatever the lens
+  // camera: orbit around the target; FRAME keeps the sheet the same size whatever the lens
   float cp = cos(PITCH), sp = sin(PITCH), cy = cos(YAW), sy = sin(YAW);
   vec3 right = vec3(cy, sy, 0.0);
   vec3 up = vec3(-sy * cp, cy * cp, sp);
@@ -455,6 +494,7 @@ void main() {
   vec3 target = vec3(TX, TY, 0.0);
   vec3 ro = target + back * dist - back * FLY;
   vec3 rd = normalize(r2 * uv.x + u2 * uv.y - back * FOCAL);
+  if (BALL > 0.001) gBallH = heightField(vec2(BALLX, BALLY));
 
   float t = 0.0, d = 1.0;
   float far = dist * 3.0 + 14.0;
@@ -468,54 +508,66 @@ void main() {
   }
   if (!hit && t < far) hit = true;   // ran out of steps grazing a surface: close enough
 
-  vec3 paper = vec3(PAPER_R, PAPER_G, PAPER_B), ink = vec3(INK_R, INK_G, INK_B), fog = vec3(FOG_R, FOG_G, FOG_B);
+  float hs = HUE * TAU;                                      // the color cycle turns the palette (grays stay gray)
+  vec3 paper = hueShift(vec3(PAPER_R, PAPER_G, PAPER_B), hs), fog = hueShift(vec3(FOG_R, FOG_G, FOG_B), hs);
+  vec3 ink1 = hueShift(vec3(INK_R, INK_G, INK_B), hs), ink2 = hueShift(vec3(INK2_R, INK2_G, INK2_B), hs);
   vec3 col = fog;
   if (hit) {
     vec3 p = ro + rd * t;
     vec3 n = calcNormal(p, t);
+    bool onBall = BALL > 0.001 && ballSDF(p) < 0.004 + 0.001 * t;
     if (MEDIACALM > 0.0) gCalm = 1.0 - MEDIACALM * mediaMaskSoft(p.xy, 1.5);
     if (AURA > 0.0) gAura = AURA * 2.0 * mediaMaskSoft(p.xy, log2(float(textureSize(uMedia, 0).y) / 22.0));
     float rr = 1.0;
     vec2 qw = p.xy;
     float v = 0.0;
-    if (WRAP < 0.999) v = lines(p.xy + n.xy * REFRACT * 0.12, p.z, rr, qw);   // refraction: lines bend over the relief
-    if (WRAP > 0.001) {
-      vec2 sq = surfaceUV(p, n);
-      float o = objWeights() > 0.001 ? objects(p) : 1e3;
-      float wo = 1.0 - smoothstep(0.003, 0.04 * OBJS, o);
-      if (wo > 0.001) sq = mix(sq, objectUV(objSpin((p - objPos()) / OBJS)), wo);
-      float rr2;
-      vec2 qw2;
-      float vw = lines(sq, p.z, rr2, qw2);
-      if (WRAP >= 0.999) { v = vw; rr = rr2; } else v = mix(v, vw, WRAP);
+    if (onBall) {
+      // chrome: the ball mirrors the lines around it
+      vec3 nb = normalize(p - ballC());
+      vec3 rf = reflect(rd, nb);
+      v = lines(ballFlow(p.xy + rf.xy * BALLR * 3.0 / (0.35 + abs(rf.z))), 0.0, rr, qw);
+      rr = 1.0;
+    } else {
+      if (WRAP < 0.999) v = lines(ballFlow(p.xy + n.xy * REFRACT * 0.12), p.z, rr, qw);   // lines bend over the relief
+      if (WRAP > 0.001) {
+        vec2 sq = surfaceUV(p, n);
+        if (length(n.xy) < 0.7) sq = ballFlow(sq);
+        float o = objWeights() > 0.001 ? objects(p) : 1e3;
+        float wo = 1.0 - smoothstep(0.003, 0.04 * OBJS, o);
+        if (wo > 0.001) sq = mix(sq, objectUV(objSpin((p - objPos()) / OBJS)), wo);
+        float rr2;
+        vec2 qw2;
+        float vw = lines(sq, p.z, rr2, qw2);
+        if (WRAP >= 0.999) { v = vw; rr = rr2; } else v = mix(v, vw, WRAP);
+      }
     }
-    if (STAT > 0.0) {
-      float sn = (hash12(floor(px / 2.0) + floor(TIME * 20.0) * vec2(17.31, 41.7)) - 0.5) * 2.6 + 0.3 * sin(px.y / uRes.y * 7.0 - TIME * 2.0);
-      v = mix(v, sn, STAT);
-    }
+    vec3 ink = mix(ink1, ink2, BANDS * gBand);
     vec4 photo = vec4(0.0);
     float photoA = 0.0;
-    if (MEDIAINK > 0.0 || MEDIAPHOTO > 0.0) {                  // the picture itself, sharp: engraved and/or shown
-      vec2 uv = mediaUV(mix(p.xy, qw, MEDIAWARP));
-      photo = texture(uMediaSharp, uv);
-      photoA = mix(1.0, photo.a, MEDIAMASK) * mediaEdge(uv, 0.03);
+    if (!onBall && (MEDIAINK > 0.0 || MEDIAPHOTO > 0.0)) {     // the picture itself, sharp: engraved and/or shown
+      vec2 muv = mediaUV(mix(p.xy, qw, MEDIAWARP));
+      photo = texture(uMediaSharp, muv);
+      photoA = mix(1.0, photo.a, MEDIAMASK) * mediaEdge(muv, 0.03);
       photo.a = mix(dot(photo.rgb, vec3(0.299, 0.587, 0.114)), 1.0 - dot(photo.rgb, vec3(0.299, 0.587, 0.114)), MEDIAINV);
       v += (0.55 - photo.a) * photoA * MEDIAINK * 2.2;         // drawn by line thickness (engraving)
     }
     vec3 L = normalize(vec3(-0.45, 0.55, 0.75));
     float diff = max(dot(n, L), 0.0);
     float amb = 0.5 + 0.5 * n.z;
-    v -= (diff - 0.6) * ENGRAVE * 1.4;                       // light thins the ink: form drawn with lines
+    if (!onBall) v -= (diff - 0.6) * ENGRAVE * 1.4;          // light thins the ink: form drawn with lines
     v -= THICK;
-    float w = (STAT > 0.5 ? 0.04 : fwidth(v) * 0.8) + 1e-3;
+    float w = fwidth(v) * 0.8 + 1e-3;
     float k = smoothstep(-w, w, v);
     k = mix(k, 1.0 - k, INVERT);
     col = mix(paper, ink, k);
     float spec = pow(max(dot(reflect(-L, n), -rd), 0.0), 40.0);
-    col = mix(col, col * (0.25 + 0.55 * amb + 0.55 * diff) + spec * 0.3, LIGHT);
+    if (onBall) {
+      float fres = pow(1.0 - max(dot(n, -rd), 0.0), 2.0);
+      col = col * (0.55 + 0.45 * diff) * (1.0 - 0.55 * fres) + pow(max(dot(reflect(-L, n), -rd), 0.0), 60.0) * 0.9;
+    } else col = mix(col, col * (0.25 + 0.55 * amb + 0.55 * diff) + spec * 0.3, LIGHT);
     if (MEDIAPHOTO > 0.0) {                                    // shown as a photo: a duotone in the palette, or true color
-      bool pd = dot(paper, vec3(1.0)) < dot(ink, vec3(1.0));
-      vec3 duo = mix(pd ? paper : ink, pd ? ink : paper, smoothstep(0.03, 0.97, photo.a));
+      bool pd = dot(paper, vec3(1.0)) < dot(ink1, vec3(1.0));
+      vec3 duo = mix(pd ? paper : ink1, pd ? ink1 : paper, smoothstep(0.03, 0.97, photo.a));
       col = mix(col, mix(duo, photo.rgb, PHOTOCOLOR), MEDIAPHOTO * photoA);
     }
     if (DROP > 0.0) col = mix(col, fog, DROP * smoothstep(-0.3, -4.0, p.z));   // the floor falling away into the dark

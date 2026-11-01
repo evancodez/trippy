@@ -1,79 +1,54 @@
-# trippy — op-art machine
+# trippy
 
-A browser playground for trippy black-and-white op art, from flat patterns to a 3D world of lines. It also makes music videos.
+A world of black-and-white op-art lines you can warp, ripple, twist and play music into. It can be flat or 3D.
 
-**Three modes** (switch at the top of the panel):
+No build step and no dependencies: plain HTML, ES modules and WebGL2.
 
-- **Worlds**: one 3D world made of lines.
-  - Pick a look and *everything glides there*. The equation re-forms instead of cutting. Looks are grouped as flat op art, 3D sheets, fly-throughs, objects, and hands & faces.
-  - Play a song or use the mic: loudness drives intensity while the bar drives the sway.
-  - **You decide what the music does:**
-    - One knob sets how much the music moves it, from 0% to 200%.
-    - One-click ties: bass bulges it, the beat jumps the scale, mids melt it, highs thin the lines, and more.
-    - Every slider has a **∿** to tie it to the bass, mids, highs, loudness, the beat, the bar or a slow wave, with a depth (negative flips it).
-    - Ties stay when the look changes.
-  - **Auto-morph** only runs with music by default. You choose:
-    - when: off, while a song plays, with any sound, or always
-    - how often: every N bars, or when the song changes section
-    - what it picks from: kinds of look, or variations of the current one
-  - The **Hand** tool turns your cursor into a hand pressing through the fabric from behind.
-- **Patterns**: flat op art. Presets, mouse tools (ripple, smear, bulge, pinch, twist), a warp stack, a second pattern layer, formulas with a knob for every number, and a film look.
-  - Every slider has a **∿** button that ties it to the music: bass, mids, highs, loudness, beat, bar or a slow wave.
-- **Films**: music videos.
-  - **PPP — a film in lines**: a 17-chapter film choreographed to Beach House's *PPP*, one continuous morph on its 6/8 bar lines.
-  - **Smart music mode** writes a new film for any song, different every time.
+## How it's laid out
 
-**Music, everywhere:**
-- **Your songs.** Drop several at once. They're kept in this browser (IndexedDB, never uploaded) so you can flip between them in any mode, even after a reload.
-  - The same song keeps playing when you switch between Patterns and Worlds; a pill in the top bar plays, pauses, skips and stops it.
-  - In Films, pick one to have a film written for it.
-- **How hard it hits:** Subtle, **Lively** (the default) or Wild, one choice for Patterns and Worlds, then fine-tune.
-- **The sound itself** bends the picture, live:
-  - *Sound wave:* the waveform, held steady like an oscilloscope, runs through the lines.
-  - *Spectrum spikes:* rings spike with the frequencies, bass to treble round the circle. Straight lines bump with them, and the last few seconds ride further out.
-  - *Sound landscape* (Worlds): the sheet rises into hills of the spectrum, rolling away from you.
+The side panel has four tabs.
 
-**Everywhere:**
-- **Four big knobs** (Calm↔Wild, Flat↔Deep, Mono↔Color, Still↔Moving) each move dozens of settings at once. The accent color is yours to pick.
-- **Explore** (`E`) breeds what you're looking at: 8 variations around it. Pick one and it has 8 children; keep going. You can keep colors, camera, shapes or lines fixed, and set how wild the mutations are.
-- **You (camera)**, worked out locally with MediaPipe. Nothing leaves the browser.
-  - **Quick setups:** Lines over me, Just me, **Playing guitar**, Just hands & guitar, My face, Ghost puppet, Movement.
-    - *Playing guitar* shows your body, arms and guitar clearly. The pattern around you moves to your playing through the mic.
-  - **What counts as you:** the whole picture, your body, your face, your hands and what they hold, body + what you hold, a frame you set, or movement trails.
-  - **How it shows:**
-    - *Photo* shows the picture itself, in the look's two colors or true color.
-    - *Relief* pushes the lines up.
-    - *Engraved* draws it in line thickness.
-    - *Detail* raises the camera's resolution (720p capture); the photo and engraving use the sharp picture.
-  - **Around you:**
-    - *Keep me still* stops the warps inside you.
-    - *Aura* makes the lines ripple off you, pushed further by the sound.
-  - **Extras:**
-    - *Ghost puppet:* the line-face copies your expressions.
-    - *3D hands* copy yours finger by finger.
-    - Movement makes ripples.
-    - *Look around:* move your head and the 3D shifts.
-  - All of this works in Worlds and in the films.
-- **Pictures & words:** drop an image or video, or type words. They press up under the lines as relief and are drawn in line thickness (engraving), and the warps can bend them.
-- **Geometry:**
-  - Penrose's impossible triangle (built from the camera's own view, with a "reveal" that turns it to show the trick).
-  - A Möbius strip and gyroscope rings that push through the fabric.
-  - An infinite Menger sponge and a field of twisting Sierpiński crystals to fly through.
-  - A colonnade rising out of a floor of lines.
-- **After Beach House's *7* visualizer:**
-  - Hard black-and-white tiles: stripes, checkers, triangles and dots.
-  - Rings that turn into squares or diamonds, a squeeze band, a vortex, and zigzag waves.
-  - Corridors to fly down: square or round, closed or open to the dark, with rippling walls.
-  - A striped ball and a lumpy blob floating in the dark. *Wrap* makes the stripes follow surfaces, like meridians on a globe.
-  - Checker hills, a triangle floor, and the floor dropping away.
+- **Looks**: every look, grouped by kind. Click one and everything glides there; the equation re-forms instead of cutting.
+  - **Lines**: Op Stripes, Squeeze, Lightning.
+  - **Rings & tunnels**: Ghost Rings, Tunnel, Square Tunnel, Diamonds, Spiral, Whirlpool.
+  - **Tiles**: Triangle Vortex, Vasarely, Dot Tunnel, Mandala.
+  - **3D sheets**: Silk, Chrome Silk, Line Landscape, Checker Hills, Triangle Floor, Endless Road, Dot Field, Orb Field.
+  - **Fly through**: Hallway, Triangle Shaft, Ring Tunnel, Lattice, Menger Sponge, Fractal Crystals, Colonnade.
+  - **Objects**: Striped Ball, Lumpy Blob, Impossible (Penrose), Möbius, Gyroscope.
+- **Tweak**: change the look you're on.
+  - Three feel knobs that work on every look: Calm ↔ Wild, Still ↔ Moving, Thin ↔ Bold.
+  - The four sliders that matter most for this look.
+  - Lines and motion: line count, weight, angle, turn, spin, flow.
+  - Color: palettes, your own colors, a second ink on every other line, a color cycle, glow.
+  - Everything else, folded away by group.
+  - Tweaks stay with their look until you **Reset** it. A pink dot marks what you changed; double-click a slider to put just that one back. **Save** keeps a tweaked look in Looks.
+- **Add**: things you can put into any look. None is on until you add it, and you can pin any of them to the toolbar.
+  - **You (camera)**, with quick setups: Just me, Playing guitar, Hands & guitar, Lines over me, My face, Movement. Everything is worked out in the browser; no picture leaves your computer.
+  - **Hands**: a mirrored pair pressing through, or a copy of yours, finger by finger.
+  - **Face**: a ghost face, or a copy of yours.
+  - **Ball**: a chrome ball the lines part around, with a turbulent wake (after Tame Impala's *Currents*). With music it hops on the beat and ripples where it lands.
+  - **Orbs** rising through the sheet.
+  - **Picture**: an image, a video or words.
+- **Sound**: your songs and how they move the picture.
+  - Songs you add are kept in this browser (IndexedDB) so you can flip between them. Nothing is uploaded.
+  - **How hard it hits**: Off, Subtle, Lively (the default) or Wild.
+  - **The sound itself**: the waveform runs through the lines like an oscilloscope, rings spike with the spectrum, and the sheet can rise into a landscape of it.
+  - What the music does to things you've added (the ball hops, the hands grab, the orbs swell).
+  - **Ties**: any slider can follow the bass, mids, highs, loudness, the beat or the bar (its ∿ button).
+  - Tempo, and changing look by itself (off unless you turn it on).
 
-Also: a View menu (the eye button) that toggles each piece of the interface including the brush ring, `H` to hide everything, saves, share links, PNG export and video recording (a whole film run with its audio).
+**The toolbar:**
+- The left button uses the chosen tool:
+  - **Ripple**.
+  - **Twist**: hold it and it keeps winding, round and round; Alt or Option winds the other way.
+  - **Bulge**, **Pinch** and **Smear**.
+  - **Hand**: your cursor presses through from behind.
+  - **Move**.
+- Right-drag moves the view with any tool. Scroll zooms; double-click puts the view back.
+- *Size*, *Strength* and *Spring back* shape the tools.
+- Add-ons you pin show up as switches.
 
-No build step and no dependencies: plain HTML + ES modules + WebGL2.
-
-## The song
-
-Songs are never committed or deployed (`*.mp3` is in `.gitignore`). Locally, keep `Beach House - PPP.mp3` next to `index.html` and the Films mode loads it automatically. On the hosted site, drop the file onto the page; it stays in your browser.
+**Top bar:** Surprise and Explore (breed 8 variations of what you're looking at; pick one, repeat), then pause, picture, record (with the song), link, fullscreen and what's on screen. `H` hides everything.
 
 ## Run it locally
 
@@ -91,46 +66,36 @@ python3 -m http.server 8000
 
 Import the GitHub repo in Vercel and keep the defaults: Framework Preset **Other**, no build command, and the root as the output directory. Every push to `main` redeploys.
 
-## How the film world works (`src/film`)
+## How it works
 
-- **One ray-marched scene.** A membrane of lines with a height field (silk folds, ripples, the ghost face, your camera).
-  - Things push through it from behind: jointed 3D hands whose fingers curl on the bar, rising orbs, and objects.
-  - It can melt into spaces to fly through (lattice, sponge, crystals, a corridor), or drop away to leave objects floating.
-  - A soft union stretches the lines over them like fabric; a hard union lets them break through.
-  - The membrane can melt into a gyroid / Schwarz-P lattice, because the distance fields are blended rather than swapped.
-- **One line equation, painted on every surface.** Straight lines, rings (round, square or diamond), a 1/r tunnel, spirals, crossing lines, triangles, moiré and contour slices are all weighted terms of a single formula. Change the weights and one pattern becomes another.
-  - It is projected onto the world, or *wrapped*: walls use (depth, along the wall) and shapes use globe coordinates.
-- **Lighting can thin the ink** where light hits (engraving), so 3D form is drawn with lines alone.
-- **Every look is ~100 numbers** (`params.js`, `looks.js`).
-  - A film is a list of keyframes: "from bar N, glide these numbers to here over M bars" (`timeline.js`).
-  - Speeds are integrated, and spins and orbits settle back to rest, so nothing jumps.
-  - Music is applied every frame: the bar drives the sway, loudness the intensity, bass the thump, mids the face's mouth, and onsets a flash.
-- **The live sound** (`src/audio.js`) goes to both shaders as one small texture every frame.
-  - The first row is the waveform, triggered on a rising zero crossing so it stands still.
-  - The rest are the last ~2.7 s of a log-spaced spectrum (30 Hz–16 kHz), softened into broad bands.
-- **Song analysis** (`src/analysis.js`) runs once per song and measures:
-  - loudness, plus bass, mid and treble envelopes
-  - note onsets
-  - tempo (autocorrelation of the onsets) and the beat grid
-  - meter
-  - section changes
-- **`ppp.js`** is the hand-made PPP film. **`auto.js`** writes films for any song with the same rules.
+- **One ray-marched world** (`src/engine/shader.js`):
+  - A sheet of lines with a height field: folds, ripples, the face, the picture and the sound's landscape.
+  - Things that push through it: hands, orbs, objects, the ball. Soft unions stretch the lines over them like fabric.
+  - Spaces the sheet can melt into: a lattice, a Menger sponge, fractal crystals, a corridor. The floor can also drop away and leave objects floating.
+  - Flat looks are the same world seen straight on.
+- **One line equation**, painted on every surface:
+  - Straight lines, rings (round, square or diamond), a 1/r tunnel, spirals, checkers, triangles, moiré and contours are all weighted terms of one formula.
+  - On top go twist, vortex, bulge, waves or zigzags, melt, a squeeze band and a kaleidoscope.
+  - The lines are projected onto the world, or *wrapped* round walls and objects.
+- **A look is ~150 numbers** (`src/engine/params.js`, `src/engine/looks.js`).
+  - The world glides between them (`src/engine/world.js`).
+  - Speeds are added up per bar, so spins and flight stay smooth and settle back to rest.
+- **The music** arrives two ways:
+  - As levels: bass, mids, highs, loudness, beats and a bar clock (`src/audio.js`; the tempo comes from `src/analysis.js`).
+  - As the sound itself: a texture holding the live waveform (triggered so it stands still) and ~2.7 s of log-spaced spectrum, which both bend the line equation.
 
 ## Files
 
 | File | What's in it |
 | --- | --- |
-| `src/film/shader.js` | The film world: ray-marched membrane, hands, orbs, lattice, the line equation, lighting |
-| `src/film/params.js` | Every film-world knob: ranges, groups, shader slots |
-| `src/film/looks.js` | Looks (shared by the films, the smart films and Worlds) |
-| `src/film/timeline.js` | Keyframes → per-parameter tracks, integrated speeds, music modulation |
-| `src/film/ppp.js`, `src/film/auto.js` | The PPP film; the smart film writer |
-| `src/world.js` | Worlds mode: the film engine live, glides, auto-morph, the hand tool |
-| `src/media.js`, `src/tracking.js` | Pictures, video, words and the camera as relief; face / hand / body / motion tracking |
-| `src/macros.js` | The four knobs and breeding (Explore) |
-| `src/shaders.js`, `src/renderer.js` | Patterns-mode GLSL; WebGL2 setup, film pass, compositing + film look |
-| `src/catalog.js`, `src/presets.js`, `src/state.js` | Patterns: patterns, warps, palettes (incl. the Depression Cherry reds), presets, state |
-| `src/formula.js` | Friendly-math → GLSL compiler for the Math tab |
-| `src/audio.js`, `src/analysis.js` | Live audio analysis (levels, beat, waveform, spectrum history); whole-song analysis |
-| `src/songs.js` | Your song library, kept in the browser |
-| `src/ui.js`, `src/main.js` | Interface; app state, frame loop, input, film playback, recording |
+| `src/engine/shader.js` | The world: ray-marched sheet, hands, objects, spaces, the ball, the line equation, lighting, color |
+| `src/engine/params.js` | Every value of the world: ranges, groups, shader slots |
+| `src/engine/looks.js` | The looks (grouped, with their key sliders) and the color palettes |
+| `src/engine/world.js` | Gliding between looks, speeds, the music applied every frame |
+| `src/engine/feel.js` | The three feel knobs and breeding (Explore) |
+| `src/adds.js` | Add-ons: the ball's motion, the pair of hands, the face, orbs |
+| `src/media.js`, `src/tracking.js` | The camera, pictures, video and words; face / hand / body / motion tracking (MediaPipe) |
+| `src/audio.js`, `src/analysis.js`, `src/songs.js` | Live audio (levels, beat, waveform, spectrum); tempo from a song; your song library |
+| `src/gl/renderer.js`, `src/gl/passes.js` | WebGL2: the world pass, brush distortion, picture relief, finishing pass |
+| `src/ui/ui.js`, `src/ui/kit.js` | The interface |
+| `src/main.js` | App state, looks and tweaks, tools, frame loop, songs, camera, recording, links |

@@ -7,7 +7,7 @@ import { AudioEngine } from './audio.js';
 import { createUI, TOOLS } from './ui.js';
 import { MAX_RIPPLES } from './shaders.js';
 import { analyzeAudio, sample } from './analysis.js';
-import { Timeline, applyMusic, toShader, toPost } from './film/timeline.js';
+import { Timeline, applyMusic, toShader, toPost, stepFactor } from './film/timeline.js';
 import { SHADER_COUNT } from './film/params.js';
 import { PPP_FILM } from './film/ppp.js';
 import { generateFilm } from './film/auto.js';
@@ -49,7 +49,7 @@ const app = {
   saves: loadSaves(),
   recording: null,
   recordStart: 0,
-  mode: 'patterns',         // patterns | worlds | films
+  mode: 'worlds',           // patterns | worlds | films
   world: new World(),
   tempo: { bpm: 70, beatsPerBar: 2, fromSong: false },
   songAnalysis: null,       // analysis of the song loaded in the Sound panel (gives the bar clock)
@@ -425,6 +425,8 @@ app.setMode = mode => {
   if (app.mode === 'films') app.filmStop();
   app.mode = mode;
   document.body.dataset.mode = mode;
+  if (mode === 'patterns') scale = modeMaxScale();
+  resize();
   if (mode === 'worlds' && !app.world.lookId) app.world.goLook('silk', 0.01);
   if (mode === 'films' && !film.def && film.status === 'idle') app.loadPPP();
   renderer.clearSlot(0);
@@ -634,6 +636,7 @@ function renderFilmFrame(dt) {
     hit: film.hit, time: t,
   });
   film.lastValues = v;
+  rt.stepK = stepFactor(v) * (rt.ripples.some((x, i) => i % 4 === 3 && x > 0 && rt.realTime - rt.ripples[i - 1] < 5) ? 0.7 : 1);
   renderer.updateDisp(rt);
   renderer.renderFilm(toShader(v, film.P), rt, 0);
   renderer.composite({ a: 0, post: toPost(v) });
@@ -658,6 +661,7 @@ function renderWorldFrame(dt) {
   h.x += (cur.tx + pointer.x * 2 * cur.frame - h.x) * (1 - Math.exp(-dt * 10));
   h.y += (cur.ty + pointer.y * 2 * cur.frame - 0.12 - h.y) * (1 - Math.exp(-dt * 10));
   const { P, post } = w.frame(app.paused ? 0 : dt, m);
+  rt.stepK = stepFactor(w.current) * (rt.ripples.some((x, i) => i % 4 === 3 && x > 0 && rt.realTime - rt.ripples[i - 1] < 5) ? 0.7 : 1);
   renderer.updateDisp(rt);
   renderer.renderFilm(P, rt, 0);
   renderer.composite({ a: 0, post });
@@ -797,13 +801,14 @@ addEventListener('keydown', e => {
 
 // ------------------------------------------------------------------ the frame loop
 let scale = Math.min(window.devicePixelRatio || 1, 2);
+const modeMaxScale = () => (app.mode === 'patterns' ? Math.min(window.devicePixelRatio || 1, 2) : Math.min(window.devicePixelRatio || 1, 1));
 function resize() {
+  scale = Math.min(scale, modeMaxScale());
   renderer.resize(innerWidth * scale, innerHeight * scale);
 }
 addEventListener('resize', resize);
 
 // drop resolution if the GPU can't keep up; creep back up once it's smooth again
-const maxScale = Math.min(window.devicePixelRatio || 1, 2);
 let perfAcc = 0, perfN = 0, perfGrace = 3, smoothSecs = 0;
 function adapt(dt) {
   if ((perfGrace -= dt) > 0 || document.hidden) return;
@@ -817,9 +822,9 @@ function adapt(dt) {
     resize();
     perfGrace = 1.5;
     smoothSecs = 0;
-  } else if (avg < 1 / 55 && scale < maxScale) {
+  } else if (avg < 1 / 55 && scale < modeMaxScale()) {
     if (++smoothSecs >= 4) {
-      scale = Math.min(maxScale, scale * 1.12);
+      scale = Math.min(modeMaxScale(), scale * 1.12);
       resize();
       perfGrace = 1.5;
       smoothSecs = 0;
@@ -965,7 +970,13 @@ async function boot() {
     app.state.formula = 'sin(x*d)';
     refreshFormula();
   }
+  if (shared) app.mode = 'patterns';
   document.body.dataset.mode = app.mode;
+  app.world.goLook('silk', 0.01);
+  app.world.auto = !shared;
+  app.world.lastAutoBar = 0;
+  if (app.mode === 'worlds') app.presetName = 'Silk · auto-morphing';
+  app.tool = app.mode === 'worlds' ? 'hand' : 'ripple';
   ui = createUI(app);
   resize();
   requestAnimationFrame(frame);

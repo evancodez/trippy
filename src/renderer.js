@@ -275,6 +275,10 @@ export class Renderer {
     gl.uniform2f(u('uRes'), this.w, this.h);
     gl.uniform1fv(u('uP'), P);
     gl.uniform4fv(u('uRipples'), rt.ripples);
+    let ripples = 0;
+    for (let i = 0; i < rt.ripples.length; i += 4) if (rt.ripples[i + 3] > 0 && rt.realTime - rt.ripples[i + 2] < 5) ripples = 1;
+    gl.uniform1f(u('uRipplesOn'), ripples);
+    gl.uniform1f(u('uStepK'), rt.stepK ?? 0.6);
     gl.uniform1f(u('uRealTime'), rt.realTime);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindTexture(gl.TEXTURE_2D, out.tex);

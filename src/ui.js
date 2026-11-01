@@ -798,16 +798,16 @@ export function createUI(app) {
   }
 
   function showHint() {
-    try { if (localStorage.getItem('trippy.hint.v1')) return; } catch {}
+    try { if (localStorage.getItem('trippy.hint.v2')) return; } catch {}
     hintEl.replaceChildren(
-      h('span', { html: '<b>Drag across the pattern.</b> Pick a tool below, or press <b>Mutate</b>. <kbd>H</kbd> hides everything.' }),
+      h('span', { html: '<b>Move your mouse over it</b> — the Hand presses through. <b>Worlds</b>, <b>Patterns</b> and <b>Films</b> are up in the panel. <kbd>H</kbd> hides everything.' }),
       h('button', { class: 'icon-btn', 'aria-label': 'Got it', html: icon('x'), onclick: dismissHint }));
     hintEl.hidden = false;
   }
   function dismissHint() {
     if (hintEl.hidden) return;
     hintEl.hidden = true;
-    try { localStorage.setItem('trippy.hint.v1', '1'); } catch {}
+    try { localStorage.setItem('trippy.hint.v2', '1'); } catch {}
   }
 
   function tick() {

@@ -18,6 +18,8 @@ uniform float uP[${SHADER_COUNT}];
 uniform sampler2D uPrev;
 uniform sampler2D uDisp;
 uniform vec4 uRipples[16];
+uniform float uRipplesOn;   // skip the mouse-ripple loop when nothing was dropped recently
+uniform float uStepK;       // how boldly the ray marcher may step (smaller when the membrane is steep)
 uniform float uRealTime;
 
 ${shaderDefines()}
@@ -72,6 +74,7 @@ float heightField(vec2 q) {
     h += RIPPLE * 0.035 * sin(r * 26.0 - RIPPHASE) * exp(-r * 1.2) * smoothstep(0.0, 0.1, r);
   }
   for (int i = 0; i < 16; i++) {                       // ripples dropped with the mouse
+    if (uRipplesOn < 0.5) break;
     vec4 rp = uRipples[i];
     if (rp.w <= 0.0) continue;
     float age = uRealTime - rp.z;
@@ -153,7 +156,7 @@ float gyroid(vec3 p) {
 }
 
 float map(vec3 p) {
-  float d = (p.z - heightField(p.xy)) * 0.6;
+  float d = (p.z - heightField(p.xy)) * uStepK;
   if (GYRO > 0.001) d = mix(d, gyroid(p), GYRO);
   if (ORBS > 0.001) d = smin(d, orbsSDF(p), 0.04);
   return smin(d, hands(p), HANDSOFT);

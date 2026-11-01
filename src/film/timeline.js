@@ -55,7 +55,7 @@ export class Timeline {
         (this.tracks[name] ||= []).push({ t0, t1, from, to: asValue(name, raw), ease });
       }
     }
-    this.chapters = keys.filter(k => k.chapter).map(k => ({ ...k.chapter, bar: k.bar, at: this.barT(k.bar) }));
+    this.chapters = keys.filter(k => k.chapter).map(k => ({ ...k.chapter, bar: k.bar, at: k.bar <= 0 ? 0 : this.barT(k.bar) }));
     this.integrate();
   }
 
@@ -147,6 +147,12 @@ export function applyMusic(v, m) {
   v.exposure += v.hitFlash * m.hit * 0.55;
   v.time = m.time;
   return v;
+}
+
+// How steep can the membrane get? (a safe step size for the ray marcher; gentle sheets march faster)
+export function stepFactor(v) {
+  const slope = v.folds * 0.09 * v.foldF * v.height + v.face * 0.9 * v.height + v.ripple * 0.9 + 0.15;
+  return Math.min(0.92, Math.max(0.4, 0.92 / Math.sqrt(1 + slope * slope)));
 }
 
 export function toShader(v, out) {

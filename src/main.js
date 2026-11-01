@@ -62,9 +62,14 @@ const app = {
   macros: { worlds: defaultMacros(), patterns: defaultMacros() },
   media: new Media(),       // a picture under the membrane: camera / image / video / words
   tracker: new Tracker(),   // your face, hands, body and movement through the camera
-  // what the camera does: relief = none | scene | body | face | motion
-  you: { relief: 'scene', puppet: false, hands: false, motion: false, look: false, handScale: 1 },
-  mediaCfg: { amount: 1.2, ink: 0.6, size: 1, x: 0, y: 0, invert: 0, soft: 2.4, warp: 0 },
+  // the camera. subject = what counts as you: none | scene | body | face | hands (and what they hold) |
+  // bodyhands (both) | box (a frame you set) | motion. The rest are extras.
+  you: { subject: 'scene', puppet: false, hands: false, motion: false, look: false, handScale: 1, feather: 6, box: { x: 0.5, y: 0.55, w: 0.6, h: 0.7 } },
+  // how the camera / picture shows: pushed up as relief, drawn in line thickness, shown as a photo
+  mediaCfg: { amount: 1.2, ink: 0.6, photo: 0, photoColor: 0, size: 1, x: 0, y: 0, invert: 0, soft: 2.4, warp: 0, detail: 0.6, calm: 0, aura: 0 },
+  // auto-morph in Worlds. when: off | song (a song is playing) | sound (a song or the mic) | always;
+  // on: bars (every N) | sections (when the song changes section); cats: kinds of look it may pick
+  autoCfg: { when: 'song', on: 'bars', every: 8, cats: ['flat', 'deep', 'space', 'objects', 'bodies'], variations: false },
   explore: { open: false, parent: null, kids: [], history: [], strength: 0.5, locks: { colors: false, camera: false, shapes: false, lines: false } },
 };
 
@@ -333,7 +338,7 @@ app.deleteSave = id => {
 };
 
 // ------------------------------------------------------------------ audio
-app.audio.onchange = () => { if (ui.tab === 'sound') ui.refresh(); };
+app.audio.onchange = () => { if (ui.tab === 'sound' || app.mode === 'worlds') ui.refresh(); };
 
 app.loadSong = async file => {
   try {
@@ -438,7 +443,7 @@ app.setMode = mode => {
   if (app.mode === 'patterns') app.patternsName = app.presetName;
   app.mode = mode;
   if (mode === 'patterns') app.presetName = app.patternsName || PRESETS[0].name;
-  if (mode === 'worlds') app.presetName = `${LOOKS[app.world.lookId || 'silk'].name}${app.world.auto ? ' · auto-morphing' : ''}`;
+  if (mode === 'worlds') app.presetName = LOOKS[app.world.lookId || 'silk'].name;
   if (mode === 'films') app.presetName = film.def?.title || 'Films';
   document.body.dataset.mode = mode;
   if (mode === 'patterns') scale = modeMaxScale();
@@ -646,13 +651,12 @@ rt.handMirror = new Float32Array([1, 1, 1]);
 const track = { hands: [0, 1].map(() => ({ on: 0, x: 0, y: 0, s: 1, a: 0, curls: [0, 0, 0, 0, 0], spread: 0.5, mirror: 1 })), face: { on: 0, x: 0, y: 0, s: 0.6, roll: 0, turn: 0, mouth: 0, eyes: 1 }, lastRipple: 0, dt: 1 / 60 };
 
 function syncTrackerWants() {
-  const y = app.you;
-  tracker.setWant('face', y.puppet || y.look || y.relief === 'face');
-  tracker.want.faceMask = y.relief === 'face';
-  tracker.setWant('hands', y.hands);
-  tracker.setWant('body', y.relief === 'body');
-  tracker.setWant('motion', y.motion || y.relief === 'motion');
-  media.cam.relief = y.relief;
+  const y = app.you, sub = y.subject;
+  tracker.setWant('face', y.puppet || y.look || sub === 'face');
+  tracker.setWant('hands', y.hands || sub === 'hands' || sub === 'bodyhands');
+  tracker.setWant('body', sub === 'body' || sub === 'bodyhands');
+  tracker.setWant('motion', y.motion || sub === 'motion');
+  media.cam.subject = sub;
 }
 tracker.onchange = () => ui?.refreshYou();
 
@@ -680,6 +684,35 @@ app.setYou = (key, value) => {
   ui.refreshYou();
 };
 
+// one-click camera setups: what counts as you, and how it shows
+app.SETUPS = [
+  { id: 'lines', name: 'Lines over me', blurb: 'the whole picture pressing up through the lines',
+    you: { subject: 'scene' }, cfg: { photo: 0, amount: 1.2, ink: 0.6, calm: 0, aura: 0, detail: 0.6 } },
+  { id: 'me', name: 'Just me', blurb: 'you, clear, with the pattern moving around you',
+    you: { subject: 'body' }, cfg: { photo: 0.9, amount: 0.4, ink: 0, calm: 1, aura: 0.7, detail: 0.85 } },
+  { id: 'guitar', name: 'Playing guitar', blurb: 'body, arms and guitar clear; your playing (mic) moves everything else',
+    you: { subject: 'bodyhands' }, cfg: { photo: 1, amount: 0.25, ink: 0, calm: 1, aura: 1, detail: 0.95 }, mic: true },
+  { id: 'hands', name: 'Just hands & guitar', blurb: 'only your hands and what they hold, sharp — the rest reacts to the sound',
+    you: { subject: 'hands' }, cfg: { photo: 1, amount: 0.2, ink: 0, calm: 1, aura: 1.2, detail: 1 }, mic: true },
+  { id: 'face', name: 'My face', blurb: 'your face engraved into the lines',
+    you: { subject: 'face' }, cfg: { photo: 0.35, amount: 1, ink: 0.9, calm: 1, aura: 0.6, detail: 0.85 } },
+  { id: 'ghost', name: 'Ghost puppet', blurb: 'no picture — the face in the lines copies yours',
+    you: { subject: 'none', puppet: true }, cfg: { photo: 0, amount: 0, ink: 0, calm: 0, aura: 0 } },
+  { id: 'trails', name: 'Movement', blurb: 'only what moves leaves a trail in the lines',
+    you: { subject: 'motion', motion: true }, cfg: { photo: 0, amount: 1.6, ink: 0.4, calm: 0, aura: 0 } },
+];
+app.quickSetup = async id => {
+  const S = app.SETUPS.find(x => x.id === id);
+  if (!S) return;
+  Object.assign(app.you, { puppet: false, motion: false }, S.you, { setup: id });
+  Object.assign(app.mediaCfg, S.cfg);
+  if (['image', 'video', 'text'].includes(media.kind)) media.clear();
+  if (!tracker.on) await app.cameraOn();
+  else syncTrackerWants();
+  if (S.mic && app.audio.mode === 'off') await app.useMic();
+  ui.refreshYou();
+};
+
 app.loadPicture = async file => {
   try {
     if (file.type.startsWith('video/') || /\.(mp4|mov|webm|m4v)$/i.test(file.name)) await media.setVideo(file);
@@ -700,10 +733,15 @@ app.clearPicture = () => { media.clear(); ui.refreshYou(); };
 
 function updateInputs(dt) {
   track.dt = dt;
+  const cfg = app.mediaCfg;
   if (tracker.on) tracker.update();
-  const masks = { canvas: tracker.maskCanvas, body: !!tracker.bodyMask, face: !!tracker.face, motion: tracker.motion.canvas };
+  const masks = { motion: tracker.motion.canvas };
+  if (tracker.on && media.kind === 'camera' && media.masked) masks.canvas = tracker.drawMasks(app.you.subject, { box: app.you.box, feather: app.you.feather });
   media.setBlur(0);
-  const sigma = 0.8 + app.mediaCfg.soft * 1.4;
+  media.cam.detail = cfg.detail;
+  // the relief's blur is in the blurred copy's own pixels: a sharper camera picture needs a wider blur
+  // to stay as smooth (Detail lets a little more of it through)
+  const sigma = (0.8 + cfg.soft * 1.4) * (media.kind === 'camera' ? (media.canvas.width / 480) * (1.15 - 0.5 * cfg.detail) : 1);
   if (app.mode !== 'patterns' && (media.update(rt.realTime, masks) || Math.abs(sigma - (track.sigma || 0)) > 0.05)) {
     track.sigma = sigma;
     renderer.setMedia(media.output, media.aspect, sigma);
@@ -716,11 +754,18 @@ const ease = (cur, target, rate) => cur + (target - cur) * (1 - Math.exp(-track.
 function applyInputs(v, still = false) {
   const cfg = app.mediaCfg, y = app.you;
   const picture = ['image', 'video', 'text'].includes(media.kind);
-  const camRelief = media.kind === 'camera' && y.relief !== 'none';
+  const camRelief = media.kind === 'camera' && y.subject !== 'none';
   const hh = v.frame * cfg.size, cx = v.tx + cfg.x * v.frame, cy = v.ty + cfg.y * v.frame;
   if (picture || camRelief) {
-    Object.assign(v, { media: cfg.amount, mediaInk: cfg.ink, mediaInv: cfg.invert, mediaSoft: 0, mediaWarp: cfg.warp, mediaS: hh, mediaX: cx, mediaY: cy, mediaMask: media.masked ? 1 : 0 });
-  } else { v.media = 0; v.mediaInk = 0; }
+    // the aura breathes with the sound: louder pushes the lines further out, hits kick it
+    const mu = track.music || neutralMusic;
+    const pump = 0.5 + 0.9 * mu.loud + 0.6 * mu.hit;
+    Object.assign(v, {
+      media: cfg.amount, mediaInk: cfg.ink, mediaPhoto: cfg.photo, photoColor: cfg.photoColor, mediaInv: cfg.invert, mediaSoft: 0, mediaWarp: cfg.warp,
+      mediaS: hh, mediaX: cx, mediaY: cy, mediaMask: media.masked ? 1 : 0, mediaLift: media.masked ? 0.45 : 0,
+      mediaCalm: cfg.calm, aura: cfg.aura * pump,
+    });
+  } else Object.assign(v, { media: 0, mediaInk: 0, mediaPhoto: 0, mediaCalm: 0, aura: 0 });
   if (!tracker.on) { rt.fingers.fill(0); return; }
   const A = tracker.aspect;
   const toSheet = (u, vv) => [cx + (u - 0.5) * 2 * hh * A, cy + (0.5 - vv) * 2 * hh];
@@ -818,8 +863,9 @@ function patternStill(state, w = 320, h = 180) {
 
 function currentParent() {
   if (app.mode === 'patterns') return cloneState(app.state);
-  const v = app.world.values();
-  return v;
+  // mid-glide, breed from where it's going (the look you picked), not from the halfway point
+  const w = app.world;
+  return Object.fromEntries(Object.entries(w.to).map(([k, x]) => [k, Array.isArray(x) ? x.slice() : x]));
 }
 app.exploreBreed = (parent = app.explore.parent) => {
   const X = app.explore;
@@ -878,11 +924,12 @@ function renderFilmFrame(dt) {
   while (film.hitIdx < film.hits.length && film.hits[film.hitIdx] <= t) { film.hit = 1; film.hitIdx++; }
   film.hit *= Math.exp(-dt * 7);
   const v = tl.values(t);
-  applyMusic(v, {
+  track.music = {
     bar: (t - tl.barZero) / tl.barLen, barLen: tl.barLen,
     loud: sample(A.rms, t), bass: sample(A.bass, t), mid: sample(A.mid, t), high: sample(A.high, t),
     hit: film.hit, time: t,
-  });
+  };
+  applyMusic(v, track.music);
   applyInputs(v);
   film.lastValues = v;
   rt.stepK = stepFactor(v) * (rt.ripples.some((x, i) => i % 4 === 3 && x > 0 && rt.realTime - rt.ripples[i - 1] < 5) ? 0.7 : 1);
@@ -897,10 +944,31 @@ function renderFilmFrame(dt) {
   ui.runTick(t);
 }
 
+// is auto-morph running right now? (by default only while a song plays)
+app.autoActive = () => {
+  const a = app.audio, when = app.autoCfg.when;
+  if (when === 'always') return true;
+  if (when === 'song') return a.mode === 'file' && a.playing;
+  if (when === 'sound') return a.mode !== 'off' && a.playing;
+  return false;
+};
+let sectionIdx = -1;
 function renderWorldFrame(dt) {
-  const w = app.world;
+  const w = app.world, A = app.autoCfg;
   const m = liveMusic(dt);
-  const named = w.tickAuto(m.bar, m.barLen);
+  track.music = m;
+  // "on the song's sections" needs an analysed song playing; otherwise it falls back to every N bars
+  const an = app.songAnalysis, a = app.audio;
+  const bySection = A.on === 'sections' && an && a.mode === 'file' && a.el && an._file === a.file;
+  let force = false;
+  if (bySection) {
+    const idx = an.boundaries.filter(b => b <= a.el.currentTime).length;
+    force = sectionIdx >= 0 && idx !== sectionIdx;
+    sectionIdx = idx;
+  } else sectionIdx = -1;
+  w.auto = app.autoActive();
+  w.autoBars = bySection ? 1e9 : A.every;
+  const named = w.tickAuto(m.bar, m.barLen, { cats: A.cats, variations: A.variations }, force && w.auto);
   if (named) { app.presetName = `Auto · ${named}`; ui.renderName(); }
   const h = w.hand;
   const want = app.tool === 'hand' && pointer.inside ? 1 : 0;
@@ -1227,10 +1295,8 @@ async function boot() {
   if (shared) app.mode = 'patterns';
   document.body.dataset.mode = app.mode;
   app.world.goLook('silk', 0.01);
-  app.world.auto = !shared;
-  app.world.lastAutoBar = 0;
   app.patternsName = app.presetName;
-  if (app.mode === 'worlds') app.presetName = 'Silk · auto-morphing';
+  if (app.mode === 'worlds') app.presetName = 'Silk';
   app.tool = app.mode === 'worlds' ? 'hand' : 'ripple';
   ui = createUI(app);
   resize();

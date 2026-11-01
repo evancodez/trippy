@@ -4,7 +4,7 @@
 // structure re-renders the open view.
 import { PATTERNS, WARPS, PALETTES, PATTERN_BY_ID, WARP_BY_ID, MAX_INKS, MIX_MODES } from './catalog.js';
 import { PPP_FILM } from './film/ppp.js';
-import { LOOKS } from './film/looks.js';
+import { LOOKS, LOOK_CATS } from './film/looks.js';
 import { PARAMS, rgbToHex } from './film/params.js';
 import { MACROS } from './macros.js';
 import { FONTS } from './media.js';
@@ -703,31 +703,52 @@ export function createUI(app) {
   }
 
   // ---------------------------------------------------------------- you: the camera
+  const SUBJECTS = [
+    ['scene', 'Whole picture'], ['body', 'My body'], ['face', 'My face'], ['hands', 'Hands & what they hold'],
+    ['bodyhands', 'Body + what I hold'], ['box', 'A frame I set'], ['motion', 'Movement trails'], ['none', 'Nothing'],
+  ];
   function youSection() {
     const tr = app.tracker, y = app.you;
     const st = tr.status;
     const label = { loading: 'loading…', on: 'on', error: 'didn’t load', off: '' };
     const status = ['face', 'hands', 'body'].filter(k => tr.want[k] && st[k] !== 'off').map(k => `${{ face: 'Face tracking', hands: 'Hand tracking', body: 'Body outline' }[k]}: ${label[st[k]]}`).join(' · ');
-    const relief = h('div', { class: 'chips' }, [['none', 'Nothing'], ['scene', 'Whole scene'], ['body', 'Just my body'], ['face', 'Just my face'], ['motion', 'Movement trails']].map(([id, name]) =>
-      h('button', { class: `chip${y.relief === id ? ' on' : ''}`, onclick: () => app.setYou('relief', id) }, name)));
+    const setups = h('div', { class: 'setups' }, app.SETUPS.map(S =>
+      h('button', { class: `setup${y.setup === S.id ? ' on' : ''}`, onclick: () => app.quickSetup(S.id) }, h('b', {}, S.name), h('small', {}, S.blurb))));
+    const subject = h('div', { class: 'chips' }, SUBJECTS.map(([id, name]) =>
+      h('button', { class: `chip${y.subject === id ? ' on' : ''}`, onclick: () => { y.setup = null; app.setYou('subject', id); } }, name)));
+    const b = y.box;
+    const boxSliders = y.subject === 'box' ? [
+      slider('Frame ↔', { min: 0, max: 1, get: () => b.x, set: v => { b.x = v; } }),
+      slider('Frame ↕', { min: 0, max: 1, get: () => b.y, set: v => { b.y = v; } }),
+      slider('Frame width', { min: 0.1, max: 1, get: () => b.w, set: v => { b.w = v; } }),
+      slider('Frame height', { min: 0.1, max: 1, get: () => b.h, set: v => { b.h = v; } }),
+    ] : null;
+    const masked = ['body', 'face', 'hands', 'bodyhands', 'box'].includes(y.subject);
     return section('You', tr.on ? '● camera on' : 'your camera, right here',
       tr.on
         ? h('button', { class: 'btn wide', html: `${icon('stop')}<span>Turn the camera off</span>`, onclick: () => app.cameraOff() })
         : h('button', { class: 'btn wide primary', html: `${icon('camera')}<span>Turn on the camera</span>`, onclick: () => app.cameraOn() }),
-      h('p', { class: 'muted small' }, 'Everything is worked out in this browser — no picture leaves your computer. Trackers download once (a few MB) the first time you switch them on.'),
-      h('div', { class: 'sub-label' }, 'What presses through the lines'),
-      relief,
-      toggle('Ghost puppet — the face in the lines copies yours', () => y.puppet, v => app.setYou('puppet', v)),
-      toggle('Hands — the 3D hands copy yours, finger by finger', () => y.hands, v => app.setYou('hands', v)),
-      toggle('Movement makes ripples', () => y.motion, v => app.setYou('motion', v)),
-      toggle('Look around — move your head and the 3D shifts', () => y.look, v => app.setYou('look', v)),
-      y.hands ? slider('Hand size', { min: 0.4, max: 2.5, get: () => y.handScale, set: v => { y.handScale = v; } }) : null,
+      h('p', { class: 'muted small' }, 'Everything is worked out in this browser — no picture leaves your computer. Trackers download once (a few MB) the first time you use them.'),
+      h('div', { class: 'sub-label' }, 'Quick setups'),
+      setups,
+      tr.on ? [
+        h('div', { class: 'sub-label' }, 'What counts as you'),
+        subject,
+        boxSliders,
+        masked ? slider('Edge softness', { min: 0, max: 24, step: 0.5, fmt: v => `${v} px`, get: () => y.feather, set: v => { y.feather = v; } }) : null,
+        h('div', { class: 'sub-label' }, 'Extras'),
+        toggle('Ghost puppet — the face in the lines copies yours', () => y.puppet, v => app.setYou('puppet', v)),
+        toggle('3D hands — they copy yours, finger by finger', () => y.hands, v => app.setYou('hands', v)),
+        toggle('Movement makes ripples', () => y.motion, v => app.setYou('motion', v)),
+        toggle('Look around — move your head and the 3D shifts', () => y.look, v => app.setYou('look', v)),
+        y.hands ? slider('Hand size', { min: 0.4, max: 2.5, get: () => y.handScale, set: v => { y.handScale = v; } }) : null,
+      ] : null,
       status ? h('p', { class: 'muted small' }, status) : null);
   }
 
   // ---------------------------------------------------------------- pictures & words
   function pictureSection() {
-    const md = app.media, cfg = app.mediaCfg;
+    const md = app.media;
     const file = h('input', { type: 'file', accept: 'image/*,video/*', hidden: true });
     file.addEventListener('change', () => { if (file.files[0]) app.loadPicture(file.files[0]); });
     const words = h('textarea', { class: 'code words', rows: 2, placeholder: 'Type words to press through the lines…', spellcheck: 'false' });
@@ -737,16 +758,34 @@ export function createUI(app) {
     const fonts = h('div', { class: 'chips' }, Object.keys(FONTS).map(f =>
       h('button', { class: `chip${md.text.font === f ? ' on' : ''}`, onclick: () => { md.text.font = f; if (words.value.trim()) app.setWords(words.value, f); renderBody(); } }, f)));
     const what = { none: 'nothing yet', image: `🖼 ${md.name}`, video: `🎞 ${md.name}`, text: '✎ words', camera: '● the camera' }[md.kind];
-    const c = (key, label, min, max, step) => slider(label, { min, max, step, get: () => cfg[key], set: v => { cfg[key] = v; } });
     return section('Pictures & words', what,
       h('div', { class: 'run-actions' },
         h('button', { class: 'btn', html: `${icon('image')}<span>Image or video</span>`, onclick: () => file.click() }),
         ['image', 'video', 'text'].includes(md.kind) ? h('button', { class: 'btn', html: `${icon('x')}<span>Remove</span>`, onclick: () => app.clearPicture() }) : null),
       file,
-      h('p', { class: 'muted small' }, 'Or just drop one anywhere on the page.'),
-      words, fonts,
-      c('amount', 'Relief height', 0, 3), c('ink', 'Drawn in line thickness', 0, 2), c('size', 'Size', 0.2, 3), c('x', 'Move ↔', -1.5, 1.5), c('y', 'Move ↕', -1.5, 1.5),
-      c('soft', 'Soften', 0, 6), c('warp', 'Bend it with the warps', 0, 1),
+      h('p', { class: 'muted small' }, 'Or just drop one anywhere on the page. A picture takes the camera’s place until you remove it.'),
+      words, fonts);
+  }
+
+  // ---------------------------------------------------------------- how the camera / picture shows
+  function showSection() {
+    const md = app.media, cfg = app.mediaCfg;
+    if (md.kind === 'none') return null;
+    const cam = md.kind === 'camera';
+    const c = (key, label, min, max, opts = {}) => slider(label, { min, max, step: opts.step || 0.01, fmt: opts.fmt, hint: opts.hint, get: () => cfg[key], set: v => { cfg[key] = v; } });
+    return section('How it shows', cam ? 'the camera' : 'your picture',
+      c('photo', 'Photo — shown as the picture itself', 0, 1, { hint: 'Clear, like a photo, in the palette’s two colors (or true color)' }),
+      cfg.photo > 0 ? toggle('True color (off: in the look’s two colors)', () => cfg.photoColor > 0.5, v => { cfg.photoColor = v ? 1 : 0; }) : null,
+      c('amount', 'Relief — pushes the lines up', 0, 3),
+      c('ink', 'Engraved — drawn in line thickness', 0, 2),
+      cam ? c('detail', 'Detail', 0, 1, { fmt: v => `${Math.round(480 + v * 800)} px`, hint: 'How sharp the camera picture is. Higher is crisper and a little heavier.' }) : null,
+      c('soft', 'Smooth the relief', 0, 6),
+      h('div', { class: 'sub-label' }, cam ? 'Around you' : 'Around it'),
+      toggle(cam ? 'Keep me still — the warps stay outside' : 'Keep it still — the warps stay outside', () => cfg.calm > 0.5, v => { cfg.calm = v ? 1 : 0; }),
+      c('aura', 'Aura — the lines ripple off it with the sound', 0, 3),
+      h('div', { class: 'sub-label' }, 'Place'),
+      c('size', 'Size', 0.2, 3), c('x', 'Move ↔', -1.5, 1.5), c('y', 'Move ↕', -1.5, 1.5),
+      c('warp', 'Bend it with the warps', 0, 1),
       toggle('Invert', () => cfg.invert > 0.5, v => { cfg.invert = v ? 1 : 0; }));
   }
 
@@ -777,14 +816,18 @@ export function createUI(app) {
 
   // ---------------------------------------------------------------- Worlds (the film engine, live)
   const WORLD_GROUPS = [
-    ['lines', 'Lines', 'the equation: straight lines, rings, tunnel, spiral, crossings'],
-    ['bend', 'Bend', 'twist, bulge, waves and mirrors'],
+    ['lines', 'Lines', 'the equation: lines, rings, squares, crossings, triangles'],
+    ['bend', 'Bend', 'twist, vortex, squeeze, bulge, waves and mirrors'],
     ['shape', 'Shapes', 'folds, orbs, the lattice, the face, hands'],
+    ['space', 'Space', 'corridors, fractals and columns to fly through'],
+    ['objects', 'Objects', 'the blob, the impossible triangle, the Möbius strip, rings'],
     ['camera', 'Camera', 'lens, zoom and tilt'],
     ['motion', 'Motion', 'speeds, per bar'],
+    ['music', 'Music reactions', 'sway, thump, loudness, flashes'],
     ['look', 'Look', 'colors, light and engraving'],
     ['film', 'Film', 'glow, grain, letterbox'],
   ];
+  const openGroups = new Set();
 
   function worldSlider(p) {
     const w = app.world;
@@ -797,37 +840,69 @@ export function createUI(app) {
     return slider(p.label, { min: p.min, max: p.max, step, get: () => w.to[p.name], set: v => { w.set(p.name, v); app.touch(); }, reset: () => p.def });
   }
 
+  const AUTO_WHEN = [['off', 'Off'], ['song', 'While a song plays'], ['sound', 'With any sound'], ['always', 'Always']];
+
+  function musicSection() {
+    const a = app.audio, w = app.world, A = app.autoCfg;
+    const live = app.autoActive();
+    const chip = (on, label, onclick) => h('button', { class: `chip${on ? ' on' : ''}`, onclick }, label);
+    const state = A.when === 'off' ? 'Off — the look only changes when you pick one.'
+      : live ? `Morphing now — ${A.on === 'sections' && app.songAnalysis ? 'on each new section of the song' : `every ${A.every} bars`}.`
+        : A.when === 'song' ? 'Waiting for a song to play.' : 'Waiting for sound — play a song or turn on the mic.';
+    return section('Music & auto-morph', a.mode === 'off' ? 'nothing playing' : a.mode === 'mic' ? '● listening to the mic' : `♪ ${a.name}`,
+      h('div', { class: 'run-actions' },
+        ...songPicker('Play a song', 'it finds the beat, then everything moves with it', f => app.loadSong(f)).map(el => { if (el.classList) el.classList.add('slim'); return el; }),
+        h('button', { class: 'btn', html: `${icon('mic')}<span>Mic</span>`, onclick: () => app.useMic() }),
+        a.mode !== 'off' ? h('button', { class: 'btn', html: `${icon('stop')}<span>Stop</span>`, onclick: () => app.stopAudio() }) : null),
+      tempoControls(),
+      h('div', { class: 'sub-label' }, 'Auto-morph — glide to new looks by itself'),
+      h('div', { class: 'chips' }, AUTO_WHEN.map(([id, label]) => chip(A.when === id, label, () => { A.when = id; renderBody(); }))),
+      A.when !== 'off' ? [
+        h('div', { class: 'chips' },
+          chip(A.on === 'bars', 'Every few bars', () => { A.on = 'bars'; renderBody(); }),
+          chip(A.on === 'sections', 'When the song changes section', () => { A.on = 'sections'; renderBody(); })),
+        A.on === 'bars' || !app.songAnalysis ? slider('Every', { min: 2, max: 32, step: 1, fmt: v => `${v} bars`, get: () => A.every, set: v => { A.every = v; } }) : null,
+        h('div', { class: 'sub-label' }, 'It picks from'),
+        h('div', { class: 'chips' },
+          chip(A.variations, 'Variations of this look', () => { A.variations = !A.variations; renderBody(); }),
+          A.variations ? null : LOOK_CATS.map(([id, label]) => chip(A.cats.includes(id), label, () => {
+            A.cats = A.cats.includes(id) ? A.cats.filter(c => c !== id) : [...A.cats, id];
+            if (!A.cats.length) A.cats = [id];
+            renderBody();
+          }))),
+      ] : null,
+      h('p', { class: 'muted small' }, state),
+      slider('Glide length', { min: 0.25, max: 8, step: 0.25, fmt: v => `${v} bars`, get: () => w.morphBars, set: v => { w.morphBars = v; } }));
+  }
+
   function renderWorlds() {
     const w = app.world;
-    const cards = h('div', { class: 'cards' }, Object.entries(LOOKS).map(([id, L]) =>
-      h('button', { class: `card${w.lookId === id ? ' on' : ''}`, title: L.blurb, onclick: () => { app.worldLook(id); renderBody(); } },
-        thumbImg('worlds', id), h('span', {}, L.name))));
-    const a = app.audio;
+    const card = ([id, L]) => h('button', { class: `card${w.lookId === id ? ' on' : ''}`, title: L.blurb, onclick: () => { app.worldLook(id); renderBody(); } },
+      thumbImg('worlds', id), h('span', {}, L.name));
+    const looks = LOOK_CATS.map(([cat, name]) => [
+      h('div', { class: 'sub-label' }, name),
+      h('div', { class: 'cards' }, Object.entries(LOOKS).filter(([, L]) => L.cat === cat).map(card)),
+    ]);
     const groups = WORLD_GROUPS.map(([g, name, blurb]) => {
       const params = PARAMS.filter(p => p.group === g && p.label);
       const colors = params.filter(p => typeof p.def === 'string');
-      return h('details', { class: 'sec details' },
+      const el = h('details', { class: 'sec details' },
         h('summary', {}, name, h('small', {}, blurb)),
         colors.length ? h('div', { class: 'color-row' }, colors.map(worldSlider)) : null,
         params.filter(p => typeof p.def !== 'string').map(worldSlider));
+      el.open = openGroups.has(g);
+      el.addEventListener('toggle', () => { if (el.open) openGroups.add(g); else openGroups.delete(g); });
+      return el;
     });
     return [
       knobStrip('worlds'),
-      h('p', { class: 'lead' }, 'One world made of lines. Pick a look and ', h('b', {}, 'everything glides there'), ' — the equation re-forms instead of cutting. Try ', h('b', {}, 'Explore'), ' up top to breed new ones.'),
-      cards,
+      h('p', { class: 'lead' }, 'One world made of lines. Pick a look and ', h('b', {}, 'everything glides there'), ' — the equation re-forms instead of cutting. ', h('b', {}, 'Explore'), ' (up top) breeds new ones.'),
+      looks,
+      musicSection(),
       youSection(),
       pictureSection(),
-      section('Morph', 'how the glide feels',
-        slider('Glide length', { min: 0.25, max: 8, step: 0.25, fmt: v => `${v} bars`, get: () => w.morphBars, set: v => { w.morphBars = v; } }),
-        toggle('Auto-morph to a new look on the bar', () => w.auto, v => { w.auto = v; w.lastAutoBar = -1e9; }),
-        slider('Every', { min: 2, max: 32, step: 1, fmt: v => `${v} bars`, get: () => w.autoBars, set: v => { w.autoBars = v; } })),
-      section('Music', a.mode === 'off' ? 'nothing playing' : a.mode === 'mic' ? 'listening to the mic' : `♪ ${a.name}`,
-        h('div', { class: 'run-actions' },
-          ...songPicker('Play a song', 'it finds the beat, then everything moves with it', f => app.loadSong(f)).map(el => { if (el.classList) el.classList.add('slim'); return el; }),
-          h('button', { class: 'btn', html: `${icon('mic')}<span>Mic</span>`, onclick: () => app.useMic() }),
-          a.mode !== 'off' ? h('button', { class: 'btn', html: `${icon('stop')}<span>Stop</span>`, onclick: () => app.stopAudio() }) : null),
-        tempoControls(),
-        PARAMS.filter(p => p.group === 'music').map(worldSlider)),
+      showSection(),
+      h('div', { class: 'sub-label' }, 'Fine-tune everything'),
       groups,
     ];
   }

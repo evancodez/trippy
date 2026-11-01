@@ -133,9 +133,13 @@ const FEATURES = [
   { h0: { on: 1, x: -0.25, y: -0.15, z: 0.12, s: 1.2, a: 0.2, curl: 0.3, spread: 0.6 }, grab: 0.5 },
   { check: 0.85 }, { wAng: 1, wRad: 1, wLin: 0 }, { kaleido: 1 }, { moire: 1, wRad: 1, wLin: 0 },
   { radInv: 1, wRad: 1, wLin: 0 }, { pitch: 1.1, focal: 1.8 },
+  { hall: 1, wrap: 1, pitch: 0, focal: 1.0, flyRate: 0.5 }, { blob: 1, drop: 1, wrap: 1, objZ: 0.1, objS: 0.48 },
+  { check: 1, tri: 1 }, { square: 1, wRad: 1, wLin: 0 }, { vortex: 1.6 }, { pinch: 1 }, { wave: 1.2, zig: 1 },
 ];
-const SPACE_KEYS = ['gyro', 'sponge', 'kifs'];
-const OBJECT_KEYS = ['penrose', 'mobius', 'rings'];
+const SPACE_KEYS = ['gyro', 'sponge', 'kifs', 'hall'];
+const OBJECT_KEYS = ['penrose', 'mobius', 'rings', 'blob'];
+// on/off switches: only the features above turn them on, never a random nudge (a 5% corridor is just a mess)
+const SWITCHES = new Set([...SPACE_KEYS, ...OBJECT_KEYS, 'columns', 'drop', 'wrap']);
 
 // parent: full world values (colors as rgb arrays) → a child set, ready for world.morphTo()
 export function breedWorld(parent, strength = 0.5, locks = {}, seed = Math.random() * 1e9) {
@@ -151,12 +155,12 @@ export function breedWorld(parent, strength = 0.5, locks = {}, seed = Math.rando
     for (const [k, x] of Object.entries(other)) {
       const p = PARAM_BY_NAME[k];
       if (!p || locked.has(p.group) || typeof x !== 'number' || typeof child[k] !== 'number') continue;
-      child[k] = lerp(child[k], x, t);
+      child[k] = SWITCHES.has(k) ? (t > 0.5 ? x : child[k]) : lerp(child[k], x, t);
     }
   }
   // nudge numbers
   for (const p of PARAMS) {
-    if (!p.group || locked.has(p.group) || typeof p.def !== 'number' || ['media', 'music'].includes(p.group)) continue;
+    if (!p.group || locked.has(p.group) || typeof p.def !== 'number' || ['media', 'music'].includes(p.group) || SWITCHES.has(p.name)) continue;
     if (r() > 0.25 + strength * 0.35) continue;
     child[p.name] = clamp(child[p.name] + gauss(r) * (p.max - p.min) * 0.1 * strength, p.min, p.max);
   }

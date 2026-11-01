@@ -1,5 +1,5 @@
 // Worlds mode: the film engine, live. You pick a look and everything glides there; you can push sliders
-// while it moves, let it auto-morph on the bar, play music into it, and press your own hand through it.
+// while it moves, play music into it (and let it auto-morph on the music), and press your own hand through it.
 import { PARAMS, PARAM_BY_NAME, RATE_TARGETS, SHADER_COUNT, hexToRgb } from './film/params.js';
 import { defaultValues, expand, applyMusic, toShader, toPost, settle, EASE } from './film/timeline.js';
 import { LOOKS, look } from './film/looks.js';
@@ -47,16 +47,18 @@ export class World {
     this.morphTo(look(id), seconds);
   }
 
-  // a random look with random tweaks — the "Surprise" of Worlds
-  surprise(seconds) {
-    const ids = Object.keys(LOOKS);
+  // a random look with random tweaks — the "Surprise" of Worlds. `cats` limits which kinds of look it picks.
+  surprise(seconds, cats = null) {
+    let ids = Object.keys(LOOKS).filter(k => !cats || cats.includes(LOOKS[k].cat));
+    if (ids.length > 1) ids = ids.filter(k => k !== this.lookId);
+    if (!ids.length) ids = Object.keys(LOOKS);
     const id = ids[Math.floor(this.rng() * ids.length)];
     const s = look(id);
     if (s.freq) s.freq *= 0.75 + this.rng() * 0.6;
     if (this.rng() < 0.35) s.twist = (this.rng() - 0.5) * 2.4;
     if (this.rng() < 0.25) Object.assign(s, { kaleido: 1, kaleidoN: [6, 8, 12][Math.floor(this.rng() * 3)] });
     if (this.rng() < 0.25) Object.assign(s, { check: 0.85, checkA: this.rng() * 3 });
-    if (this.rng() < 0.3) Object.assign(s, { pitch: this.rng() * 0.9, focal: 1.6 + this.rng() * 3 });
+    if (this.rng() < 0.3 && ['flat', 'deep'].includes(LOOKS[id].cat)) Object.assign(s, { pitch: this.rng() * 0.9, focal: 1.6 + this.rng() * 3 });
     this.lookId = id;
     this.morphTo(s, seconds);
     return LOOKS[id].name;
@@ -124,12 +126,15 @@ export class World {
     return { P: this.P, post: toPost(v) };
   }
 
-  // auto-morph on the bar
-  tickAuto(bar, barLen) {
-    if (!this.auto) return null;
-    if (bar - this.lastAutoBar >= this.autoBars || bar < this.lastAutoBar) {
+  // auto-morph: every `autoBars` bars, or now (`force`: a new section of the song).
+  // opts = { cats: kinds of look to pick from, variations: stay on this look and drift instead }
+  // While it's off the counter keeps up, so switching it on waits a full stretch before the first morph.
+  tickAuto(bar, barLen, opts = {}, force = false) {
+    if (!this.auto) { this.lastAutoBar = Math.floor(bar); return null; }
+    if (force || bar - this.lastAutoBar >= this.autoBars || bar < this.lastAutoBar) {
       this.lastAutoBar = Math.floor(bar);
-      return this.surprise(this.morphBars * barLen);
+      if (opts.variations) { this.mutate(this.morphBars * barLen); return 'a variation'; }
+      return this.surprise(this.morphBars * barLen, opts.cats);
     }
     return null;
   }

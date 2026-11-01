@@ -19,7 +19,8 @@ export class Media {
     this.lastDraw = 0;
     this.text = { value: '', font: 'grotesk' };
     this.camera = null;        // { video, stream }
-    this.cam = { relief: 'scene' };   // what of the camera presses through: none | scene | body | face | motion
+    // what of the camera is "you": none | scene | body | face | hands | bodyhands | box | motion; and how sharp
+    this.cam = { subject: 'scene', detail: 0.6 };
     this.blurPx = 6;           // a smooth relief needs a softened picture (sharp pixels make crunchy lines)
     this.out = document.createElement('canvas');
     this.outCtx = this.out.getContext('2d');
@@ -130,13 +131,14 @@ export class Media {
     if (this.kind === 'camera') { this.kind = 'none'; this.size(16, 16); this.dirty = true; }
   }
 
-  // camera frame → canvas, mirrored like a selfie; masks come from the tracker
+  // camera frame → canvas, mirrored like a selfie, at the size the Detail setting asks for;
+  // the subject's mask (from the tracker) goes into the alpha channel
   drawCamera(masks) {
     const v = this.camera.video;
     if (!v.videoWidth) return;
-    const w = 480, h = Math.round(480 * v.videoHeight / v.videoWidth);
+    const w = Math.min(v.videoWidth, Math.round(480 + this.cam.detail * 800)), h = Math.round(w * v.videoHeight / v.videoWidth);
     this.size(w, h);
-    const g = this.ctx, r = this.cam.relief;
+    const g = this.ctx, r = this.cam.subject;
     g.globalCompositeOperation = 'source-over';
     if (r === 'none') { g.fillStyle = '#000'; g.fillRect(0, 0, w, h); this.dirty = true; return; }
     if (r === 'motion') {                     // where you moved, fading trails
@@ -146,18 +148,13 @@ export class Media {
       this.dirty = true;
       return;
     }
+    g.clearRect(0, 0, w, h);
     g.save();
     g.translate(w, 0);
     g.scale(-1, 1);
     g.drawImage(v, 0, 0, w, h);
     g.restore();
-    if (r === 'body' && masks.body) {         // a silhouette that bulges, with your detail on top
-      g.globalAlpha = 0.45;
-      g.fillStyle = '#fff';
-      g.fillRect(0, 0, w, h);
-      g.globalAlpha = 1;
-    }
-    if ((r === 'body' && masks.body) || (r === 'face' && masks.face)) {
+    if (this.masked && masks.canvas) {
       g.globalCompositeOperation = 'destination-in';
       g.drawImage(masks.canvas, 0, 0, w, h);
       g.globalCompositeOperation = 'source-over';
@@ -183,6 +180,6 @@ export class Media {
 
   // does the picture need its alpha channel used as a mask?
   get masked() {
-    return this.kind === 'camera' && (this.cam.relief === 'body' || this.cam.relief === 'face');
+    return this.kind === 'camera' && ['body', 'face', 'hands', 'bodyhands', 'box'].includes(this.cam.subject);
   }
 }

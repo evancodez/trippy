@@ -28,9 +28,12 @@ export class Tracker {
     this.hands = [];           // [{ u, v, size, angle, curls[5], spread, mirror }]
     this.bodyMask = null;
     this.motion = { energy: 0, u: 0.5, v: 0.5, canvas: null };
+    // the box around your hands (and whatever they're holding), smoothed; held a moment when they go missing
+    this.handBox = { u0: 0.3, v0: 0.4, u1: 0.7, v1: 0.8, a: 0, seen: -1e9 };
     this.maskCanvas = document.createElement('canvas');
-    this.maskCanvas.width = 256;
-    this.maskCanvas.height = 192;
+    this.maskCanvas.width = 320;
+    this.maskCanvas.height = 240;
+    this.maskRaw = document.createElement('canvas');
     this.turn = 0;
     this.ts = 0;
     this.onchange = () => {};
@@ -44,7 +47,7 @@ export class Tracker {
     this.status.camera = 'loading';
     this.onchange();
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }, audio: false });
+      this.stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }, audio: false });
     } catch (e) {
       this.status.camera = 'error';
       this.onchange();
@@ -57,6 +60,7 @@ export class Tracker {
     await v.play();
     this.video = v;
     this.aspect = v.videoWidth / v.videoHeight || 4 / 3;
+    this.maskCanvas.height = Math.round(this.maskCanvas.width / this.aspect);
     this.status.camera = 'on';
     for (const k of ['face', 'hands', 'body']) if (this.want[k]) this.ensure(k);
     this.onchange();
@@ -119,7 +123,7 @@ export class Tracker {
       else if (kind === 'body') this.tasks.body.segmentForVideo(v, this.ts, r => this.readBody(r));
     } catch (e) { console.warn(e); }
     if (this.want.motion) this.readMotion();
-    this.drawMasks();
+    this.trackHandBox();
   }
 
   readFace(r) {
@@ -156,14 +160,16 @@ export class Tracker {
       const localX = across.x * Math.cos(-angle) - across.y * Math.sin(-angle);
       const curls = FINGERS.map(([a, b, , d]) => clamp((angleBetween(sub(P[b], P[a]), sub(P[d], P[b])) - 0.15) / 1.5, 0, 1.4));
       const spread = clamp(angleBetween(sub(P[8], P[5]), sub(P[20], P[17])) / 0.9, 0, 1.4);
-      return { u: palm.x / A, v: 1 - palm.y, size, angle, curls, spread, mirror: localX >= 0 ? 1 : -1 };
+      const us = lm.map(p => 1 - p.x), vs = lm.map(p => p.y);
+      const box = { u0: Math.min(...us), u1: Math.max(...us), v0: Math.min(...vs), v1: Math.max(...vs) };
+      return { u: palm.x / A, v: 1 - palm.y, size, angle, curls, spread, mirror: localX >= 0 ? 1 : -1, box };
     });
   }
 
   readBody(r) {
     const mask = r.confidenceMasks?.[0];
     if (!mask) return;
-    this.bodyMask = { w: mask.width, h: mask.height, data: mask.getAsFloat32Array() };
+    this.bodyMask = { w: mask.width, h: mask.height, data: mask.getAsFloat32Array(), fresh: true };
     mask.close?.();
   }
 
@@ -206,28 +212,63 @@ export class Tracker {
     M.prev = gray;
   }
 
-  // the alpha masks for "only my body" / "only my face"
-  drawMasks() {
-    const c = this.maskCanvas, g = c.getContext('2d');
+  // one box around both hands, padded: for a guitar it takes in the neck and the strings between them
+  trackHandBox() {
+    const B = this.handBox, now = performance.now() / 1000;
+    const dt = Math.min(0.1, now - (B.t || now));
+    B.t = now;
+    if (this.hands.length) {
+      let u0 = 1, v0 = 1, u1 = 0, v1 = 0;
+      for (const h of this.hands) { u0 = Math.min(u0, h.box.u0); v0 = Math.min(v0, h.box.v0); u1 = Math.max(u1, h.box.u1); v1 = Math.max(v1, h.box.v1); }
+      const pad = 0.3 * Math.max(u1 - u0, v1 - v0, 0.12) + 0.03;
+      const k = B.a < 0.05 ? 1 : 1 - Math.exp(-dt * 8);
+      B.u0 += (u0 - pad - B.u0) * k; B.u1 += (u1 + pad - B.u1) * k;
+      B.v0 += (v0 - pad - B.v0) * k; B.v1 += (v1 + pad - B.v1) * k;
+      B.seen = now;
+    }
+    B.a += ((now - B.seen < 1.5 ? 1 : 0) - B.a) * (1 - Math.exp(-dt * 4));
+  }
+
+  // the alpha mask for the subject: what of the camera counts as "you"
+  //   body · face · hands (and what they hold) · bodyhands (both) · box (a frame you set)
+  drawMasks(subject, { box, feather = 6 } = {}) {
+    const c = this.maskCanvas, raw = this.maskRaw;
     const W = c.width, H = c.height;
+    if (raw.width !== W || raw.height !== H) { raw.width = W; raw.height = H; }
+    const g = raw.getContext('2d');
     g.clearRect(0, 0, W, H);
     const b = this.bodyMask;
-    if (b && this.want.body) {
-      const img = g.createImageData(b.w, b.h);
-      for (let y = 0; y < b.h; y++) for (let x = 0; x < b.w; x++) {
-        const a = b.data[y * b.w + (b.w - 1 - x)];       // mirror it
-        const o = (y * b.w + x) * 4;
-        img.data[o] = img.data[o + 1] = img.data[o + 2] = 255;
-        img.data[o + 3] = Math.max(0, Math.min(255, (a - 0.2) * 320));
+    if (b && (subject === 'body' || subject === 'bodyhands')) {
+      if (b.fresh) {                                      // a new outline: mirror it into a small canvas
+        const w = Math.min(b.w, 320), h = Math.round(w * b.h / b.w), sx = b.w / w, sy = b.h / h;
+        const bc = this._bodyCanvas ||= document.createElement('canvas');
+        if (bc.width !== w || bc.height !== h) { bc.width = w; bc.height = h; }
+        const bg = bc.getContext('2d'), img = bg.createImageData(w, h);
+        for (let y = 0; y < h; y++) {
+          const row = Math.floor(y * sy) * b.w;
+          for (let x = 0; x < w; x++) {
+            const a = b.data[row + (b.w - 1 - Math.floor(x * sx))];
+            const o = (y * w + x) * 4;
+            img.data[o] = img.data[o + 1] = img.data[o + 2] = 255;
+            img.data[o + 3] = Math.max(0, Math.min(255, (a - 0.2) * 320));
+          }
+        }
+        bg.putImageData(img, 0, 0);
+        b.fresh = false;
       }
-      if (!this._bodyCanvas) this._bodyCanvas = document.createElement('canvas');
-      this._bodyCanvas.width = b.w;
-      this._bodyCanvas.height = b.h;
-      this._bodyCanvas.getContext('2d').putImageData(img, 0, 0);
       g.drawImage(this._bodyCanvas, 0, 0, W, H);
     }
+    const rect = (u0, v0, u1, v1, a = 1) => {
+      g.fillStyle = `rgba(255,255,255,${a})`;
+      g.beginPath();
+      g.roundRect(u0 * W, v0 * H, (u1 - u0) * W, (v1 - v0) * H, Math.min(u1 - u0, v1 - v0) * W * 0.12);
+      g.fill();
+    };
+    const hb = this.handBox;
+    if ((subject === 'hands' || subject === 'bodyhands') && hb.a > 0.01) rect(hb.u0, hb.v0, hb.u1, hb.v1, hb.a);
+    if (subject === 'box' && box) rect(box.x - box.w / 2, box.y - box.h / 2, box.x + box.w / 2, box.y + box.h / 2);
     const f = this.face;
-    if (f && this.want.faceMask) {
+    if (f && subject === 'face') {
       g.save();
       g.translate(f.u * W, f.v * H);
       g.rotate(-f.roll);
@@ -242,5 +283,11 @@ export class Tracker {
       g.fill();
       g.restore();
     }
+    const out = c.getContext('2d');
+    out.clearRect(0, 0, W, H);
+    out.filter = feather > 0.3 ? `blur(${feather.toFixed(1)}px)` : 'none';
+    out.drawImage(raw, 0, 0);
+    out.filter = 'none';
+    return c;
   }
 }

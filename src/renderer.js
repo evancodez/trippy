@@ -51,15 +51,17 @@ export class Renderer {
     this.handMirror = new Float32Array([1, 1, 1]);
   }
 
-  // upload a canvas / image / video frame as the media relief (rgb = picture, a = mask), then blur it
-  // in floating point at half size — a smooth relief needs smooth slopes, which 8 bits can't give
+  // upload a canvas / image / video frame (rgb = picture, a = mask). The upload itself stays sharp, at
+  // full size (the photo and the engraving read it); a copy is blurred in floating point at half size
+  // for the relief — a smooth relief needs smooth slopes, which 8 bits can't give
   setMedia(source, aspect, sigma = 3) {
     const gl = this.gl;
-    if (!this.mediaRaw) this.mediaRaw = this.makeTexture(1, 1, false);
+    if (!this.mediaRaw) this.mediaRaw = this.makeTexture(1, 1, false, true);
     gl.bindTexture(gl.TEXTURE_2D, this.mediaRaw);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.generateMipmap(gl.TEXTURE_2D);
     this.mediaAspect = aspect || 1;
     const sw = source.videoWidth || source.naturalWidth || source.width, sh = source.videoHeight || source.naturalHeight || source.height;
     const w = Math.max(32, Math.round(sw / 2)), h = Math.max(32, Math.round(sh / 2));
@@ -316,6 +318,10 @@ export class Renderer {
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, this.mediaTex);
     gl.uniform1i(u('uMedia'), 2);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, this.mediaRaw || this.zeroTex);
+    gl.uniform1i(u('uMediaSharp'), 3);
+    gl.activeTexture(gl.TEXTURE0);
     gl.uniform1f(u('uMediaAspect'), this.mediaAspect);
     gl.uniform1fv(u('uFinger'), rt.fingers || this.fingers);
     gl.uniform1fv(u('uHandMirror'), rt.handMirror || this.handMirror);

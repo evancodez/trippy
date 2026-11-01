@@ -20,7 +20,8 @@ uniform vec2 uRes;
 uniform float uP[${SHADER_COUNT}];
 uniform sampler2D uPrev;
 uniform sampler2D uDisp;
-uniform sampler2D uMedia;      // relief source: rgb = picture, a = mask (body / face / text)
+uniform sampler2D uMedia;      // relief source, blurred: rgb = picture, a = mask (body / face / hands / a box)
+uniform sampler2D uMediaSharp; // the same picture unblurred at full size: the photo and the engraving
 uniform float uMediaAspect;
 uniform vec4 uRipples[16];
 uniform float uRipplesOn;      // skip the mouse-ripple loop when nothing was dropped recently
@@ -35,6 +36,8 @@ ${shaderDefines()}
 #define TAU 6.28318530718
 
 vec3 gRight, gUp, gBack;       // the camera's frame (the impossible triangle is built from it)
+float gCalm = 1.0;             // 0 inside you when "keep it still inside" is on: the warps leave you alone
+float gAura = 0.0;             // how far the lines are pushed around you
 
 mat2 rot(float a) { float c = cos(a), s = sin(a); return mat2(c, s, -s, c); }
 float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
@@ -86,19 +89,30 @@ vec4 texBicubic(sampler2D t, vec2 uv, float lod) {
        + g1.y * (g0.x * textureLod(t, vec2(p0.x, p1.y), fl) + g1.x * textureLod(t, vec2(p1.x, p1.y), fl));
 }
 
-// returns (brightness, weight): weight is the mask × the soft edge of the picture
+vec2 mediaUV(vec2 q) { return (q - vec2(MEDIAX, MEDIAY)) / (2.0 * MEDIAS * vec2(uMediaAspect, 1.0)) + 0.5; }
+float mediaEdge(vec2 uv, float w) { vec2 e = smoothstep(0.0, w, uv) * smoothstep(0.0, w, 1.0 - uv); return e.x * e.y; }
+
+// the relief: returns (brightness, weight); weight is the mask × the soft edge of the picture.
+// A masked subject (body, hands…) is lifted a little so its silhouette stands up, with its detail on top.
 vec2 mediaAt(vec2 q, float lod) {
-  vec2 uv = (q - vec2(MEDIAX, MEDIAY)) / (2.0 * MEDIAS * vec2(uMediaAspect, 1.0)) + 0.5;
-  vec2 e = smoothstep(0.0, 0.05, uv) * smoothstep(0.0, 0.05, 1.0 - uv);
+  vec2 uv = mediaUV(q);
   vec4 m = lod > 0.5 ? texBicubic(uMedia, uv, 0.0) : textureLod(uMedia, uv, 0.0);
   float l = dot(m.rgb, vec3(0.299, 0.587, 0.114));
   l = mix(l, 1.0 - l, MEDIAINV);
-  return vec2(l, mix(1.0, m.a, MEDIAMASK) * e.x * e.y);
+  l = mix(l, 1.0, MEDIALIFT);
+  return vec2(l, mix(1.0, m.a, MEDIAMASK) * mediaEdge(uv, 0.05));
+}
+
+// how much of "you" is at q, very soft (lod picks the blur): for keeping you still, and for the aura
+float mediaMaskSoft(vec2 q, float lod) {
+  vec2 uv = mediaUV(q);
+  return mix(1.0, textureLod(uMedia, uv, lod).a, MEDIAMASK) * mediaEdge(uv, 0.08);
 }
 
 // ---------------------------------------------------------------- the membrane's height
 float heightField(vec2 q) {
   float h = 0.0;
+  float calm = MEDIACALM > 0.0 ? 1.0 - MEDIACALM * mediaMaskSoft(q, 1.5) : 1.0;
   if (FOLDS > 0.0) {
     float f = FOLDF;
     for (int i = 0; i < 4; i++) {
@@ -106,11 +120,11 @@ float heightField(vec2 q) {
       float a = fi * 1.7 + 0.4;
       h += sin(dot(q, vec2(cos(a), sin(a))) * f * (0.6 + 0.25 * fi) + PHASE * (0.35 + 0.1 * fi) + fi * 2.1) / (1.0 + fi * 0.7);
     }
-    h *= FOLDS * 0.045;
+    h *= FOLDS * 0.045 * calm;
   }
   if (RIPPLE > 0.0) {
     float r = length(q);
-    h += RIPPLE * 0.035 * sin(r * 26.0 - RIPPHASE) * exp(-r * 1.2) * smoothstep(0.0, 0.1, r);
+    h += calm * RIPPLE * 0.035 * sin(r * 26.0 - RIPPHASE) * exp(-r * 1.2) * smoothstep(0.0, 0.1, r);
   }
   for (int i = 0; i < 16; i++) {                       // ripples dropped with the mouse (or by your movement)
     if (uRipplesOn < 0.5) break;
@@ -270,31 +284,58 @@ float penrose(vec3 p) {
   return min(a, min(b, c));
 }
 
+// a soft lump that turns in the dark: a sphere, or two lobes twisted round each other
+float blobSDF(vec3 s) {
+  float l = BLOBLUMP;
+  s.xz = rot(s.y * 1.3 * l + 0.25 * l * sin(OBJROT * 2.0)) * s.xz;
+  vec3 o = vec3(0.3 * l, 0.06 * l, 0.0);
+  float r = 0.78 - 0.16 * min(l, 1.0);
+  vec3 k = vec3(1.0, 1.0, 1.0 + 0.25 * l);
+  float d = smin(length((s - o) * k) - r, length((s + o) * k) - r, 0.35);
+  d += l * 0.035 * sin(s.x * 6.0 + OBJROT) * sin(s.y * 5.0 - OBJROT * 0.7);
+  return d * 0.72;
+}
+
+float objWeights() { return PENROSE + MOBIUS + RINGS + BLOB; }
+
+// object space: centred, scaled, and (for the strip and the blob) turned and tilted
+vec3 objPos() { return vec3(OBJX, OBJY, mix(-1.3 * OBJS, OBJZ, min(objWeights(), 1.0))); }
+vec3 objSpin(vec3 q) { q.xz = rot(OBJROT) * q.xz; q.yz = rot(OBJTILT) * q.yz; return q; }
+
 float objects(vec3 p) {
-  float wsum = PENROSE + MOBIUS + RINGS;
+  float wsum = objWeights();
   if (wsum < 0.001) return 1e3;
-  float pres = min(wsum, 1.0);
-  vec3 q = (p - vec3(OBJX, OBJY, mix(-1.3 * OBJS, OBJZ, pres))) / OBJS;
+  vec3 q = (p - objPos()) / OBJS;
   float bound = length(q) - 1.35;
   if (bound * OBJS > OBJSOFT + 0.1) return bound * OBJS;
   float d = 0.0;
   if (PENROSE > 0.001) d += PENROSE * penrose(q);
-  vec3 s = q;
-  s.xz = rot(OBJROT) * s.xz;
-  s.yz = rot(OBJTILT) * s.yz;
+  vec3 s = objSpin(q);
   if (MOBIUS > 0.001) d += MOBIUS * mobius(s);
   if (RINGS > 0.001) d += RINGS * rings(q);
+  if (BLOB > 0.001) d += BLOB * blobSDF(s);
   return d / wsum * OBJS;
 }
 
+// ---------------------------------------------------------------- a corridor to fly down
+// square ↔ round, a closed box ↔ walls and a floor open to the dark; its walls can ripple
+float hallSDF(vec3 p) {
+  float w = HALLW * (1.0 + HALLWAVE * 0.22 * sin(p.z * 2.3 + PHASE * 0.35) * sin(p.z * 0.71 - 1.3));
+  vec2 q = p.xy;
+  float h = w * 0.72;
+  float box = mix(min(w - abs(q.x), h - abs(q.y)), min(w - abs(q.x), h + q.y), HALLOPEN);
+  return mix(box, w - length(q), HALLROUND);
+}
+
 float map(vec3 p) {
-  float d = (p.z - heightField(p.xy)) * uStepK;
-  float sw = GYRO + SPONGE + KIFS;
+  float d = (p.z - heightField(p.xy) + DROP * DROP * 40.0) * uStepK;
+  float sw = GYRO + SPONGE + KIFS + HALL;
   if (sw > 0.001) {
     float ds = 0.0;
     if (GYRO > 0.001) ds += GYRO * gyroid(p);
     if (SPONGE > 0.001) ds += SPONGE * sponge(p);
     if (KIFS > 0.001) ds += KIFS * crystal(p);
+    if (HALL > 0.001) ds += HALL * hallSDF(p);
     d = mix(d, ds / sw, min(sw, 1.0));
   }
   if (ORBS > 0.001) d = smin(d, orbsSDF(p), 0.04);
@@ -314,35 +355,61 @@ vec3 calcNormal(vec3 p, float t) {
 float lines(vec2 q, float z, out float rr, out vec2 qw) {
   q = rot(FROT) * q;
   float r = length(q);
-  if (TWIST != 0.0) q = rot(TWIST * exp(-r * r * 1.6)) * q;
-  if (BULGE != 0.0) q *= 1.0 - clamp(BULGE, -1.0, 1.0) * 0.85 * exp(-r * r * 3.5);
-  if (WAVE != 0.0) q.x += WAVE * 0.06 * sin(q.y * WAVEF + PHASE * 0.6);
-  if (WARPN > 0.0) q += WARPN * 0.22 * vec2(fbm(q * 1.8 + vec2(0.0, PHASE * 0.05)), fbm(q * 1.8 + vec2(7.3, -PHASE * 0.05)));
+  float c = gCalm;
+  if (PINCH > 0.0) q.x += c * PINCH * 0.24 * tanh((q.x - PINCHX) / 0.035);   // a band the lines squeeze through
+  if (VORTEX != 0.0) q = rot(c * VORTEX * 0.55 * log(max(r, 0.015))) * q;     // wound into the center, forever
+  if (TWIST != 0.0) q = rot(c * TWIST * exp(-r * r * 1.6)) * q;
+  if (BULGE != 0.0) q *= 1.0 - c * clamp(BULGE, -1.0, 1.0) * 0.85 * exp(-r * r * 3.5);
+  if (WAVE != 0.0) {
+    float wv = q.y * WAVEF + PHASE * 0.6;
+    q.x += c * WAVE * 0.06 * mix(sin(wv), asin(sin(wv)) * 0.6366, ZIG);   // smooth waves ↔ zigzags
+  }
+  if (WARPN > 0.0) q += c * WARPN * 0.22 * vec2(fbm(q * 1.8 + vec2(0.0, PHASE * 0.05)), fbm(q * 1.8 + vec2(7.3, -PHASE * 0.05)));
   if (KALEIDO > 0.0) {
     float seg = TAU / floor(KALEIDON + 0.5);
     float af = abs(mod(atan(q.y, q.x), seg) - seg * 0.5);
-    q = mix(q, length(q) * vec2(cos(af), sin(af)), KALEIDO);
+    q = mix(q, length(q) * vec2(cos(af), sin(af)), KALEIDO * c);
   }
   qw = rot(-FROT) * q;
   r = length(q);
   rr = r;
   float ang = atan(q.y, q.x);
   float L = dot(q, vec2(cos(LINA), sin(LINA)));
-  float R = mix(r, -log(max(r, 1e-4)) * 0.3, RADLOG);
-  R = mix(R, 0.09 / max(r, 2e-3), RADINV);
-  float base = (WLIN * L + WRAD * R + CONTOUR * z * 2.5) * FREQ - PHASE;
+  vec2 aq = abs(q);
+  float rs = mix(r, SQUARE > 0.0 ? max(aq.x, aq.y) : (aq.x + aq.y) * 0.7071, abs(SQUARE));   // rings → squares or diamonds
+  float R = mix(rs, -log(max(rs, 1e-4)) * 0.3, RADLOG);
+  R = mix(R, 0.09 / max(rs, 2e-3), RADINV);
+  float base = (WLIN * L + WRAD * R + CONTOUR * z * 2.5) * FREQ - PHASE + gAura;
   float v = sin(base * PI);
   if (WANG > 0.0) v = mix(v, sin(base * PI + ang * floor(SPOKES + 0.5)), WANG);
   if (CHECK > 0.0) {
-    float lin2 = sin((dot(q, vec2(cos(LINA + CHECKA), sin(LINA + CHECKA))) * FREQ - PHASE * 0.5) * PI);
-    float pol2 = sin(ang * floor(SPOKES + 0.5) + PHASE * 0.3);
-    v *= mix(1.0, mix(lin2, pol2, CHECKPOLAR), CHECK);
+    float a2 = dot(q, vec2(cos(LINA + CHECKA), sin(LINA + CHECKA))) * FREQ - PHASE * 0.5;
+    float p2 = (ang * floor(SPOKES + 0.5) + PHASE * 0.3) / PI;
+    v *= mix(1.0, mix(sin(a2 * PI), sin(p2 * PI), CHECKPOLAR), CHECK);
+    // a third family through every crossing cuts each square into two triangles
+    if (TRI > 0.0) v *= mix(1.0, sin((base + mix(a2, p2, CHECKPOLAR)) * PI), TRI * CHECK);
   }
   if (MOIRE > 0.0) {
     vec2 o = MOIREOFF * 0.5 * vec2(cos(PHASE * 0.15), sin(PHASE * 0.15));
     v *= mix(1.0, sin(length(q - o) * FREQ * PI), MOIRE);
   }
   return v;
+}
+
+// "wrap": the lines follow the surface instead of being projected onto it. Walls (a corridor) use
+// (depth, along the wall); the shapes use their own turning frame, so stripes go round them as they spin.
+vec2 surfaceUV(vec3 p, vec3 n) {
+  if (length(n.xy) < 0.7) return p.xy;                       // facing the camera: as projected
+  vec2 nn = normalize(n.xy);
+  float along = mix(dot(p.xy, vec2(-nn.y, nn.x)), atan(nn.x, -nn.y) * HALLW, HALLROUND);
+  return vec2(p.z, along);
+}
+
+// on a shape: longitude and height, like a globe — stripes become meridians that curve round it.
+// The longitude is scaled so a whole number of stripes fits around, so there is no seam at the back.
+vec2 objectUV(vec3 s) {
+  float n = max(1.0, floor(0.8 * PI * FREQ * OBJS + 0.5));
+  return vec2(atan(s.x, s.z) * n / (PI * FREQ), s.y * 0.8 * OBJS);
 }
 
 void main() {
@@ -380,16 +447,34 @@ void main() {
   if (hit) {
     vec3 p = ro + rd * t;
     vec3 n = calcNormal(p, t);
-    float rr;
-    vec2 qw;
-    float v = lines(p.xy + n.xy * REFRACT * 0.12, p.z, rr, qw);   // refraction: lines bend over the relief
+    if (MEDIACALM > 0.0) gCalm = 1.0 - MEDIACALM * mediaMaskSoft(p.xy, 1.5);
+    if (AURA > 0.0) gAura = AURA * 2.0 * mediaMaskSoft(p.xy, log2(float(textureSize(uMedia, 0).y) / 22.0));
+    float rr = 1.0;
+    vec2 qw = p.xy;
+    float v = 0.0;
+    if (WRAP < 0.999) v = lines(p.xy + n.xy * REFRACT * 0.12, p.z, rr, qw);   // refraction: lines bend over the relief
+    if (WRAP > 0.001) {
+      vec2 sq = surfaceUV(p, n);
+      float o = objWeights() > 0.001 ? objects(p) : 1e3;
+      float wo = 1.0 - smoothstep(0.003, 0.04 * OBJS, o);
+      if (wo > 0.001) sq = mix(sq, objectUV(objSpin((p - objPos()) / OBJS)), wo);
+      float rr2;
+      vec2 qw2;
+      float vw = lines(sq, p.z, rr2, qw2);
+      if (WRAP >= 0.999) { v = vw; rr = rr2; } else v = mix(v, vw, WRAP);
+    }
     if (STAT > 0.0) {
       float sn = (hash12(floor(px / 2.0) + floor(TIME * 20.0) * vec2(17.31, 41.7)) - 0.5) * 2.6 + 0.3 * sin(px.y / uRes.y * 7.0 - TIME * 2.0);
       v = mix(v, sn, STAT);
     }
-    if (MEDIAINK > 0.0) {                                      // the picture drawn by line thickness (engraving)
-      vec2 m = mediaAt(mix(p.xy, qw, MEDIAWARP), 0.0);
-      v += (0.55 - m.x) * m.y * MEDIAINK * 2.2;
+    vec4 photo = vec4(0.0);
+    float photoA = 0.0;
+    if (MEDIAINK > 0.0 || MEDIAPHOTO > 0.0) {                  // the picture itself, sharp: engraved and/or shown
+      vec2 uv = mediaUV(mix(p.xy, qw, MEDIAWARP));
+      photo = texture(uMediaSharp, uv);
+      photoA = mix(1.0, photo.a, MEDIAMASK) * mediaEdge(uv, 0.03);
+      photo.a = mix(dot(photo.rgb, vec3(0.299, 0.587, 0.114)), 1.0 - dot(photo.rgb, vec3(0.299, 0.587, 0.114)), MEDIAINV);
+      v += (0.55 - photo.a) * photoA * MEDIAINK * 2.2;         // drawn by line thickness (engraving)
     }
     vec3 L = normalize(vec3(-0.45, 0.55, 0.75));
     float diff = max(dot(n, L), 0.0);
@@ -402,6 +487,12 @@ void main() {
     col = mix(paper, ink, k);
     float spec = pow(max(dot(reflect(-L, n), -rd), 0.0), 40.0);
     col = mix(col, col * (0.25 + 0.55 * amb + 0.55 * diff) + spec * 0.3, LIGHT);
+    if (MEDIAPHOTO > 0.0) {                                    // shown as a photo: a duotone in the palette, or true color
+      bool pd = dot(paper, vec3(1.0)) < dot(ink, vec3(1.0));
+      vec3 duo = mix(pd ? paper : ink, pd ? ink : paper, smoothstep(0.03, 0.97, photo.a));
+      col = mix(col, mix(duo, photo.rgb, PHOTOCOLOR), MEDIAPHOTO * photoA);
+    }
+    if (DROP > 0.0) col = mix(col, fog, DROP * smoothstep(-0.3, -4.0, p.z));   // the floor falling away into the dark
     col = mix(fog, col, exp(-max(t - dist * 0.8, 0.0) * FOGD));
     col = mix(fog, col, mix(1.0, smoothstep(0.0, 0.5, rr), CFOG));
   }

@@ -8,6 +8,7 @@ import { LOOKS, GROUPS, NEUTRAL, look, PALETTES, COLOR_KEYS } from './engine/loo
 import { PARAM_BY_NAME, hexToRgb, rgbToHex, isColorParam, DEFAULTS } from './engine/params.js';
 import { applyFeel, defaultFeel, breed } from './engine/feel.js';
 import { ADDS, defaultAdds, Ball, applyHands, applyFace, applyOrbs } from './adds.js';
+import { Director } from './director.js';
 import { AudioEngine } from './audio.js';
 import { analyzeAudio } from './analysis.js';
 import { SongLibrary, isSong } from './songs.js';
@@ -64,10 +65,13 @@ const app = {
   auto: { when: 'off', every: 8, groups: GROUPS.map(g => g[0]) },
   tempo: { bpm: 70, beatsPerBar: 2, fromSong: false },
   songAnalysis: null,
-  // tools
+  // the cinematic camera: glides from shot to shot on the bar; can change the look as it goes
+  cine: { on: false, pace: 0.4, looks: true, every: 2, groups: ['lines', 'rings', 'tiles', 'sheets'], waves: 0.5 },
+  director: new Director(),
+  // tools, and your own camera moves (on top of the look's, or the director's)
   tool: 'ripple',
   brush: { size: 0.16, strength: 0.7, spring: 0.35 },
-  view: { panX: 0, panY: 0, zoom: 1 },
+  view: { panX: 0, panY: 0, zoom: 1, yaw: 0, pitch: 0 },
   glide: 2.5,               // seconds to glide to a new look
   paused: false,
   recording: null,
@@ -286,6 +290,23 @@ function applySound(v, m) {
     if (!p || typeof v[key] !== 'number') continue;
     v[key] = clamp(v[key] + sourceValue(src, m) * amt * k * (p.max - p.min) * 0.6, p.min, p.max);
   }
+}
+
+// the cinematic camera, before speeds and music (so the bar's sway and the bass thump still ride on top)
+app.setCinema = on => {
+  app.cine.on = on;
+  if (on) ui.toast('Cinematic camera — it drifts from shot to shot on the bar (C to stop)');
+  ui.cinemaChanged();
+};
+function applyCinema(v, m, dt) {
+  const C = app.cine, D = app.director;
+  if (D.due(m, C) && C.looks && (D.shots + 1) % C.every === 0) {
+    const ids = Object.keys(LOOKS).filter(k => k !== app.lookId && C.groups.includes(LOOKS[k].group));
+    if (ids.length) app.pickLook(ids[Math.floor(Math.random() * ids.length)], Math.round(16 - 12 * C.pace) * m.barLen * 0.65);
+  }
+  D.update(dt, v, LOOKS[app.lookId].group, m, C);
+  D.apply(v);
+  v.swell = Math.max(v.swell, C.waves * D.mix);
 }
 
 // auto-change the look (off unless you ask for it)
@@ -555,9 +576,14 @@ function applyInputs(v, m) {
 const handTool = { on: 0, x: 0, y: 0, press: 0 };
 function applyAdds(v, m, dt) {
   const A = app.adds;
-  v.tx -= app.view.panX * 2 * v.frame;
-  v.ty -= app.view.panY * 2 * v.frame;
-  v.frame *= app.view.zoom;
+  const V = app.view;
+  v.tx -= V.panX * 2 * v.frame;
+  v.ty -= V.panY * 2 * v.frame;
+  v.frame *= V.zoom;
+  v.yaw += V.yaw;
+  v.pitch = clamp(v.pitch + V.pitch, -0.35, 1.42);
+  // tilted back, a long lens would push the camera miles away: widen it as it tilts
+  if (v.focal > 2.2) v.focal += (2.0 - v.focal) * clamp((v.pitch - 0.12) / 0.7, 0, 1);
   for (const k of ['hands', 'face', 'orbs']) pres[k] = ease(pres[k], A[k].on ? 1 : 0, 3, dt);
   const copying = A.hands.copy && tracker.on && tracker.hands.length;
   if (!copying) { rt.handMirror[0] = 1; rt.handMirror[1] = -1; rt.fingers.fill(0); }
@@ -663,7 +689,7 @@ app.toggleFullscreen = () => {
   else document.documentElement.requestFullscreen?.().catch(() => ui.toast('Fullscreen is not allowed here'));
 };
 app.resetView = () => {
-  app.view = { panX: 0, panY: 0, zoom: 1 };
+  app.view = { panX: 0, panY: 0, zoom: 1, yaw: 0, pitch: 0 };
   rt.twists.fill(0);
   twists.forEach(t => { t.angle = 0; });
   renderer.clearDisp = true;
@@ -688,7 +714,7 @@ addEventListener('drop', e => {
 });
 
 // ------------------------------------------------------------------ the tools: left button = the chosen tool,
-// right button (or shift) = move, wheel = zoom, double-click = put the view back
+// right button = turn and tilt the camera (shift: slide it), wheel = zoom, double-click = put the view back
 const pointer = { down: false, move: false, inside: false, x: 0, y: 0, lastX: 0, lastY: 0, lastRipple: 0, alt: false };
 const ring = document.getElementById('brush');
 // the endless twist: up to 4 twists, each winding while you hold it and (if Spring back is up) unwinding after
@@ -701,7 +727,7 @@ function toUV(e) {
 }
 function updateRing(e) {
   if (e) { ring.style.left = `${e.clientX}px`; ring.style.top = `${e.clientY}px`; }
-  const show = !['move', 'hand'].includes(app.tool) && !matchMedia('(pointer: coarse)').matches;
+  const show = !['camera', 'hand'].includes(app.tool) && !matchMedia('(pointer: coarse)').matches;
   ring.classList.toggle('show', show && pointer.inside && !pointer.move);
   const d = app.brush.size * 2 * canvas.getBoundingClientRect().height * (app.tool === 'ripple' ? 0.6 : 1);
   ring.style.width = ring.style.height = `${d}px`;
@@ -714,8 +740,9 @@ canvas.addEventListener('pointerdown', e => {
   try { canvas.setPointerCapture(e.pointerId); } catch {}
   [pointer.x, pointer.y] = toUV(e);
   [pointer.lastX, pointer.lastY] = [pointer.x, pointer.y];
-  pointer.move = e.button === 2 || e.button === 1 || e.shiftKey || app.tool === 'move';
-  pointer.down = !pointer.move || app.tool === 'move';
+  pointer.move = e.button === 2 || e.button === 1 || e.shiftKey || app.tool === 'camera';
+  pointer.slide = e.shiftKey || e.button === 1;
+  pointer.down = !pointer.move || app.tool === 'camera';
   pointer.alt = e.altKey;
   rt.brush.x = pointer.x; rt.brush.y = pointer.y;
   if (!pointer.move && app.tool === 'ripple') {
@@ -736,8 +763,17 @@ canvas.addEventListener('pointermove', e => {
   const [x, y] = toUV(e);
   pointer.inside = true;
   if (pointer.move && (e.buttons & 7)) {
-    app.view.panX += (x - pointer.x) * app.view.zoom;
-    app.view.panY += (y - pointer.y) * app.view.zoom;
+    const V = app.view;
+    if (pointer.slide) {
+      V.panX += (x - pointer.x) * V.zoom;
+      V.panY += (y - pointer.y) * V.zoom;
+    } else {
+      // drag sideways to turn, up and down to tilt toward the horizon
+      V.yaw -= (x - pointer.x) * 3;
+      V.pitch = clamp(V.pitch + (y - pointer.y) * 2.2, -0.4, 1.4);
+      if (app.cine.on) { app.setCinema(false); ui.toast('Cinematic off — you’ve got the camera'); }
+    }
+    ui.viewChanged();
   }
   pointer.x = x; pointer.y = y;
   if (pointer.down && !pointer.move && app.tool === 'ripple' && rt.realTime - pointer.lastRipple > 0.08 && Math.hypot(x - pointer.lastX, y - pointer.lastY) > 0.03) {
@@ -761,6 +797,7 @@ canvas.addEventListener('dblclick', () => app.resetView());
 canvas.addEventListener('wheel', e => {
   e.preventDefault();
   app.view.zoom = clamp(app.view.zoom * Math.exp(e.deltaY * 0.0015), 0.15, 5);
+  ui.viewChanged();
 }, { passive: false });
 document.getElementById('unhide').addEventListener('click', () => (document.body.classList.contains('ui-hidden') ? app.toggleUI() : ui.setView('topbar', true)));
 
@@ -799,6 +836,7 @@ addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
   const act = {
     ' ': app.togglePause, h: app.toggleUI, f: app.toggleFullscreen, e: app.exploreOpen, d: app.surprise, s: app.snapshot,
+    c: () => app.setCinema(!app.cine.on),
     arrowright: () => app.stepLook(1), arrowleft: () => app.stepLook(-1),
     '[': () => { app.brush.size = Math.max(0.04, app.brush.size * 0.85); ui.renderDock(); updateRing(); },
     ']': () => { app.brush.size = Math.min(0.5, app.brush.size * 1.18); ui.renderDock(); updateRing(); },
@@ -846,7 +884,7 @@ function adapt(dt) {
 let last = performance.now();
 const t0 = last;
 function frame(now) {
-  const dt = Math.min(0.1, (now - last) / 1000);
+  const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
   last = now;
   rt.realTime = (now - t0) / 1000;
   const a = app.audio;
@@ -865,7 +903,7 @@ function frame(now) {
     spawnRipple((app.ball.x - cur.tx) / (2 * cur.frame), (app.ball.y - cur.ty) / (2 * cur.frame), 0.9 * app.sound.ballBounce);
   }
   const { P, post } = w.frame(app.paused ? 0 : dt, m, {
-    pre: v => { applyFeel(v, app.feel); applySound(v, m); },
+    pre: v => { applyFeel(v, app.feel); applySound(v, m); applyCinema(v, m, app.paused ? 0 : dt); },
     post: v => applyAdds(v, m, dt),
   });
   const rippling = rt.ripples.some((x, i) => i % 4 === 3 && x > 0 && rt.realTime - rt.ripples[i - 1] < 5);

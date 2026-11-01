@@ -15,12 +15,13 @@ The side panel has four tabs.
   - **3D sheets**: Silk, Chrome Silk, Line Landscape, Checker Hills, Triangle Floor, Endless Road, Dot Field, Orb Field.
   - **Fly through**: Hallway, Triangle Shaft, Ring Tunnel, Lattice, Menger Sponge, Fractal Crystals, Colonnade.
   - **Objects**: Striped Ball, Lumpy Blob, Impossible (Penrose), Möbius, Gyroscope.
-- **Tweak**: change the look you're on.
-  - Three feel knobs that work on every look: Calm ↔ Wild, Still ↔ Moving, Thin ↔ Bold.
+- **Tweak**: change the look you're on, most-used first.
+  - Color palettes, one click each.
   - The four sliders that matter most for this look.
-  - Lines and motion: line count, weight, angle, turn, spin, flow.
-  - Color: palettes, your own colors, a second ink on every other line, a color cycle, glow.
-  - Everything else, folded away by group.
+  - Lines and motion: line count, weight, spin, flow, waves rolling through.
+  - **Camera**: tilt toward the horizon, turn and zoom, or switch on the **cinematic camera**. It glides from shot to shot on the bar: straight down, high, low across the lines to the horizon, tilted. It never quite stops panning, and it can change the look as it goes and send waves through the lines.
+  - Three feel knobs that work on every look: Calm ↔ Wild, Still ↔ Moving, Thin ↔ Bold.
+  - Folded away: your own colors (a second ink on every other line, a color cycle, glow) and everything else by group.
   - Tweaks stay with their look until you **Reset** it. A pink dot marks what you changed; double-click a slider to put just that one back. **Save** keeps a tweaked look in Looks.
 - **Add**: things you can put into any look. None is on until you add it, and you can pin any of them to the toolbar.
   - **You (camera)**, with quick setups: Just me, Playing guitar, Hands & guitar, Lines over me, My face, Movement. Everything is worked out in the browser; no picture leaves your computer.
@@ -43,8 +44,9 @@ The side panel has four tabs.
   - **Twist**: hold it and it keeps winding, round and round; Alt or Option winds the other way.
   - **Bulge**, **Pinch** and **Smear**.
   - **Hand**: your cursor presses through from behind.
-  - **Move**.
-- Right-drag moves the view with any tool. Scroll zooms; double-click puts the view back.
+  - **Camera**: drag to turn and tilt (drag up to look out to the horizon); Shift-drag slides.
+- Right-drag turns the camera with any tool. Scroll zooms; double-click puts the view back.
+- **Cinematic** (or `C`) hands the camera to the cinematic director.
 - *Size*, *Strength* and *Spring back* shape the tools.
 - Add-ons you pin show up as switches.
 
@@ -94,6 +96,7 @@ Import the GitHub repo in Vercel and keep the defaults: Framework Preset **Other
 | `src/engine/world.js` | Gliding between looks, speeds, the music applied every frame |
 | `src/engine/feel.js` | The three feel knobs and breeding (Explore) |
 | `src/adds.js` | Add-ons: the ball's motion, the pair of hands, the face, orbs |
+| `src/director.js` | The cinematic camera: shots, glides on the bar, drift |
 | `src/media.js`, `src/tracking.js` | The camera, pictures, video and words; face / hand / body / motion tracking (MediaPipe) |
 | `src/audio.js`, `src/analysis.js`, `src/songs.js` | Live audio (levels, beat, waveform, spectrum); tempo from a song; your song library |
 | `src/gl/renderer.js`, `src/gl/passes.js` | WebGL2: the world pass, brush distortion, picture relief, finishing pass |

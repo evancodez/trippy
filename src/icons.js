@@ -29,6 +29,7 @@ const P = {
   stop: '<rect x="6" y="6" width="12" height="12" rx="1.5"/>',
   next: '<path d="M6 5.5v13l9.5-6.5z"/><path d="M18.5 5.5v13"/>',
   sliders: '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>',
+  orbit: '<ellipse cx="12" cy="12" rx="9" ry="4"/><path d="M12 3v18"/><path d="m19 9.5 2 2.5-3 .5"/>',
   pin: '<path d="M9 4h6l-1 5 3 3v2H7v-2l3-3z"/><path d="M12 14v6"/>',
   ball: '<circle cx="12" cy="12" r="5.5"/><path d="M2.5 9c3 0 4 1.5 4.5 3M2.5 15c3 0 4-1.5 4.5-3M21.5 9c-3 0-4 1.5-4.5 3M21.5 15c-3 0-4-1.5-4.5-3"/><path d="M10 10.2a2.5 2.5 0 0 1 2-1"/>',
   face: '<ellipse cx="12" cy="12" rx="7" ry="9"/><path d="M9 10.5h.01M15 10.5h.01M9.5 15.5c1.5 1 3.5 1 5 0"/>',

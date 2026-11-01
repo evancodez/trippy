@@ -120,6 +120,9 @@ float mediaMaskSoft(vec2 q, float lod) {
 float heightField(vec2 q) {
   float h = 0.0;
   float calm = MEDIACALM > 0.0 ? 1.0 - MEDIACALM * mediaMaskSoft(q, 1.5) : 1.0;
+  if (SWELL > 0.0) {                         // long waves rolling across the sheet
+    h += calm * SWELL * 0.05 * (sin(dot(q, vec2(0.8, 0.6)) * SWELLF - SWELLPH) + 0.45 * sin(dot(q, vec2(-0.45, 0.89)) * SWELLF * 1.7 - SWELLPH * 2.0));
+  }
   if (FOLDS > 0.0) {
     float f = FOLDF;
     for (int i = 0; i < 4; i++) {
@@ -392,6 +395,10 @@ float lines(vec2 q, float z, out float rr, out vec2 qw) {
   q = rot(FROT) * q;
   float r = length(q);
   float c = gCalm;
+  if (SWELL > 0.0) {                                                           // waves running along the lines
+    vec2 d = vec2(cos(LINA), sin(LINA));
+    q += d * c * SWELL * 0.035 * sin(dot(q, vec2(-d.y, d.x)) * SWELLF * 1.3 - SWELLPH);
+  }
   if (PINCH > 0.0) q.x += c * PINCH * 0.24 * tanh((q.x - PINCHX) / 0.035);   // a band the lines squeeze through
   if (VORTEX != 0.0) q = rot(c * VORTEX * 0.55 * log(max(r, 0.015))) * q;     // wound into the center, forever
   if (TWIST != 0.0) q = rot(c * TWIST * exp(-r * r * 1.6)) * q;

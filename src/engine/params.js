@@ -58,6 +58,9 @@ export const PARAMS = [
   P('wave', 0, 0, 2, 'bend', 'Waves'),
   P('waveF', 6, 1, 30, 'bend', 'Wave size'),
   P('zig', 0, 0, 1, 'bend', 'Waves: smooth ↔ zigzag'),
+  P('swell', 0, 0, 2, 'bend', 'Waves rolling through'),
+  P('swellF', 3, 0.5, 12, 'bend', 'Rolling wave size'),
+  P('swellPh', 0, 0, 0),
   P('warpN', 0, 0, 1.5, 'bend', 'Melt'),
   P('pinch', 0, 0, 1, 'bend', 'Squeeze band'),
   P('pinchX', 0, -1.5, 1.5, 'bend', 'Squeeze band position'),
@@ -150,12 +153,13 @@ export const PARAMS = [
   P('orbitRate', 0, -0.4, 0.4, 'motion', 'Orbit', 'rate'),
   P('flyRate', 0, -1.2, 1.2, 'motion', 'Fly forward', 'rate'),
   P('objSpin', 0.15, -1, 1, 'motion', 'Object spin', 'rate'),
+  P('swellRate', 1.5, -6, 6, 'motion', 'Rolling wave speed', 'rate'),
   P('hueRate', 0, -0.5, 0.5, 'color', 'Color cycle', 'rate'),
   P('ripRate', 2.5, 0, 10, null, null, 'rate'),
 ];
 
 // rates add into these values
-export const RATE_TARGETS = { flow: 'phase', spinRate: 'frot', orbitRate: 'yaw', flyRate: 'fly', ripRate: 'ripPhase', objSpin: 'objRot', hueRate: 'hue' };
+export const RATE_TARGETS = { flow: 'phase', spinRate: 'frot', orbitRate: 'yaw', flyRate: 'fly', ripRate: 'ripPhase', objSpin: 'objRot', hueRate: 'hue', swellRate: 'swellPh' };
 
 export const PARAM_BY_NAME = Object.fromEntries(PARAMS.map(p => [p.name, p]));
 export const DEFAULTS = Object.fromEntries(PARAMS.map(p => [p.name, p.def]));

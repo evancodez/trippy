@@ -90,6 +90,8 @@ export function settle(rate, a, speed, dBars, space = {}) {
   if (rate === 'spinRate' || rate === 'orbitRate' || rate === 'objSpin') {
     a -= TAU * Math.round(a / TAU);
     if (Math.abs(speed) < 0.005) a *= Math.exp(-dBars / 1.5);
+  } else if (rate === 'swellRate') {
+    a -= TAU * Math.round(a / TAU);             // the two rolling waves repeat every full turn
   } else if (rate === 'hueRate') {
     a -= Math.round(a);
     if (Math.abs(speed) < 0.002) a *= Math.exp(-dBars / 1.5);
@@ -118,7 +120,7 @@ export function applyMusic(v, m) {
   v.tx += v.swayX * 0.05 * Math.sin(m.bar * Math.PI) * v.frame;
   v.frame *= 1 - v.pulse * 0.08 * m.bass * m.bass * down;
   const I = clamp(1 + (m.loud - 0.5) * v.react, 0.3, 1.9);
-  for (const k of ['folds', 'wave', 'twist', 'bulge', 'warpN', 'orbs', 'ripple', 'vortex']) v[k] *= I;
+  for (const k of ['folds', 'wave', 'twist', 'bulge', 'warpN', 'orbs', 'ripple', 'vortex', 'swell']) v[k] *= I;
   v.height *= 1 + v.breathe * 0.25 * sway;
   const close = 0.5 - 0.5 * Math.cos(m.bar * TAU);
   for (let i = 0; i < 2; i++) v[`h${i}curl`] += v.grab * 0.75 * close + 0.05 * Math.sin(m.time * 1.7 + i * 2.1);
@@ -133,7 +135,7 @@ export function applyMusic(v, m) {
 // How steep can the sheet get? (a safe step for the ray marcher; gentle sheets march faster)
 export function stepFactor(v) {
   const slope = v.folds * 0.09 * v.foldF * v.height + v.face * 0.9 * v.height + v.ripple * 0.9
-    + v.media * 1.3 * v.height + v.sland * 1.6 * v.height + 0.15;
+    + v.media * 1.3 * v.height + v.sland * 1.6 * v.height + v.swell * 0.09 * v.swellF * v.height + 0.15;
   return Math.min(0.92, Math.max(0.4, 0.92 / Math.sqrt(1 + slope * slope)));
 }
 

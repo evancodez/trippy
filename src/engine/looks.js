@@ -15,6 +15,7 @@ export const NEUTRAL = {
   freq: 18, thick: 0, frot: 0, linA: 0, wLin: 1, wRad: 0, radLog: 0, radInv: 0, square: 0, wAng: 0, spokes: 6,
   check: 0, checkA: H, checkPolar: 0, tri: 0, moire: 0, contour: 0, wrap: 0, refract: 0.6,
   twist: 0, vortex: 0, bulge: 0, wave: 0, waveF: 6, zig: 0, warpN: 0, pinch: 0, pinchX: 0, kaleido: 0, kaleidoN: 6, cfog: 0,
+  swell: 0, swellF: 3, swellRate: 1.5,
   height: 1, folds: 0, foldF: 6, ripple: 0, orbs: 0, orbN: 5,
   gyro: 0, sponge: 0, kifs: 0, hall: 0, hallWave: 0, columns: 0,
   penrose: 0, mobius: 0, rings: 0, blob: 0, drop: 0, objSoft: 0.06,

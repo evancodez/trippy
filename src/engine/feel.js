@@ -17,7 +17,7 @@ export function applyFeel(v, f) {
   const w = (f.wild - 0.5) * 2, mv = (f.move - 0.5) * 2, b = (f.bold - 0.5) * 2;
   if (w) {
     const k = w > 0 ? 1 + w * 1.6 : 1 + w * 0.9;
-    for (const key of ['twist', 'vortex', 'bulge', 'wave', 'warpN', 'folds', 'orbs', 'ripple']) v[key] *= k;
+    for (const key of ['twist', 'vortex', 'bulge', 'wave', 'warpN', 'folds', 'orbs', 'ripple', 'swell']) v[key] *= k;
     v.react *= Math.max(0.15, k);
     v.sway *= Math.max(0, 1 + w);
     if (w > 0) {
@@ -31,7 +31,7 @@ export function applyFeel(v, f) {
   }
   if (mv) {
     const k = mv > 0 ? 1 + mv * 2 : 1 + mv;
-    for (const key of ['flow', 'spinRate', 'orbitRate', 'flyRate', 'objSpin', 'hueRate']) v[key] *= k;
+    for (const key of ['flow', 'spinRate', 'orbitRate', 'flyRate', 'objSpin', 'hueRate', 'swellRate']) v[key] *= k;
     if (mv > 0) { v.flow += mv * 0.6 * Math.sign(v.flow || 1); v.spinRate += mv * 0.05; }
     v.sway *= Math.max(0, 1 + mv);
     v.grab *= Math.max(0, 1 + mv);

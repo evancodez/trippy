@@ -19,7 +19,7 @@ export const TOOLS = [
   { id: 'pinch', icon: 'pinch', name: 'Pinch', tip: 'Hold to suck it in' },
   { id: 'smear', icon: 'smear', name: 'Smear', tip: 'Drag to push it like wet paint' },
   { id: 'hand', icon: 'hand', name: 'Hand', tip: 'Your cursor is a hand pressing through from behind — hold to push' },
-  { id: 'move', icon: 'move', name: 'Move', tip: 'Drag to move the view — or right-drag with any tool. Scroll to zoom.' },
+  { id: 'camera', icon: 'orbit', name: 'Camera', tip: 'Drag to turn and tilt the view (or right-drag with any tool) · Shift-drag slides it · scroll zooms' },
 ];
 
 // friendlier names for the sliders people reach for most
@@ -194,6 +194,10 @@ export function createUI(app) {
     const pinned = ADDS.filter(a => app.adds[a.id].pinned);
     dock.replaceChildren(
       tools,
+      h('button', {
+        class: `tool cine${app.cine.on ? ' on' : ''}`, 'data-tip': 'Cinematic camera: it drifts from shot to shot on its own (C)',
+        onclick: () => app.setCinema(!app.cine.on), html: `${icon('film')}<span>Cinematic</span>`,
+      }),
       h('div', { class: 'tool-opts' },
         mini('Size', 'size', 0.04, 0.5), mini('Strength', 'strength', 0.05, 1.5),
         ['twist', 'bulge', 'pinch', 'smear'].includes(app.tool) ? mini('Spring back', 'spring', 0, 1) : null,
@@ -272,17 +276,16 @@ export function createUI(app) {
   }
 
   // ---------------------------------------------------------------- Tweak
-  let resetBtn = null;
+  // most used first: color, this look's own sliders, lines & motion, the camera; then the feel knobs; the rest folded
+  let resetBtn = null, feelReset = null, viewRows = [];
   function renderTweak() {
     const L = LOOKS[app.lookId], v = look(app.lookId);
     resetBtn = h('button', { class: 'btn', disabled: !app.isEdited(app.lookId), onclick: () => app.resetLook(), html: `${icon('reset')}<span>Reset</span>` });
     const has = k => Math.abs(v[k] || 0) > 0.001;
     const rate = has('flyRate') ? 'flyRate' : has('objSpin') ? 'objSpin' : has('orbitRate') ? 'orbitRate' : null;
-    const sheetish = ['sheets', 'fly', 'dark'].includes(L.group);
-    // whatever isn't already up top, folded into groups
-    const shown = new Set([...L.tweaks, 'freq', 'thick', 'linA', 'frot', 'spinRate', 'flow', rate, 'frame', 'pitch', 'focal',
+    const shown = new Set([...L.tweaks, 'freq', 'thick', 'spinRate', 'flow', 'swell', rate,
       'paper', 'ink', 'ink2', 'fog', 'bands', 'hueRate', 'glow', 'glowColor']);
-    const MORE = [['lines', 'Lines'], ['bend', 'Bend'], ['shape', 'Relief'], ['space', 'Space'], ['objects', 'Objects'], ['camera', 'Camera'], ['motion', 'Speeds'], ['look', 'Light & finish'], ['music', 'Music reactions']];
+    const MORE = [['lines', 'Lines'], ['bend', 'Bend'], ['shape', 'Relief'], ['space', 'Space'], ['objects', 'Objects'], ['camera', 'The look’s own camera'], ['motion', 'Speeds'], ['look', 'Light & finish'], ['music', 'Music reactions']];
     const swatch = p => h('button', {
       class: 'swatch', title: p.name, 'aria-label': p.name,
       style: `--paper:${p.paper};--ink:${p.ink};--ink2:${p.ink2 || p.ink}`, onclick: () => { app.applyPalette(p); renderBody(); },
@@ -293,28 +296,25 @@ export function createUI(app) {
         h('div', { class: 'tweak-btns' },
           resetBtn,
           iconBtn('save', 'Save it (it shows up in Looks)', () => { const n = prompt('Name it', `${L.name} (mine)`); if (n?.trim()) app.saveLook(n.trim().slice(0, 40)); }))),
-      h('div', { class: 'knobs' },
-        KNOBS.map(k => knob(k, () => app.feel[k.id], x => { app.feel[k.id] = x; feelReset.disabled = !feelMoved(app.feel); }))),
-      h('div', { class: 'knobs-foot' },
-        h('small', { class: 'muted' }, 'These three work on every look'),
-        (() => { feelReset = h('button', { class: 'link-btn', disabled: !feelMoved(app.feel), onclick: () => { app.resetFeel(); renderBody(); } }, 'Center them'); return feelReset; })()),
+      h('div', { class: 'swatches' }, PALETTES.map(swatch)),
       section('This look', null, L.tweaks.map(k => lookSlider(k))),
       section('Lines & motion', null,
-        lookSlider('freq'), lookSlider('thick'),
-        v.wLin > 0.3 ? lookSlider('linA', { min: -1.57, max: 1.57 }) : null,
-        lookSlider('frot'), lookSlider('spinRate'), lookSlider('flow', { min: -3, max: 3 }), rate ? lookSlider(rate) : null),
-      section('Color', null,
-        h('div', { class: 'swatches' }, PALETTES.map(swatch)),
+        lookSlider('freq'), lookSlider('thick'), lookSlider('spinRate'), lookSlider('flow', { min: -3, max: 3 }),
+        lookSlider('swell', { label: 'Waves rolling through' }),
+        rate ? lookSlider(rate) : null),
+      cameraSection(),
+      section('Feel', 'works on every look',
+        h('div', { class: 'knobs' },
+          KNOBS.map(k => knob(k, () => app.feel[k.id], x => { app.feel[k.id] = x; feelReset.disabled = !feelMoved(app.feel); }))),
+        h('div', { class: 'knobs-foot' },
+          (feelReset = h('button', { class: 'link-btn', disabled: !feelMoved(app.feel), onclick: () => { app.resetFeel(); renderBody(); } }, 'Center them')))),
+      h('div', { class: 'sub-label' }, 'More'),
+      fold('more-color', 'Color', 'your own',
         h('div', { class: 'color-row' }, ['paper', 'ink', 'ink2', 'fog'].map(colorPick)),
         lookSlider('bands', { label: 'Every other line in the second ink' }),
         lookSlider('hueRate', { label: 'Color cycle' }),
         lookSlider('glow'),
         toggle('Keep these colors when I change look', () => app.keepColors, on => app.setKeepColors(on))),
-      section('View', null,
-        lookSlider('frame', { min: 0.15, max: 2 }),
-        sheetish ? lookSlider('pitch') : null,
-        sheetish ? lookSlider('focal') : null),
-      h('div', { class: 'sub-label' }, 'Everything else'),
       MORE.map(([g, name]) => {
         const ps = PARAMS.filter(p => p.group === g && p.label && !shown.has(p.name));
         return ps.length ? fold(`more-${g}`, name, `${ps.length}`, ps.map(p => lookSlider(p.name))) : null;
@@ -322,7 +322,30 @@ export function createUI(app) {
       h('p', { class: 'muted small foot' }, 'Your tweaks stay with this look until you Reset it. Double-click a slider to put just that one back. A pink ∿ means it follows the music.'),
     ];
   }
-  let feelReset = null;
+
+  // the camera is yours, across looks: turn, tilt and zoom it, or let the cinematic camera drive
+  function cameraSection() {
+    const C = app.cine, V = app.view;
+    const deg = x => `${Math.round(x * 57.3)}°`;
+    const wrap = a => a - Math.PI * 2 * Math.round(a / (Math.PI * 2));
+    viewRows = [
+      slider('Tilt toward the horizon', { min: -0.4, max: 1.4, get: () => V.pitch, set: x => { V.pitch = x; }, fmt: deg, reset: () => { V.pitch = 0; } }),
+      slider('Turn', { min: -3.14, max: 3.14, get: () => wrap(V.yaw), set: x => { V.yaw = x; }, fmt: deg, reset: () => { V.yaw = 0; } }),
+      slider('Zoom', { min: 0.25, max: 3, get: () => 1 / V.zoom, set: x => { V.zoom = 1 / x; }, fmt: x => `${x.toFixed(2)}×`, reset: () => { V.zoom = 1; } }),
+    ];
+    return section('Camera', 'right-drag turns it · scroll zooms',
+      toggle('Cinematic', () => C.on, on => app.setCinema(on), 'drifts from shot to shot on its own: top down, out to the horizon, tilted'),
+      C.on ? h('div', { class: 'cine' },
+        slider('Pace', { min: 0, max: 1, get: () => C.pace, set: x => { C.pace = x; }, fmt: x => (x < 0.3 ? 'slow' : x < 0.7 ? 'moderate' : 'fast') }),
+        slider('Waves through the lines', { min: 0, max: 1.5, get: () => C.waves, set: x => { C.waves = x; } }),
+        toggle('Change the look as it goes', () => C.looks, x => { C.looks = x; renderBody(); }),
+        C.looks ? chips(GROUPS.map(([id, name]) => [id, name]), id => C.groups.includes(id), id => {
+          C.groups = C.groups.includes(id) ? (C.groups.length > 1 ? C.groups.filter(x => x !== id) : C.groups) : [...C.groups, id];
+          renderBody();
+        }, 'small') : null) : null,
+      viewRows,
+      h('button', { class: 'link-btn', onclick: () => { app.resetView(); renderBody(); } }, 'Put the camera back'));
+  }
 
   // ---------------------------------------------------------------- Add
   function addHead(a) {
@@ -535,7 +558,7 @@ export function createUI(app) {
   function showHint() {
     if (hintShown) return;
     hintEl.replaceChildren(
-      h('span', {}, h('b', {}, 'Drag on it'), ' to ripple · ', h('b', {}, 'right-drag'), ' to move · ', h('b', {}, 'scroll'), ' to zoom. Looks, tweaks, things to add and sound are on the right.'),
+      h('span', {}, h('b', {}, 'Drag'), ' to ripple · ', h('b', {}, 'right-drag'), ' to turn the camera · ', h('b', {}, 'scroll'), ' to zoom · ', h('b', {}, 'C'), ' for the cinematic camera.'),
       h('button', { class: 'icon-btn', 'aria-label': 'Close', html: icon('x'), onclick: dismissHint }));
     hintEl.hidden = false;
   }
@@ -590,5 +613,7 @@ export function createUI(app) {
     lookEdited,
     soundChanged() { renderNow(); if (tab === 'sound') renderBody(); },
     addsChanged() { renderDock(); if (tab === 'add') renderBody(); },
+    cinemaChanged() { renderDock(); if (tab === 'tweak') renderBody(); },
+    viewChanged() { if (tab === 'tweak') viewRows.forEach(r => r.isConnected && r.sync()); },
   };
 }

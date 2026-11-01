@@ -1,5 +1,6 @@
 import { VERT, mainFrag, DISP_FRAG, COMP_FRAG, MAX_WARPS, MAX_NUMS } from './shaders.js';
 import { PATTERN_BY_ID, WARP_BY_ID } from './catalog.js';
+import { FILM_FRAG } from './film/shader.js';
 
 export function hexToRgb(hex) {
   const n = parseInt(String(hex).replace('#', ''), 16) || 0;
@@ -252,6 +253,32 @@ export class Renderer {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindTexture(gl.TEXTURE_2D, out.tex);
     gl.generateMipmap(gl.TEXTURE_2D);   // feeds the halation glow
+    slot.fi = 1 - slot.fi;
+  }
+
+  // the film world (src/film): P = Float32Array of shader params from film/timeline.js
+  renderFilm(P, rt, si = 0) {
+    const gl = this.gl;
+    if (!this.filmProg) this.filmProg = this.program(FILM_FRAG);
+    const F = this.filmProg, u = n => F.loc(n);
+    const slot = this.slots[si];
+    const prev = slot.frames[slot.fi], out = slot.frames[1 - slot.fi];
+    gl.bindFramebuffer(gl.FRAMEBUFFER, out.fb);
+    gl.viewport(0, 0, this.w, this.h);
+    gl.useProgram(F.prog);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.floatDisp ? this.disps[this.di].tex : this.zeroTex);
+    gl.uniform1i(u('uDisp'), 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, prev.tex);
+    gl.uniform1i(u('uPrev'), 1);
+    gl.uniform2f(u('uRes'), this.w, this.h);
+    gl.uniform1fv(u('uP'), P);
+    gl.uniform4fv(u('uRipples'), rt.ripples);
+    gl.uniform1f(u('uRealTime'), rt.realTime);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindTexture(gl.TEXTURE_2D, out.tex);
+    gl.generateMipmap(gl.TEXTURE_2D);
     slot.fi = 1 - slot.fi;
   }
 

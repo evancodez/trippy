@@ -6,10 +6,15 @@ import { makeState, cloneState, mutateState, randomState, encodeShare, decodeSha
 import { AudioEngine } from './audio.js';
 import { createUI, TOOLS } from './ui.js';
 import { MAX_RIPPLES } from './shaders.js';
-import { Director } from './director.js';
-import { analyzeAudio } from './analysis.js';
-import { PPP_SHOW } from './shows/ppp.js';
-import { generateShow } from './shows/auto.js';
+import { analyzeAudio, sample } from './analysis.js';
+import { Timeline, applyMusic, toShader, toPost } from './film/timeline.js';
+import { SHADER_COUNT } from './film/params.js';
+import { PPP_FILM } from './film/ppp.js';
+import { generateFilm } from './film/auto.js';
+import { LOOKS, look } from './film/looks.js';
+import { World } from './world.js';
+import { RANGES } from './state.js';
+import { WARP_BY_ID } from './catalog.js';
 
 const canvas = document.getElementById('stage');
 let renderer;
@@ -37,13 +42,18 @@ const app = {
   formulaError: null,
   tool: 'ripple',
   brush: { size: 0.16, strength: 0.7, spring: 0.35 },
-  audioCfg: { pulse: 0.45, ripples: 0.5, intensity: 0.6, wobble: 0.2 },
+  audioCfg: { pulse: 0.45, ripples: 0.15, intensity: 0.6, wobble: 0.2 },
   paused: false,
-  thumbs: { presets: {}, patterns: {}, warps: {} },
+  thumbs: { presets: {}, patterns: {}, warps: {}, worlds: {} },
   history: [],
   saves: loadSaves(),
   recording: null,
   recordStart: 0,
+  mode: 'patterns',         // patterns | worlds | films
+  world: new World(),
+  tempo: { bpm: 70, beatsPerBar: 2, fromSong: false },
+  songAnalysis: null,       // analysis of the song loaded in the Sound panel (gives the bar clock)
+  mods: {},                 // Patterns: slider → music source, e.g. { density: { src: 'bass', amt: 0.4 } }
 };
 
 // Everything that moves every frame.
@@ -136,6 +146,16 @@ app.undo = () => {
   if (!s) return ui.toast('Nothing to undo');
   setState(makeState(s), { fade: 0.4 });
 };
+
+// in Worlds the same buttons drive the film engine
+for (const [name, worldsVersion] of Object.entries({
+  mutate: () => { app.world.mutate(barLen() * 1.5); app.dirty = true; ui.renderName(); },
+  surprise: () => { app.presetName = app.world.surprise(app.world.morphBars * barLen()); app.dirty = false; ui.renderName(); },
+  reset: () => { app.world.goLook(app.world.lookId || 'silk', barLen() * 2); app.dirty = false; ui.renderName(); },
+})) {
+  const patternsVersion = app[name];
+  app[name] = () => (app.mode === 'worlds' ? worldsVersion() : app.mode === 'patterns' ? patternsVersion() : null);
+}
 
 app.setPattern = id => {
   const s = app.state;
@@ -306,7 +326,8 @@ app.audio.onchange = () => { if (ui.tab === 'sound') ui.refresh(); };
 app.loadSong = async file => {
   try {
     await app.audio.loadFile(file);
-    ui.toast(`Playing “${app.audio.name}”`);
+    ui.toast(`Playing “${app.audio.name}” — finding the beat…`);
+    analyseLoadedSong(file);
   } catch (e) {
     console.warn(e);
     ui.toast('Could not play that file');
@@ -322,191 +343,324 @@ app.useMic = async () => {
 };
 app.stopAudio = () => app.audio.stop();
 
-// ------------------------------------------------------------------ music videos (Run tab)
+// ------------------------------------------------------------------ the live music clock
+// With a song loaded (and analysed) the bar count follows the song; otherwise it free-runs at app.tempo.
+const clock = { bar: 0, hit: 0, tapTimes: [] };
+function barLen() { return (60 / app.tempo.bpm) * app.tempo.beatsPerBar; }
+
+function liveMusic(dt) {
+  const a = app.audio, an = app.songAnalysis;
+  if (an && a.mode === 'file' && a.el && an._file === a.file) clock.bar = (a.el.currentTime - an.beatOffset) / barLen();
+  else if (!app.paused) clock.bar += dt / barLen();
+  clock.hit = a.beat ? 1 : clock.hit * Math.exp(-dt * 7);
+  const on = a.mode !== 'off';
+  return { bar: clock.bar, barLen: barLen(), loud: on ? a.level : 0.5, bass: on ? a.bass : 0, mid: on ? a.mid : 0, high: on ? a.high : 0, hit: clock.hit, time: rt.realTime };
+}
+
+app.tapTempo = () => {
+  const now = performance.now() / 1000, taps = clock.tapTimes;
+  if (taps.length && now - taps[taps.length - 1] > 2) taps.length = 0;
+  taps.push(now);
+  if (taps.length > 6) taps.shift();
+  if (taps.length >= 3) {
+    const gaps = taps.slice(1).map((t, i) => t - taps[i]);
+    app.tempo.bpm = Math.round(60 / (gaps.reduce((x, y) => x + y, 0) / gaps.length));
+    app.tempo.fromSong = false;
+    clock.bar = Math.round(clock.bar);
+  }
+  return app.tempo.bpm;
+};
+
+async function analyseLoadedSong(file) {
+  try {
+    const an = await analyzeAudio(await file.arrayBuffer());
+    an._file = file;
+    let bpm = an.bpm;
+    while (bpm < 55) bpm *= 2;
+    while (bpm > 150) bpm /= 2;
+    app.tempo = { bpm: Math.round(bpm * 10) / 10, beatsPerBar: bpm < 85 ? 2 : an.meter || 4, fromSong: true };
+    app.songAnalysis = an;
+    ui.refresh();
+  } catch (e) { console.warn('analysis failed', e); }
+}
+
+// ------------------------------------------------------------------ Patterns: let any slider follow the music
+const clampN = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+app.modSources = ['bass', 'mid', 'high', 'loud', 'beat', 'bar', 'slow'];
+function sourceValue(src, m) {
+  switch (src) {
+    case 'bass': return m.bass;
+    case 'mid': return m.mid;
+    case 'high': return m.high;
+    case 'loud': return m.loud;
+    case 'beat': return m.hit;
+    case 'bar': return 0.5 + 0.5 * Math.sin(m.bar * Math.PI * 2);
+    case 'slow': return 0.5 + 0.5 * Math.sin(m.bar * Math.PI / 4);
+    default: return 0;
+  }
+}
+function modulated(s, m) {
+  const entries = Object.entries(app.mods);
+  if (!entries.length) return s;
+  const out = { ...s, warps: s.warps.map(w => ({ ...w })) };
+  for (const [key, { src, amt }] of entries) {
+    const x = sourceValue(src, m) * amt;
+    if (key.startsWith('w')) {
+      const [wi, f] = key.slice(1).split('.');
+      const w = out.warps[+wi];
+      const meta = w && WARP_BY_ID[w.type].params[f];
+      if (meta) w[f] = clampN(w[f] + x * (meta.max - meta.min) * 0.6, meta.min, meta.max);
+    } else if (RANGES[key]) out[key] = clampN(out[key] + x * (RANGES[key].max - RANGES[key].min) * 0.6, RANGES[key].min, RANGES[key].max);
+  }
+  return out;
+}
+app.setMod = (key, src, amt = 0.4) => {
+  if (!src) delete app.mods[key];
+  else app.mods[key] = { src, amt: app.mods[key]?.amt ?? amt };
+};
+
+// ------------------------------------------------------------------ modes
+app.setMode = mode => {
+  if (app.mode === mode) return;
+  if (app.mode === 'films') app.filmStop();
+  app.mode = mode;
+  document.body.dataset.mode = mode;
+  if (mode === 'worlds' && !app.world.lookId) app.world.goLook('silk', 0.01);
+  if (mode === 'films' && !film.def && film.status === 'idle') app.loadPPP();
+  renderer.clearSlot(0);
+  ui.refresh();
+  ui.renderDock();
+};
+
+// ------------------------------------------------------------------ Worlds (the film engine, live)
+app.worldLook = id => {
+  app.world.goLook(id, app.world.morphBars * barLen());
+  app.presetName = LOOKS[id].name;
+  app.dirty = false;
+  ui.renderName();
+};
+
+// ------------------------------------------------------------------ Films
 const PPP_FILE = 'Beach House - PPP.mp3';
-const show = app.show = {
+const film = app.film = {
   kind: null,           // 'ppp' | 'auto'
-  def: null,            // the show: scenes laid against the song
-  director: null,
+  def: null,            // the film: keyframes laid against the song
+  tl: null,
   analysis: null,
   file: null,
-  active: false,        // the director is driving the screen
+  active: false,
   clock: 0,
   status: 'idle',       // idle | loading | ready | need-song | error
   message: '',
   seed: 0,
-  cinema: true,         // hide the interface while a film plays
+  cinema: true,
   recordRun: false,
-  current: -1,
-  lastState: null,
+  chapter: -1,
+  hits: [],
+  hitIdx: 0,
+  hit: 0,
+  lastValues: null,
+  P: new Float32Array(SHADER_COUNT),
 };
 
 async function prepareSong(file) {
-  show.status = 'loading';
-  show.message = 'Listening to the song…';
+  film.status = 'loading';
+  film.message = 'Listening to the song…';
   ui.refreshRun();
-  const analysis = await analyzeAudio(await file.arrayBuffer(), msg => { show.message = `${msg}…`; ui.refreshRun(); });
+  const analysis = await analyzeAudio(await file.arrayBuffer(), msg => { film.message = `${msg}…`; ui.refreshRun(); });
   await app.audio.loadFile(file, { autoplay: false, loop: false });
   const el = app.audio.el;
   if (el.readyState < 1) await new Promise(r => el.addEventListener('loadedmetadata', r, { once: true }));
-  el.addEventListener('ended', onShowEnded);
-  show.file = file;
-  show.analysis = analysis;
+  el.addEventListener('ended', onFilmEnded);
+  film.file = file;
+  film.analysis = analysis;
+  // strong onsets, for flashes
+  const on = analysis.onset;
+  film.hits = [];
+  for (let i = 2; i < on.length - 2; i++) {
+    if (on[i] > 0.45 && on[i] >= on[i - 1] && on[i] >= on[i + 1] && on[i] >= on[i - 2] && on[i] >= on[i + 2]) film.hits.push(i / analysis.fps);
+  }
   return analysis;
 }
 
-function useShow(def) {
-  show.def = def;
-  show.director = new Director(def, show.analysis);
-  show.director.onNewSlot = slot => renderer.clearSlot(slot);
-  show.director.spawn = (x, y, s) => spawnRipple(x, y, s);
-  show.kind = def.id;
-  show.status = 'ready';
-  show.message = '';
-  show.current = -1;
+function useFilm(def) {
+  film.def = def;
+  film.tl = new Timeline(def);
+  film.kind = def.id;
+  film.status = 'ready';
+  film.message = '';
+  film.chapter = -1;
+  film.active = true;
+  renderer.clearSlot(0);
 }
 
-const songName = () => show.file?.name.replace(/\.[^.]+$/, '') || 'your song';
+const songName = () => film.file?.name.replace(/\.[^.]+$/, '') || 'your song';
 
-app.loadShowFile = async (file, { forceAuto = false } = {}) => {
+app.loadFilmFile = async (file, { forceAuto = false } = {}) => {
   try {
-    app.showStop();
+    app.filmStop();
     const an = await prepareSong(file);
-    const ppp = !forceAuto && /ppp/i.test(file.name) && Math.abs(an.duration - PPP_SHOW.duration) < 4;
-    if (ppp) useShow(PPP_SHOW);
+    const ppp = !forceAuto && /ppp/i.test(file.name) && Math.abs(an.duration - PPP_FILM.duration) < 4;
+    if (ppp) useFilm(PPP_FILM);
     else {
-      show.seed = (Math.random() * 2 ** 31) | 0;
-      useShow(generateShow(an, show.seed, songName()));
+      film.seed = (Math.random() * 2 ** 31) | 0;
+      useFilm(generateFilm(an, film.seed, songName()));
     }
     ui.refreshRun();
-    ui.toast(ppp ? 'PPP is ready — press play' : 'Your film is cut — press play');
+    ui.toast(ppp ? 'PPP is ready — press play' : 'Your film is written — press play');
   } catch (e) {
     console.warn(e);
-    show.status = 'error';
-    show.message = 'Could not read that song.';
+    film.status = 'error';
+    film.message = 'Could not read that song.';
     ui.refreshRun();
   }
 };
 
 // The PPP film uses the MP3 sitting next to the app when there is one; otherwise it asks for it.
 app.loadPPP = async () => {
-  if (show.kind === 'ppp' && show.analysis) return;
+  if (film.kind === 'ppp' && film.analysis) return;
   try {
     const res = await fetch(encodeURI(PPP_FILE));
     if (!res.ok || /text\/html/.test(res.headers.get('content-type') || '')) throw new Error('missing');
-    await app.loadShowFile(new File([await res.blob()], PPP_FILE, { type: 'audio/mpeg' }));
+    await app.loadFilmFile(new File([await res.blob()], PPP_FILE, { type: 'audio/mpeg' }));
   } catch {
-    show.status = 'need-song';
-    show.message = 'Drop “Beach House - PPP.mp3” onto the page — the song isn’t hosted with the app.';
+    film.status = 'need-song';
+    film.message = 'Drop “Beach House - PPP.mp3” onto the page — the song isn’t hosted with the app.';
     ui.refreshRun();
   }
 };
 
 app.reshuffle = () => {
-  if (!show.analysis) return;
-  show.seed = (Math.random() * 2 ** 31) | 0;
-  useShow(generateShow(show.analysis, show.seed, songName()));
+  if (!film.analysis) return;
+  film.seed = (Math.random() * 2 ** 31) | 0;
+  useFilm(generateFilm(film.analysis, film.seed, songName()));
   ui.refreshRun();
-  ui.toast(`New cut · seed ${show.seed}`);
+  ui.toast(`New film · seed ${film.seed}`);
 };
 
 app.autoFromCurrentSong = () => {
   const f = app.audio.file;
   if (!f) return ui.toast('Load a song first');
-  ui.setTab('run');
-  app.loadShowFile(f, { forceAuto: true });
+  app.setMode('films');
+  app.loadFilmFile(f, { forceAuto: true });
 };
 
-app.showPlaying = () => !!(show.active && app.audio.el && !app.audio.el.paused);
+app.filmPlaying = () => !!(film.active && app.audio.el && !app.audio.el.paused && film.file === app.audio.file);
 
-app.showPlay = async () => {
-  if (!show.director || !app.audio.el) return;
-  show.active = true;
+app.filmPlay = async () => {
+  if (!film.tl || !app.audio.el) return;
+  if (app.mode !== 'films') app.setMode('films');
+  film.active = true;
   await app.audio.ctx.resume();
   if (app.audio.el.ended) app.audio.el.currentTime = 0;
   await app.audio.el.play();
-  show.clock = app.audio.el.currentTime;
-  if (show.cinema) {
+  film.clock = app.audio.el.currentTime;
+  if (film.cinema) {
     document.body.classList.add('ui-hidden');
-    ui.toast('Press H for the controls · Space pauses · Esc stops');
+    ui.toast('H shows the controls · Space pauses · Esc stops');
   }
   ui.refreshRun();
 };
 
-app.showPause = () => {
+app.filmPause = () => {
   app.audio.el?.pause();
   ui.refreshRun();
 };
 
-app.showSeek = t => {
-  if (!app.audio.el || !show.director) return;
-  app.audio.el.currentTime = Math.max(0, Math.min(show.director.duration - 0.05, t));
-  show.clock = app.audio.el.currentTime;
-  show.active = true;
+app.filmSeek = t => {
+  if (!app.audio.el || !film.tl) return;
+  app.audio.el.currentTime = Math.max(0, Math.min(film.tl.duration - 0.05, t));
+  film.clock = app.audio.el.currentTime;
+  film.hitIdx = film.hits.findIndex(h => h >= film.clock);
+  film.active = true;
 };
 
-// stop the film; optionally keep the look on screen to keep playing with it
-app.showStop = ({ keepLook = false } = {}) => {
-  if (keepLook && show.lastState) {
-    pushHistory();
-    const s = makeState(cloneState(show.lastState));
-    app.base = makeState(cloneState(s));
-    app.presetId = null;
-    app.presetName = show.def?.scenes[show.current]?.name || 'From the film';
-    app.dirty = false;
-    setState(s, { fade: 0 });
-  }
-  if (show.recordRun && app.recording) app.recording.stop();
-  show.recordRun = false;
-  app.audio.el?.pause();
-  show.active = false;
-  show.current = -1;
+// stop the film; optionally carry the look on screen into Worlds to keep playing with it
+app.filmStop = ({ keepLook = false } = {}) => {
+  if (film.recordRun && app.recording) app.recording.stop();
+  film.recordRun = false;
+  if (film.file && app.audio.file === film.file) app.audio.el?.pause();
   document.body.classList.remove('ui-hidden');
+  if (keepLook && film.lastValues) {
+    const v = film.lastValues;
+    const set = {};
+    for (const [k, x] of Object.entries(v)) set[k] = x;
+    app.world.morphTo(set, 0.01);
+    app.presetName = film.tl?.chapters[film.chapter]?.name || 'From the film';
+    app.setMode('worlds');
+  }
   ui.renderName();
   ui.refreshRun();
 };
 
 app.recordRun = async () => {
-  if (!show.director) return;
-  app.showSeek(0);
-  await app.showPlay();
+  if (!film.tl) return;
+  app.filmSeek(0);
+  await app.filmPlay();
   if (!app.recording) app.toggleRecord();
-  show.recordRun = true;
+  film.recordRun = true;
 };
 
-function onShowEnded() {
-  if (show.recordRun && app.recording) app.recording.stop();
-  show.recordRun = false;
+function onFilmEnded() {
+  if (film.recordRun && app.recording) app.recording.stop();
+  film.recordRun = false;
   document.body.classList.remove('ui-hidden');
   ui.refreshRun();
 }
 
 // a smooth song clock: advances with the frame, gently pulled toward the audio element's time
-function showTime(dt) {
+function filmTime(dt) {
   const el = app.audio.el;
-  if (!el) return show.clock;
+  if (!el || film.file !== app.audio.file) return film.clock;
   if (!el.paused) {
-    show.clock += dt;
+    film.clock += dt;
     const ct = el.currentTime;
-    if (Math.abs(ct - show.clock) > 0.08) show.clock = ct;
-    else show.clock += (ct - show.clock) * 0.1;
-  } else show.clock = el.currentTime;
-  return Math.max(0, show.clock - (app.audio.ctx?.outputLatency || 0));
+    if (Math.abs(ct - film.clock) > 0.08) film.clock = ct;
+    else film.clock += (ct - film.clock) * 0.1;
+  } else film.clock = el.currentTime;
+  return Math.max(0, film.clock - (app.audio.ctx?.outputLatency || 0));
 }
 
-function renderShow(dt) {
-  const t = showTime(dt);
-  const f = show.director.frame(t, rt);
+function renderFilmFrame(dt) {
+  const t = filmTime(dt);
+  const tl = film.tl, A = film.analysis;
+  if (film.hitIdx < 0) film.hitIdx = film.hits.length;
+  while (film.hitIdx < film.hits.length && film.hits[film.hitIdx] <= t) { film.hit = 1; film.hitIdx++; }
+  film.hit *= Math.exp(-dt * 7);
+  const v = tl.values(t);
+  applyMusic(v, {
+    bar: (t - tl.barZero) / tl.barLen, barLen: tl.barLen,
+    loud: sample(A.rms, t), bass: sample(A.bass, t), mid: sample(A.mid, t), high: sample(A.high, t),
+    hit: film.hit, time: t,
+  });
+  film.lastValues = v;
   renderer.updateDisp(rt);
-  renderer.renderScene(f.a.state, f.a.rt, f.a.slot);
-  if (f.b) renderer.renderScene(f.b.state, f.b.rt, f.b.slot);
-  renderer.composite({ a: f.a.slot, b: f.b ? f.b.slot : null, mix: f.mix, transition: f.transition, flash: f.flash, post: f.post });
-  show.lastState = (f.b && f.mix > 0.5 ? f.b : f.a).state;
-  if (f.index !== show.current) {
-    show.current = f.index;
-    ui.runScene(f.index);
+  renderer.renderFilm(toShader(v, film.P), rt, 0);
+  renderer.composite({ a: 0, post: toPost(v) });
+  const ci = tl.chapterAt(t);
+  if (ci !== film.chapter) {
+    film.chapter = ci;
+    ui.runScene(ci);
   }
   ui.runTick(t);
+}
+
+function renderWorldFrame(dt) {
+  const w = app.world;
+  const m = liveMusic(dt);
+  const named = w.tickAuto(m.bar, m.barLen);
+  if (named) { app.presetName = `Auto · ${named}`; ui.renderName(); }
+  const h = w.hand;
+  const want = app.tool === 'hand' && pointer.inside ? 1 : 0;
+  h.on += (want - h.on) * (1 - Math.exp(-dt * 4));
+  h.press += ((pointer.down && app.tool === 'hand' ? 1 : 0) - h.press) * (1 - Math.exp(-dt * 6));
+  const cur = w.current || w.values();
+  h.x += (cur.tx + pointer.x * 2 * cur.frame - h.x) * (1 - Math.exp(-dt * 10));
+  h.y += (cur.ty + pointer.y * 2 * cur.frame - 0.12 - h.y) * (1 - Math.exp(-dt * 10));
+  const { P, post } = w.frame(app.paused ? 0 : dt, m);
+  renderer.updateDisp(rt);
+  renderer.renderFilm(P, rt, 0);
+  renderer.composite({ a: 0, post });
 }
 
 // drag a song anywhere onto the page
@@ -521,8 +675,8 @@ addEventListener('drop', e => {
   dropEl.classList.remove('show');
   const f = [...e.dataTransfer.files].find(x => x.type.startsWith('audio/') || /\.(mp3|wav|m4a|aac|ogg|flac|opus)$/i.test(x.name));
   if (!f) return ui.toast('That is not an audio file');
-  if (ui.tab === 'run') app.loadShowFile(f);
-  else { app.loadSong(f); ui.setTab('sound'); }
+  if (app.mode === 'films') app.loadFilmFile(f);
+  else app.loadSong(f);
 });
 
 // ------------------------------------------------------------------ mouse / touch
@@ -541,7 +695,7 @@ function spawnRipple(x, y, strength) {
 
 function updateBrushRing(e) {
   if (e) { ring.style.left = `${e.clientX}px`; ring.style.top = `${e.clientY}px`; }
-  const show = app.tool !== 'move' && !matchMedia('(pointer: coarse)').matches;
+  const show = !['move', 'hand'].includes(app.tool) && !matchMedia('(pointer: coarse)').matches;
   ring.classList.toggle('show', show && pointer.inside);
   const d = app.brush.size * 2 * canvas.getBoundingClientRect().height * (app.tool === 'ripple' ? 0.6 : 1);
   ring.style.width = ring.style.height = `${d}px`;
@@ -587,7 +741,11 @@ canvas.addEventListener('pointerleave', () => { pointer.inside = false; updateBr
 canvas.addEventListener('dblclick', () => { if (app.tool === 'move') rt.pan = [0, 0]; });
 canvas.addEventListener('wheel', e => {
   e.preventDefault();
-  app.state.zoom = Math.min(4, Math.max(0.2, app.state.zoom * Math.exp(-e.deltaY * 0.0015)));
+  if (app.mode === 'worlds') {
+    app.world.set('frame', Math.min(3, Math.max(0.05, app.world.get('frame') * Math.exp(e.deltaY * 0.0015))));
+  } else if (app.mode === 'patterns') {
+    app.state.zoom = Math.min(4, Math.max(0.2, app.state.zoom * Math.exp(-e.deltaY * 0.0015)));
+  }
   app.touch();
 }, { passive: false });
 
@@ -602,16 +760,20 @@ addEventListener('keydown', e => {
     return;
   }
   const k = e.key.toLowerCase();
-  if (show.active) {
+  if (app.mode === 'films' && film.tl) {
     const filmKeys = {
-      ' ': () => (app.showPlaying() ? app.showPause() : app.showPlay()),
-      escape: () => app.showStop(),
-      arrowright: () => app.showSeek(show.clock + 5),
-      arrowleft: () => app.showSeek(show.clock - 5),
+      ' ': () => (app.filmPlaying() ? app.filmPause() : app.filmPlay()),
+      escape: () => app.filmStop(),
+      arrowright: () => app.filmSeek(film.clock + 5),
+      arrowleft: () => app.filmSeek(film.clock - 5),
     };
     if (filmKeys[k]) { e.preventDefault(); filmKeys[k](); return; }
   }
   const presetStep = d => {
+    if (app.mode === 'worlds') {
+      const ids = Object.keys(LOOKS), i = ids.indexOf(app.world.lookId);
+      return app.worldLook(ids[(i + d + ids.length) % ids.length]);
+    }
     const i = PRESETS.findIndex(p => p.id === app.presetId);
     app.loadPreset(PRESETS[(i + d + PRESETS.length) % PRESETS.length].id);
   };
@@ -629,7 +791,8 @@ addEventListener('keydown', e => {
     return;
   }
   const n = parseInt(k, 10);
-  if (n >= 1 && n <= TOOLS.length) app.setTool(TOOLS[n - 1].id);
+  const tools = TOOLS.filter(t => !t.modes || t.modes.includes(app.mode));
+  if (n >= 1 && n <= tools.length) app.setTool(tools[n - 1].id);
 });
 
 // ------------------------------------------------------------------ the frame loop
@@ -688,7 +851,7 @@ function frame(now) {
   rt.pulse = Math.pow(a.bass, 1.6) * cfg.pulse * 0.35;
   rt.wobble = a.mid * cfg.wobble;
   rt.face.mouth = Math.min(1, a.mid * 1.2);
-  if (a.beat && cfg.ripples > 0) {
+  if (a.beat && cfg.ripples > 0 && app.mode === 'patterns') {
     const aspect = canvas.width / canvas.height;
     spawnRipple((Math.random() - 0.5) * aspect * 0.8, (Math.random() - 0.5) * 0.8, cfg.ripples * 1.5);
   }
@@ -711,8 +874,9 @@ function frame(now) {
   b.relax = Math.pow(1 - (0.004 + app.brush.spring * 0.07), dt * 60);
   rt.rippleScale = app.brush.size / 0.16;
 
-  if (show.active && show.director && renderer.mainProg) renderShow(dt);
-  else renderer.render(s, rt);
+  if (app.mode === 'films' && film.active && film.tl) renderFilmFrame(dt);
+  else if (app.mode === 'worlds') renderWorldFrame(dt);
+  else renderer.render(modulated(s, liveMusic(dt)), rt);
   if (afterRender.length) { const fns = afterRender; afterRender = []; fns.forEach(f => f()); }
   ui.tick(dt);
   adapt(dt);
@@ -759,6 +923,22 @@ async function makeThumbs() {
     ui.setThumb(kind, id, url);
     if (i % 4 === 3) await new Promise(r => setTimeout(r, 0));
   }
+  // the film-world looks, rendered with the film engine
+  const P = new Float32Array(SHADER_COUNT);
+  const still = { realTime: 0, ripples: new Float32Array(MAX_RIPPLES * 4) };
+  tr.resize(240, 150);
+  for (const id of Object.keys(LOOKS)) {
+    const w = new World();
+    w.goLook(id, 0.001);
+    const { P: params, post } = w.frame(1, { bar: 0.3, barLen: 1.7, loud: 0.5, bass: 0.2, mid: 0.2, high: 0.2, hit: 0, time: 2 });
+    P.set(params);
+    tr.clearSlot(0);
+    tr.renderFilm(P, still, 0);
+    tr.composite({ a: 0, post: { ...post, grain: 0.04 } });
+    app.thumbs.worlds[id] = tr.canvas.toDataURL('image/jpeg', 0.82);
+    ui.setThumb('worlds', id, app.thumbs.worlds[id]);
+    await new Promise(r => setTimeout(r, 0));
+  }
   tr.destroy();
 }
 
@@ -785,6 +965,7 @@ async function boot() {
     app.state.formula = 'sin(x*d)';
     refreshFormula();
   }
+  document.body.dataset.mode = app.mode;
   ui = createUI(app);
   resize();
   requestAnimationFrame(frame);

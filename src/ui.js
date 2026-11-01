@@ -1,7 +1,11 @@
-// All the DOM: top bar, side panel (Presets / Freeplay / Smart / Sound), tool dock, toasts.
-// Sliders write straight into app.state; anything that changes structure re-renders the open tab.
+// All the DOM: top bar, side panel, tool dock, toasts.
+// The panel has three modes — Patterns (flat op-art: Presets / Build / Math / Sound), Worlds (the 3D film
+// engine, live) and Films (music videos). Sliders write straight into the state; anything that changes
+// structure re-renders the open view.
 import { PATTERNS, WARPS, PALETTES, PATTERN_BY_ID, WARP_BY_ID, MAX_INKS, MIX_MODES } from './catalog.js';
-import { PPP_SHOW } from './shows/ppp.js';
+import { PPP_FILM } from './film/ppp.js';
+import { LOOKS } from './film/looks.js';
+import { PARAMS, rgbToHex } from './film/params.js';
 import { PRESETS, FORMULA_PRESETS, BLOCKS } from './presets.js';
 import { RANGES, DEFAULTS, warpDefaults } from './state.js';
 import { VARIABLES, FUNCTION_HELP, formatNumber } from './formula.js';
@@ -29,7 +33,8 @@ const fmt2 = v => (Math.abs(v) < 0.005 ? 0 : v).toFixed(2);
 const BLANK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
 export const TOOLS = [
-  { id: 'move', icon: 'move', name: 'Move', tip: 'Drag to slide the pattern around · scroll to zoom · double-click to recenter' },
+  { id: 'move', icon: 'move', name: 'Move', modes: ['patterns'], tip: 'Drag to slide the pattern around · scroll to zoom · double-click to recenter' },
+  { id: 'hand', icon: 'hand', name: 'Hand', modes: ['worlds'], tip: 'Your cursor is a hand pressing through the fabric from behind — hold to push and grab' },
   { id: 'ripple', icon: 'ripple', name: 'Ripple', tip: 'Click or drag to drop ripples, like a stone in a pond' },
   { id: 'smear', icon: 'smear', name: 'Smear', tip: 'Drag to push the pattern like wet paint — it slowly springs back' },
   { id: 'bulge', icon: 'bulge', name: 'Bulge', tip: 'Hold down to puff it up under your cursor' },
@@ -51,7 +56,7 @@ export function createUI(app) {
   let toastTimer = 0;
 
   // ---------------------------------------------------------------- building blocks
-  function slider(label, { min, max, step = 0.01, get, set, fmt = fmt2, reset, hint }) {
+  function slider(label, { min, max, step = 0.01, get, set, fmt = fmt2, reset, hint, mod }) {
     const input = h('input', { type: 'range', min, max, step, 'aria-label': typeof label === 'string' ? label : null });
     const out = h('output');
     const paint = () => {
@@ -61,16 +66,43 @@ export function createUI(app) {
     };
     input.value = get();
     input.addEventListener('input', () => { set(+input.value); paint(); });
-    const row = h('div', { class: 'slider', title: hint || (reset ? 'Double-click to reset' : null) },
-      h('div', { class: 'slider-top' }, h('span', { class: 'slider-label' }, label), out), input);
-    if (reset) row.addEventListener('dblclick', () => { input.value = reset(); set(+input.value); paint(); });
+    const top = h('div', { class: 'slider-top' }, h('span', { class: 'slider-label' }, label), out);
+    const row = h('div', { class: 'slider', title: hint || (reset ? 'Double-click to reset' : null) }, top, input);
+    if (reset) row.addEventListener('dblclick', e => { if (e.target.closest('.modrow, .mod-btn')) return; input.value = reset(); set(+input.value); paint(); });
+    if (mod) attachMod(row, top, mod);
     row.sync = () => { input.value = get(); paint(); };
     paint();
     return row;
   }
 
+  // ∿ — tie a slider to the music: a source (bass, beat, bar…) and a depth
+  const MOD_LABELS = { bass: 'Bass', mid: 'Mids', high: 'Highs', loud: 'Loudness', beat: 'Beat', bar: 'Bar sway', slow: 'Slow wave' };
+  function attachMod(row, top, key) {
+    const btn = h('button', { class: 'mod-btn', 'aria-label': 'Follow the music', 'data-tip': 'Follow the music', html: '∿' });
+    top.insertBefore(btn, top.lastChild);
+    let open = false, panel = null;
+    const paint = () => {
+      const m = app.mods[key];
+      row.classList.toggle('modded', !!m);
+      btn.textContent = m ? `∿ ${MOD_LABELS[m.src]}` : '∿';
+    };
+    const build = () => {
+      const m = app.mods[key];
+      panel = h('div', { class: 'modrow' },
+        h('div', { class: 'chips' },
+          h('button', { class: `chip${!m ? ' on' : ''}`, onclick: () => { app.setMod(key, null); rebuild(); } }, 'Off'),
+          Object.entries(MOD_LABELS).map(([src, name]) => h('button', { class: `chip${m?.src === src ? ' on' : ''}`, onclick: () => { app.setMod(key, src); rebuild(); } }, name))),
+        m ? slider('Depth (− flips it)', { min: -1, max: 1, get: () => app.mods[key]?.amt ?? 0.4, set: v => { if (app.mods[key]) app.mods[key].amt = v; } }) : null);
+      row.append(panel);
+    };
+    const rebuild = () => { panel?.remove(); panel = null; if (open) build(); paint(); };
+    btn.addEventListener('click', e => { e.stopPropagation(); open = !open; rebuild(); });
+    paint();
+  }
+
   function stateSlider(key, label, opts = {}) {
     return slider(label, {
+      mod: RANGES[key] && !['angle', 'rotate', 'mixAngle', 'speed'].includes(key) ? key : null,
       ...RANGES[key], ...opts,
       get: () => app.state[key],
       set: v => { app.state[key] = v; app.touch(); opts.after?.(v); },
@@ -173,7 +205,9 @@ export function createUI(app) {
 
   // ---------------------------------------------------------------- tool dock
   function renderDock() {
-    const tools = h('div', { class: 'tools' }, TOOLS.map((t, i) =>
+    const list = TOOLS.filter(t => !t.modes || t.modes.includes(app.mode));
+    if (!list.some(t => t.id === app.tool)) app.tool = list[0].id;
+    const tools = h('div', { class: 'tools' }, list.map((t, i) =>
       h('button', {
         class: `tool${app.tool === t.id ? ' on' : ''}`, 'data-tip': `${t.tip} (${i + 1})`, 'aria-label': t.name,
         onclick: () => app.setTool(t.id),
@@ -188,7 +222,7 @@ export function createUI(app) {
     const opts = h('div', { class: 'tool-opts' },
       mini('Size', 'size', 0.04, 0.5),
       mini('Strength', 'strength', 0.1, 1),
-      app.tool === 'ripple' || app.tool === 'move' ? null : mini('Spring back', 'spring', 0, 1),
+      ['ripple', 'move', 'hand'].includes(app.tool) ? null : mini('Spring back', 'spring', 0, 1),
       h('button', {
         class: `icon-btn${view.ring ? ' on' : ''}`, 'data-tip': view.ring ? 'Hide the brush ring' : 'Show the brush ring',
         'aria-label': 'Brush ring', html: icon(view.ring ? 'ring' : 'ringOff'), onclick: () => setView('ring', !view.ring),
@@ -198,22 +232,29 @@ export function createUI(app) {
   }
 
   // ---------------------------------------------------------------- tabs
+  const MODES = [
+    { id: 'patterns', name: 'Patterns', blurb: 'flat op-art' },
+    { id: 'worlds', name: 'Worlds', blurb: '3D & morphing' },
+    { id: 'films', name: 'Films', blurb: 'music videos' },
+  ];
   const TABS = [
     { id: 'presets', name: 'Presets' },
-    { id: 'play', name: 'Freeplay' },
-    { id: 'smart', name: 'Smart' },
+    { id: 'play', name: 'Build' },
+    { id: 'smart', name: 'Math' },
     { id: 'sound', name: 'Sound' },
-    { id: 'run', name: 'Run' },
   ];
 
   function renderTabs() {
-    tabsEl.replaceChildren(...TABS.map(t =>
-      h('button', { class: `tab${tab === t.id ? ' on' : ''}`, onclick: () => setTab(t.id) }, t.name)));
+    const modes = h('div', { class: 'modes' }, MODES.map(m =>
+      h('button', { class: `mode${app.mode === m.id ? ' on' : ''}`, onclick: () => app.setMode(m.id) }, h('b', {}, m.name), h('small', {}, m.blurb))));
+    const sub = app.mode === 'patterns'
+      ? h('div', { class: 'tabs-row' }, TABS.map(t => h('button', { class: `tab${tab === t.id ? ' on' : ''}`, onclick: () => setTab(t.id) }, t.name)))
+      : null;
+    tabsEl.replaceChildren(modes, sub || '');
   }
 
   function setTab(id) {
     tab = id;
-    if (id === 'run' && !app.show.def && app.show.status === 'idle') app.loadPPP();
     renderTabs();
     renderBody();
     body.scrollTop = 0;
@@ -222,8 +263,10 @@ export function createUI(app) {
   function renderBody() {
     meters = null;
     runEls = null;
-    const view = { presets: renderPresets, play: renderPlay, smart: renderSmart, sound: renderSound, run: renderRun }[tab]();
-    body.replaceChildren(...[view].flat().filter(Boolean));
+    const view = app.mode === 'worlds' ? renderWorlds()
+      : app.mode === 'films' ? renderFilms()
+        : { presets: renderPresets, play: renderPlay, smart: renderSmart, sound: renderSound }[tab]();
+    body.replaceChildren(...[view].flat(3).filter(Boolean));
   }
 
   // ---------------------------------------------------------------- Presets tab
@@ -400,7 +443,7 @@ export function createUI(app) {
     const sliders = ['amount', 'scale', 'speed', 'extra'].filter(k => meta.params[k]).map(k => {
       const p = meta.params[k];
       return slider(p.label, {
-        min: p.min, max: p.max,
+        min: p.min, max: p.max, mod: k === 'speed' ? null : `w${i}.${k}`,
         get: () => w[k], set: v => { w[k] = v; app.touch(); if (k === 'amount' || k === 'speed') refreshRecipe(); },
         reset: () => p.def,
       });
@@ -580,17 +623,18 @@ export function createUI(app) {
       h('button', { class: 'btn wide', html: `${icon('mic')}<span>Use the microphone instead</span>`, onclick: () => app.useMic() }),
       now,
       a.mode === 'file' ? h('button', { class: 'btn wide primary', html: `${icon('film')}<span>Make a music video from this song</span>`, onclick: () => app.autoFromCurrentSong() }) : null,
+      section('Tempo', 'drives the bar-synced ∿ sources', tempoControls()),
       section('Levels', null, h('div', { class: 'meters' }, meters.bass, meters.mid, meters.high, meters.beat)),
       section('What reacts', null,
         cfgSlider('pulse', 'Bass → zoom thump'),
         cfgSlider('ripples', 'Beats → ripples'),
         cfgSlider('intensity', 'Loudness → intensity', 'Louder music pushes the warps harder (not faster)'),
         cfgSlider('wobble', 'Mids → wobble')),
-      h('p', { class: 'muted small' }, 'Formulas can use ', h('code', {}, 'bass'), ', ', h('code', {}, 'mid'), ' and ', h('code', {}, 'high'), ' too — try the Heartbeat recipe in Smart.'),
+      h('p', { class: 'muted small' }, 'Any slider in Build can follow the music too: click its ', h('b', {}, '∿'), '. Formulas can use ', h('code', {}, 'bass'), ', ', h('code', {}, 'mid'), ' and ', h('code', {}, 'high'), '.'),
     ];
   }
 
-  // ---------------------------------------------------------------- Run tab (music videos)
+  // ---------------------------------------------------------------- shared: song controls + tempo
   const fmtT = t => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 
   function songPicker(label, sub, onFile) {
@@ -600,78 +644,134 @@ export function createUI(app) {
       h('span', { html: icon('music') }), h('b', {}, label), h('small', {}, sub)), file];
   }
 
-  function renderRun() {
-    const sh = app.show, def = sh.def;
-    const playing = app.showPlaying();
-    const status = sh.status === 'loading'
-      ? h('div', { class: 'status' }, h('span', { class: 'spinner' }), sh.message)
-      : sh.status === 'error' ? h('div', { class: 'status bad' }, sh.message) : null;
+  function tempoControls() {
+    const t = app.tempo;
+    return h('div', { class: 'tempo' },
+      slider(t.fromSong ? 'Tempo (from the song)' : 'Tempo', {
+        min: 40, max: 180, step: 0.5, fmt: v => `${v.toFixed(1)} bpm`,
+        get: () => t.bpm, set: v => { t.bpm = v; t.fromSong = false; },
+      }),
+      h('div', { class: 'tempo-row' },
+        h('button', { class: 'btn', onclick: e => { const bpm = app.tapTempo(); e.currentTarget.textContent = `Tap · ${bpm}`; } }, 'Tap the beat'),
+        h('span', { class: 'muted small' }, 'Beats per bar'),
+        [2, 3, 4].map(n => h('button', { class: `chip${t.beatsPerBar === n ? ' on' : ''}`, onclick: () => { t.beatsPerBar = n; renderBody(); } }, String(n)))));
+  }
 
-    const pppCard = h('div', { class: `film${sh.kind === 'ppp' ? ' on' : ''}` },
+  // ---------------------------------------------------------------- Worlds (the film engine, live)
+  const WORLD_GROUPS = [
+    ['lines', 'Lines', 'the equation: straight lines, rings, tunnel, spiral, crossings'],
+    ['bend', 'Bend', 'twist, bulge, waves and mirrors'],
+    ['shape', 'Shapes', 'folds, orbs, the lattice, the face, hands'],
+    ['camera', 'Camera', 'lens, zoom and tilt'],
+    ['motion', 'Motion', 'speeds, per bar'],
+    ['look', 'Look', 'colors, light and engraving'],
+    ['film', 'Film', 'glow, grain, letterbox'],
+  ];
+
+  function worldSlider(p) {
+    const w = app.world;
+    if (typeof p.def === 'string') {
+      const inp = h('input', { type: 'color', value: rgbToHex(w.to[p.name]), 'aria-label': p.label });
+      inp.addEventListener('input', () => w.set(p.name, inp.value));
+      return h('label', { class: 'color' }, inp, h('span', {}, p.label));
+    }
+    const step = p.max - p.min > 20 ? 0.1 : 0.01;
+    return slider(p.label, { min: p.min, max: p.max, step, get: () => w.to[p.name], set: v => { w.set(p.name, v); app.touch(); }, reset: () => p.def });
+  }
+
+  function renderWorlds() {
+    const w = app.world;
+    const cards = h('div', { class: 'cards' }, Object.entries(LOOKS).map(([id, L]) =>
+      h('button', { class: `card${w.lookId === id ? ' on' : ''}`, title: L.blurb, onclick: () => { app.worldLook(id); renderBody(); } },
+        thumbImg('worlds', id), h('span', {}, L.name))));
+    const a = app.audio;
+    const groups = WORLD_GROUPS.map(([g, name, blurb]) => {
+      const params = PARAMS.filter(p => p.group === g && p.label);
+      const colors = params.filter(p => typeof p.def === 'string');
+      return h('details', { class: 'sec details' },
+        h('summary', {}, name, h('small', {}, blurb)),
+        colors.length ? h('div', { class: 'color-row' }, colors.map(worldSlider)) : null,
+        params.filter(p => typeof p.def !== 'string').map(worldSlider));
+    });
+    return [
+      h('p', { class: 'lead' }, 'One world made of lines. Pick a look and ', h('b', {}, 'everything glides there'), ' — the equation re-forms instead of cutting. Use the ', h('b', {}, 'Hand'), ' tool to press through it.'),
+      cards,
+      section('Morph', 'how the glide feels',
+        slider('Glide length', { min: 0.25, max: 8, step: 0.25, fmt: v => `${v} bars`, get: () => w.morphBars, set: v => { w.morphBars = v; } }),
+        toggle('Auto-morph to a new look on the bar', () => w.auto, v => { w.auto = v; w.lastAutoBar = -1e9; }),
+        slider('Every', { min: 2, max: 32, step: 1, fmt: v => `${v} bars`, get: () => w.autoBars, set: v => { w.autoBars = v; } })),
+      section('Music', a.mode === 'off' ? 'nothing playing' : a.mode === 'mic' ? 'listening to the mic' : `♪ ${a.name}`,
+        h('div', { class: 'run-actions' },
+          ...songPicker('Play a song', 'it finds the beat, then everything moves with it', f => app.loadSong(f)).map(el => { if (el.classList) el.classList.add('slim'); return el; }),
+          h('button', { class: 'btn', html: `${icon('mic')}<span>Mic</span>`, onclick: () => app.useMic() }),
+          a.mode !== 'off' ? h('button', { class: 'btn', html: `${icon('stop')}<span>Stop</span>`, onclick: () => app.stopAudio() }) : null),
+        tempoControls(),
+        PARAMS.filter(p => p.group === 'music').map(worldSlider)),
+      groups,
+    ];
+  }
+
+  // ---------------------------------------------------------------- Films (music videos)
+  function renderFilms() {
+    const f = app.film, tl = f.tl, def = f.def;
+    const playing = app.filmPlaying();
+    const status = f.status === 'loading'
+      ? h('div', { class: 'status' }, h('span', { class: 'spinner' }), f.message)
+      : f.status === 'error' ? h('div', { class: 'status bad' }, f.message) : null;
+
+    const pppCard = h('div', { class: `film${f.kind === 'ppp' ? ' on' : ''}` },
       h('div', { class: 'film-art' }),
       h('div', { class: 'film-text' },
-        h('b', {}, PPP_SHOW.title),
-        h('small', {}, `${PPP_SHOW.artist} · 6:09 · 6/8 at ${PPP_SHOW.bpm} bpm`),
-        h('p', {}, PPP_SHOW.logline)),
-      sh.kind === 'ppp' ? null : h('button', { class: 'btn primary', onclick: () => app.loadPPP() }, 'Load'));
+        h('b', {}, PPP_FILM.title),
+        h('small', {}, `${PPP_FILM.artist} · 6:09 · 6/8 at ${PPP_FILM.bpm} bpm`),
+        h('p', {}, PPP_FILM.logline)),
+      f.kind === 'ppp' ? null : h('button', { class: 'btn primary', onclick: () => app.loadPPP() }, 'Load'));
 
-    const need = sh.status === 'need-song'
-      ? [h('p', { class: 'muted small' }, sh.message), ...songPicker('Choose the PPP mp3', 'it stays on your computer', f => app.loadShowFile(f))]
+    const need = f.status === 'need-song'
+      ? [h('p', { class: 'muted small' }, f.message), ...songPicker('Choose the PPP mp3', 'it stays on your computer', file => app.loadFilmFile(file))]
       : [];
 
-    let player = null, timeline = null;
-    if (def) {
-      const dur = show_duration(def);
-      const time = h('span', { class: 'run-time' }, `${fmtT(sh.clock)} / ${fmtT(dur)}`);
+    let player = null, chapters = null;
+    if (tl) {
+      const dur = tl.duration;
+      const time = h('span', { class: 'run-time' }, `${fmtT(f.clock)} / ${fmtT(dur)}`);
       const scrub = h('input', { type: 'range', min: 0, max: dur, step: 0.01, 'aria-label': 'Song position' });
-      scrub.value = sh.clock;
-      scrub.style.setProperty('--p', `${(sh.clock / dur) * 100}%`);
+      scrub.value = f.clock;
+      scrub.style.setProperty('--p', `${(f.clock / dur) * 100}%`);
       let dragging = false;
       scrub.addEventListener('pointerdown', () => { dragging = true; });
       scrub.addEventListener('pointerup', () => { dragging = false; });
-      scrub.addEventListener('input', () => { app.showSeek(+scrub.value); scrub.style.setProperty('--p', `${(scrub.value / dur) * 100}%`); });
-      const ticks = h('div', { class: 'ticks' }, def.scenes.map(sc => h('i', { style: `left:${(sc.at / dur) * 100}%` })));
-      const sceneEls = def.scenes.map((sc, i) => h('button', {
-        class: `scene${i === sh.current ? ' on' : ''}`, onclick: () => app.showSeek(sc.at + 0.02),
-      },
-      h('span', { class: 'scene-time' }, fmtT(sc.at), sc.bar != null ? h('i', {}, `bar ${sc.bar}`) : null),
-      h('span', { class: 'scene-body' }, h('b', {}, sc.name), h('span', {}, sc.story), h('small', {}, sc.how))));
-      runEls = { time, scrub, dur, sceneEls, isDragging: () => dragging };
+      scrub.addEventListener('input', () => { app.filmSeek(+scrub.value); scrub.style.setProperty('--p', `${(scrub.value / dur) * 100}%`); });
+      const ticks = h('div', { class: 'ticks' }, tl.chapters.map(c => h('i', { style: `left:${(c.at / dur) * 100}%` })));
+      const chapterEls = tl.chapters.map((c, i) => h('button', { class: `scene${i === f.chapter ? ' on' : ''}`, onclick: () => app.filmSeek(c.at + 0.02) },
+        h('span', { class: 'scene-time' }, fmtT(Math.max(0, c.at)), h('i', {}, `bar ${Math.round(c.bar)}`)),
+        h('span', { class: 'scene-body' }, h('b', {}, c.name), h('span', {}, c.story), h('small', {}, c.how))));
+      runEls = { time, scrub, dur, sceneEls: chapterEls, isDragging: () => dragging };
 
       player = h('div', { class: 'player' },
         h('div', { class: 'transport' },
-          h('button', { class: 'play', 'aria-label': playing ? 'Pause' : 'Play', html: icon(playing ? 'pause' : 'play'), onclick: () => (playing ? app.showPause() : app.showPlay()) }),
-          h('div', { class: 'transport-mid' },
-            h('b', {}, def.title),
-            time),
-          iconBtn('stop', 'Stop and go back to the editor', () => app.showStop())),
+          h('button', { class: 'play', 'aria-label': playing ? 'Pause' : 'Play', html: icon(playing ? 'pause' : 'play'), onclick: () => (playing ? app.filmPause() : app.filmPlay()) }),
+          h('div', { class: 'transport-mid' }, h('b', {}, def.title), time),
+          iconBtn('stop', 'Stop', () => app.filmStop())),
         h('div', { class: 'scrub' }, ticks, scrub),
         h('div', { class: 'run-actions' },
-          h('button', { class: 'btn', html: `${icon('record')}<span>Record the whole run</span>`, onclick: () => app.recordRun() }),
-          h('button', { class: 'btn', html: `${icon('save')}<span>Keep this look</span>`, 'data-tip': 'Stop and edit whatever is on screen', onclick: () => app.showStop({ keepLook: true }) }),
-          sh.kind === 'auto' ? h('button', { class: 'btn', html: `${icon('dice')}<span>New cut</span>`, onclick: () => app.reshuffle() }) : null),
-        toggle('Cinema mode (hide controls while it plays)', () => sh.cinema, v => { sh.cinema = v; }),
-        h('p', { class: 'muted small' }, sh.kind === 'auto' ? def.logline : 'Your mouse tools still work while it plays — try Ripple.'));
-      timeline = section(sh.kind === 'ppp' ? 'How it was made' : 'The cut', 'scene by scene · tap to jump', h('div', { class: 'scenes' }, sceneEls));
+          h('button', { class: 'btn', html: `${icon('record')}<span>Record the whole film</span>`, onclick: () => app.recordRun() }),
+          h('button', { class: 'btn', html: `${icon('save')}<span>Play with this look</span>`, 'data-tip': 'Take whatever is on screen into Worlds', onclick: () => app.filmStop({ keepLook: true }) }),
+          f.kind === 'auto' ? h('button', { class: 'btn', html: `${icon('dice')}<span>Write another</span>`, onclick: () => app.reshuffle() }) : null),
+        toggle('Cinema mode (hide controls while it plays)', () => f.cinema, v => { f.cinema = v; }),
+        h('p', { class: 'muted small' }, f.kind === 'auto' ? def.logline : 'Your mouse tools still work while it plays.'));
+      chapters = section(f.kind === 'ppp' ? 'The story, and how it was made' : 'The film', 'tap a chapter to jump', h('div', { class: 'scenes' }, chapterEls));
     }
 
     return [
-      h('p', { class: 'lead' }, 'Music videos made of pure geometry. Everything is cut on the song’s bar lines; loudness changes how ', h('b', {}, 'intense'), ' things get, never how fast.'),
-      pppCard, ...need, status, player, timeline,
-      section('Smart music mode', 'auto-directs any song',
-        h('p', { class: 'muted small' }, 'Give it any song: it finds the tempo, bars and sections, then cuts a new film from the same building blocks. Every cut is different — hit “New cut” for another.'),
-        ...songPicker('Auto-direct a song', 'drop it on the page or click to choose', f => app.loadShowFile(f, { forceAuto: true })),
-        sh.analysis && sh.kind === 'ppp' ? h('button', { class: 'btn wide', html: `${icon('dice')}<span>Auto-direct PPP instead (random cut)</span>`, onclick: () => app.reshuffle() }) : null),
-      h('details', { class: 'sec details' },
-        h('summary', {}, 'How the director works'),
-        h('ul', { class: 'explain' },
-          h('li', {}, 'The song is decoded and analysed once: loudness, bass/mid/treble, note onsets, tempo (autocorrelation of the onsets) and section changes (where the sound shifts most).'),
-          h('li', {}, 'Every scene is a look plus a little program that runs each frame. Sway, flight speed and spin are tied to the bar and beat counters, so motion stays on tempo.'),
-          h('li', {}, 'Loudness raises the intensity of the warps (deeper folds, bigger bulges); strong onsets drop ripples, flashes or glitches.'),
-          h('li', {}, 'Transitions render both scenes at once and mix them: dissolve, iris, op-art ring wipe, blinds, ink bleed, flash or a hard cut on the downbeat.'))),
+      h('p', { class: 'lead' }, 'Music videos made of one world of lines. Nothing cuts — every chapter is the equation re-forming, landing on the song’s bar lines; loudness changes how ', h('b', {}, 'intense'), ' it gets, never how fast.'),
+      pppCard, ...need, status, player, chapters,
+      section('Smart music mode', 'a new film for any song',
+        h('p', { class: 'muted small' }, 'It finds the tempo, the bars and the sections, then writes a film with the same rules as PPP — different every time.'),
+        ...songPicker('Make a film for a song', 'drop it on the page or click to choose', file => app.loadFilmFile(file, { forceAuto: true })),
+        f.analysis && f.kind === 'ppp' ? h('button', { class: 'btn wide', html: `${icon('dice')}<span>Let the machine direct PPP instead</span>`, onclick: () => app.reshuffle() }) : null),
     ];
   }
-  const show_duration = def => def.duration || app.show.director?.duration || 1;
 
   function runTick(t) {
     if (!runEls) return;
@@ -682,8 +782,8 @@ export function createUI(app) {
     }
   }
   function runScene(i) {
-    const sc = app.show.def?.scenes[i];
-    if (sc) { nameEl.textContent = `▶ ${sc.name}`; nameEl.classList.remove('dirty'); }
+    const c = app.film.tl?.chapters[i];
+    if (c) { nameEl.textContent = `▶ ${c.name}`; nameEl.classList.remove('dirty'); }
     if (!runEls) return;
     runEls.sceneEls.forEach((el, k) => el.classList.toggle('on', k === i));
     runEls.sceneEls[i]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -739,8 +839,8 @@ export function createUI(app) {
   showHint();
 
   return {
-    refresh() { renderTop(); renderBody(); },
-    refreshRun() { if (tab === 'run') renderBody(); },
+    refresh() { renderTop(); renderTabs(); renderBody(); },
+    refreshRun() { if (app.mode === 'films') renderBody(); },
     runTick, runScene,
     refreshTop: renderTop,
     renderName,

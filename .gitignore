@@ -1,0 +1,12 @@
+.claude/
+.DS_Store
+.vercel
+
+# songs and cover art stay local (copyrighted) — drop them into the app instead
+*.mp3
+*.wav
+*.m4a
+*.flac
+*.ogg
+*.aac
+media/

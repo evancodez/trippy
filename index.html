@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Trippy — op-art machine</title>
+  <meta name="description" content="Play with warping, rippling black-and-white op-art patterns in real time. Presets, mouse tools, formulas and music.">
+  <meta name="theme-color" content="#000000">
+  <meta property="og:title" content="Trippy — op-art machine">
+  <meta property="og:description" content="Warp, ripple and twist black-and-white op-art patterns in real time.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <canvas id="stage" aria-label="Pattern canvas — drag on it to interact"></canvas>
+  <div id="brush" class="brush"></div>
+
+  <header id="topbar" class="chrome">
+    <div class="brand glass">
+      <span class="logo" aria-hidden="true"></span>
+      <b>trippy</b>
+      <span id="presetName" class="preset-name"></span>
+    </div>
+    <div id="actions" class="actions glass"></div>
+  </header>
+
+  <aside id="panel" class="glass chrome">
+    <nav id="tabs" class="tabs"></nav>
+    <div id="panelBody" class="panel-body"></div>
+  </aside>
+
+  <nav id="dock" class="dock glass chrome"></nav>
+
+  <div id="hint" class="hint glass chrome" hidden></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="drop" class="drop"><div>Drop a song to make it dance</div></div>
+  <button id="unhide" class="unhide" aria-label="Show the menu"></button>
+  <div id="fatal" class="fatal" hidden></div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

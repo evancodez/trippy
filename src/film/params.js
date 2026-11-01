@@ -137,6 +137,10 @@ export const PARAMS = [
   P('mediaCalm', 0, 0, 1, 'media', 'Keep it still inside'),
   P('mediaLift', 0, 0, 1),
   P('aura', 0, 0, 3, 'media', 'Aura: lines ripple off it'),
+  // the sound itself (set from the Music section, not by looks): the waveform, the spectrum, a landscape of it
+  P('swave', 0, 0, 2),
+  P('sspec', 0, 0, 2),
+  P('sland', 0, 0, 2),
   ...HANDS,
   // the film-look pass
   P('glow', 0, 0, 1.5, 'film', 'Halation glow', 'post'),

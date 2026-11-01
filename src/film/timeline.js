@@ -156,7 +156,7 @@ export function applyMusic(v, m) {
 
 // How steep can the membrane get? (a safe step size for the ray marcher; gentle sheets march faster)
 export function stepFactor(v) {
-  const slope = v.folds * 0.09 * v.foldF * v.height + v.face * 0.9 * v.height + v.ripple * 0.9 + (v.media || 0) * 1.3 * v.height + 0.15;
+  const slope = v.folds * 0.09 * v.foldF * v.height + v.face * 0.9 * v.height + v.ripple * 0.9 + (v.media || 0) * 1.3 * v.height + (v.sland || 0) * 1.6 * v.height + 0.15;
   return Math.min(0.92, Math.max(0.4, 0.92 / Math.sqrt(1 + slope * slope)));
 }
 

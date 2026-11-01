@@ -23,6 +23,16 @@ A browser playground for trippy black-and-white op art, from flat patterns to a 
   - **PPP — a film in lines**: a 17-chapter film choreographed to Beach House's *PPP*, one continuous morph on its 6/8 bar lines.
   - **Smart music mode** writes a new film for any song, different every time.
 
+**Music, everywhere:**
+- **Your songs.** Drop several at once. They're kept in this browser (IndexedDB, never uploaded) so you can flip between them in any mode, even after a reload.
+  - The same song keeps playing when you switch between Patterns and Worlds; a pill in the top bar plays, pauses, skips and stops it.
+  - In Films, pick one to have a film written for it.
+- **How hard it hits:** Subtle, **Lively** (the default) or Wild, one choice for Patterns and Worlds, then fine-tune.
+- **The sound itself** bends the picture, live:
+  - *Sound wave:* the waveform, held steady like an oscilloscope, runs through the lines.
+  - *Spectrum spikes:* rings spike with the frequencies, bass to treble round the circle. Straight lines bump with them, and the last few seconds ride further out.
+  - *Sound landscape* (Worlds): the sheet rises into hills of the spectrum, rolling away from you.
+
 **Everywhere:**
 - **Four big knobs** (Calm↔Wild, Flat↔Deep, Mono↔Color, Still↔Moving) each move dozens of settings at once. The accent color is yours to pick.
 - **Explore** (`E`) breeds what you're looking at: 8 variations around it. Pick one and it has 8 children; keep going. You can keep colors, camera, shapes or lines fixed, and set how wild the mutations are.
@@ -95,6 +105,9 @@ Import the GitHub repo in Vercel and keep the defaults: Framework Preset **Other
   - A film is a list of keyframes: "from bar N, glide these numbers to here over M bars" (`timeline.js`).
   - Speeds are integrated, and spins and orbits settle back to rest, so nothing jumps.
   - Music is applied every frame: the bar drives the sway, loudness the intensity, bass the thump, mids the face's mouth, and onsets a flash.
+- **The live sound** (`src/audio.js`) goes to both shaders as one small texture every frame.
+  - The first row is the waveform, triggered on a rising zero crossing so it stands still.
+  - The rest are the last ~2.7 s of a log-spaced spectrum (30 Hz–16 kHz), softened into broad bands.
 - **Song analysis** (`src/analysis.js`) runs once per song and measures:
   - loudness, plus bass, mid and treble envelopes
   - note onsets
@@ -118,5 +131,6 @@ Import the GitHub repo in Vercel and keep the defaults: Framework Preset **Other
 | `src/shaders.js`, `src/renderer.js` | Patterns-mode GLSL; WebGL2 setup, film pass, compositing + film look |
 | `src/catalog.js`, `src/presets.js`, `src/state.js` | Patterns: patterns, warps, palettes (incl. the Depression Cherry reds), presets, state |
 | `src/formula.js` | Friendly-math → GLSL compiler for the Math tab |
-| `src/audio.js`, `src/analysis.js` | Live audio analysis; whole-song analysis |
+| `src/audio.js`, `src/analysis.js` | Live audio analysis (levels, beat, waveform, spectrum history); whole-song analysis |
+| `src/songs.js` | Your song library, kept in the browser |
 | `src/ui.js`, `src/main.js` | Interface; app state, frame loop, input, film playback, recording |

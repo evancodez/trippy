@@ -1,6 +1,7 @@
 import { VERT, mainFrag, DISP_FRAG, COMP_FRAG, BLUR_FRAG, MAX_WARPS, MAX_NUMS } from './shaders.js';
 import { PATTERN_BY_ID, WARP_BY_ID } from './catalog.js';
 import { FILM_FRAG } from './film/shader.js';
+import { SOUND_W, SOUND_ROWS } from './audio.js';
 
 export function hexToRgb(hex) {
   const n = parseInt(String(hex).replace('#', ''), 16) || 0;
@@ -49,6 +50,28 @@ export class Renderer {
     this.mediaAspect = 1;
     this.fingers = new Float32Array(15);
     this.handMirror = new Float32Array([1, 1, 1]);
+    this.setSound(new Uint8Array(SOUND_W).fill(128), new Uint8Array(SOUND_W * SOUND_ROWS));   // silence
+  }
+
+  // the live sound for the shaders: row 0 the waveform (0.5 = silence), rows 1–64 the spectrum's past, newest first
+  setSound(wave, hist) {
+    const gl = this.gl, W = wave.length, H = hist.length / W + 1;
+    if (!this.soundTex) {
+      this.soundTex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, this.soundTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, W, H, 0, gl.RED, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      this.soundBuf = new Uint8Array(W * H);
+    }
+    this.soundBuf.set(wave, 0);
+    this.soundBuf.set(hist, W);
+    gl.bindTexture(gl.TEXTURE_2D, this.soundTex);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, W, H, gl.RED, gl.UNSIGNED_BYTE, this.soundBuf);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
   }
 
   // upload a canvas / image / video frame (rgb = picture, a = mask). The upload itself stays sharp, at
@@ -234,6 +257,12 @@ export class Renderer {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, prev.tex);
     gl.uniform1i(u('uPrev'), 1);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, this.soundTex);
+    gl.uniform1i(u('uSound'), 2);
+    gl.uniform1f(u('uSWave'), rt.sWave || 0);
+    gl.uniform1f(u('uSSpec'), rt.sSpec || 0);
+    gl.activeTexture(gl.TEXTURE0);
 
     gl.uniform2f(u('uRes'), this.w, this.h);
     gl.uniform1f(u('uTime'), rt.time);
@@ -321,6 +350,9 @@ export class Renderer {
     gl.activeTexture(gl.TEXTURE3);
     gl.bindTexture(gl.TEXTURE_2D, this.mediaRaw || this.zeroTex);
     gl.uniform1i(u('uMediaSharp'), 3);
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D, this.soundTex);
+    gl.uniform1i(u('uSound'), 4);
     gl.activeTexture(gl.TEXTURE0);
     gl.uniform1f(u('uMediaAspect'), this.mediaAspect);
     gl.uniform1fv(u('uFinger'), rt.fingers || this.fingers);

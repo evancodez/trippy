@@ -654,3 +654,22 @@ body.ui-hidden .unhide { display: block; }
 .mod-x { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; margin-left: auto; margin-right: 6px; border-radius: 6px; color: var(--muted); }
 .mod-x:hover { color: var(--text); background: var(--hover); }
 .mod-x .icon { width: 12px; height: 12px; }
+
+/* songs: the library list and the top bar's now-playing pill */
+.top-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.now-pill { display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 4px 0 14px; border-radius: 999px; }
+.now-pill[hidden] { display: none; }
+.now-pill-name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--muted); margin-right: 4px; }
+.song-list { display: grid; gap: 2px; margin: 8px 0 4px; max-height: 220px; overflow: auto; }
+.song { display: flex; align-items: center; border-radius: 8px; }
+.song:hover { background: var(--hover); }
+.song.on { background: rgba(255, 255, 255, 0.08); }
+.song-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 6px 8px; text-align: left; font-size: 12.5px; color: var(--muted); }
+.song-name span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.song.on .song-name { color: var(--text); }
+.song-name .icon { width: 12px; height: 12px; opacity: 0.7; flex: none; }
+.song-x { width: 24px; height: 24px; display: none; align-items: center; justify-content: center; border-radius: 6px; color: var(--faint); }
+.song:hover .song-x { display: inline-flex; }
+.song-x:hover { color: var(--text); background: var(--hover); }
+.song-x .icon { width: 12px; height: 12px; }
+.songs .dropzone.slim b { white-space: nowrap; }

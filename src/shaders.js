@@ -101,6 +101,9 @@ uniform vec4 uAudio;                     // bass, mid, high, level
 uniform vec2 uFaceCtl;                   // mouth open, eyes open
 uniform float uPulse;
 uniform float uWobble;
+uniform sampler2D uSound;                // row 0: the live waveform; rows 1–64: the spectrum's past, newest first
+uniform float uSWave;                    // the waveform bends the pattern
+uniform float uSSpec;                    // the spectrum spikes it outward, round the circle
 uniform float uNum[${MAX_NUMS}];         // every number typed into a formula
 
 ${COMMON}
@@ -437,6 +440,9 @@ float patternValue(int type, vec2 p, float dens, float k, float ang, float ph, o
   return fx_value(p);
 }
 
+float soundWave(float x) { return (texture(uSound, vec2(x, 0.5 / 65.0)).r - 0.5) * 2.0; }
+float soundSpec(float f, float age) { return texture(uSound, vec2(f, (1.5 + clamp(age, 0.0, 1.0) * 63.0) / 65.0)).r; }
+
 // Where does this screen pixel land in pattern-space, and what's the pattern value there?
 float field(vec2 px, out float band, out vec2 pw) {
   gShade = 1.0; gThick = 0.0; gMask = 0.0; gFlip = 0.0;
@@ -458,6 +464,8 @@ float field(vec2 px, out float band, out vec2 pw) {
   p /= uZoom * (1.0 + uPulse);
   vec2 flatP = p;
   if (uWobble > 0.0) p.x += uWobble * 0.06 * sin(p.y * 9.0 + uTime * 4.0);
+  if (uSWave > 0.0) p.y += uSWave * 0.1 * soundWave(fract(p.x * 0.3 + 0.5));            // an oscilloscope across the screen
+  if (uSSpec > 0.0) p *= 1.0 - uSSpec * 0.3 * soundSpec(abs(atan(p.y, p.x)) / PI, length(p) * 0.6);   // spikes, the past further out
   for (int i = 0; i < ${MAX_WARPS}; i++) {
     if (i >= uWarpCount) break;
     p = warp(uWarpType[i], uWarpParam[i], p);

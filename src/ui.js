@@ -607,15 +607,6 @@ export function createUI(app) {
   function renderSound() {
     const a = app.audio;
     const cfg = app.audioCfg;
-    const file = h('input', { type: 'file', accept: 'audio/*', hidden: true });
-    file.addEventListener('change', () => { if (file.files[0]) app.loadSong(file.files[0]); });
-    const drop = h('button', { class: 'dropzone', onclick: () => file.click() },
-      h('span', { html: icon('music') }), h('b', {}, 'Drop a song here'), h('small', {}, 'or click to choose an audio file'));
-
-    const now = a.mode === 'off' ? null : h('div', { class: 'now' },
-      h('span', { class: 'now-name' }, a.mode === 'mic' ? '🎙 Listening to the microphone' : `♪ ${a.name}`),
-      a.mode === 'file' ? iconBtn(a.playing ? 'pause' : 'play', 'Play / pause', () => { a.togglePlay(); setTimeout(renderBody, 50); }) : null,
-      iconBtn('stop', 'Stop', () => app.stopAudio()));
 
     const bar = label => {
       const fill = h('i');
@@ -625,21 +616,22 @@ export function createUI(app) {
     };
     meters = { bass: bar('Bass'), mid: bar('Mids'), high: bar('Highs'), beat: h('div', { class: 'beat' }, 'BEAT') };
 
-    const cfgSlider = (key, label, hint) => slider(label, { min: 0, max: 1, get: () => cfg[key], set: v => { cfg[key] = v; }, hint });
+    const cfgSlider = (key, label, hint, max = 1) => slider(label, { min: 0, max, get: () => cfg[key], set: v => { cfg[key] = v; }, hint });
 
     return [
-      h('p', { class: 'lead' }, 'Make the pattern dance. Songs stay on your computer — nothing gets uploaded.'),
-      drop, file,
-      h('button', { class: 'btn wide', html: `${icon('mic')}<span>Use the microphone instead</span>`, onclick: () => app.useMic() }),
-      now,
+      h('p', { class: 'lead' }, 'Make the pattern dance. Songs stay on your computer — nothing gets uploaded. The same song keeps playing in Worlds.'),
+      songsBlock(),
       a.mode === 'file' ? h('button', { class: 'btn wide primary', html: `${icon('film')}<span>Make a music video from this song</span>`, onclick: () => app.autoFromCurrentSong() }) : null,
-      section('Tempo', 'drives the bar-synced ∿ sources', tempoControls()),
-      section('Levels', null, h('div', { class: 'meters' }, meters.bass, meters.mid, meters.high, meters.beat)),
+      section('How hard it hits', 'Patterns and Worlds', reactivityBlock()),
       section('What reacts', null,
+        cfgSlider('wave', 'Sound wave', 'Like an oscilloscope: the live waveform bends the pattern across the screen', 2),
+        cfgSlider('spectrum', 'Spectrum spikes', 'Bass to treble around the circle; the last few seconds ripple outward', 2),
         cfgSlider('pulse', 'Bass → zoom thump'),
         cfgSlider('ripples', 'Beats → ripples'),
         cfgSlider('intensity', 'Loudness → intensity', 'Louder music pushes the warps harder (not faster)'),
         cfgSlider('wobble', 'Mids → wobble')),
+      section('Levels', null, h('div', { class: 'meters' }, meters.bass, meters.mid, meters.high, meters.beat)),
+      section('Tempo', 'drives the bar-synced ∿ sources', tempoControls()),
       h('p', { class: 'muted small' }, 'Any slider in Build can follow the music too: click its ', h('b', {}, '∿'), '. Formulas can use ', h('code', {}, 'bass'), ', ', h('code', {}, 'mid'), ' and ', h('code', {}, 'high'), '.'),
     ];
   }
@@ -652,6 +644,51 @@ export function createUI(app) {
     file.addEventListener('change', () => { if (file.files[0]) onFile(file.files[0]); });
     return [h('button', { class: 'dropzone', onclick: () => file.click() },
       h('span', { html: icon('music') }), h('b', {}, label), h('small', {}, sub)), file];
+  }
+
+  // your songs: add (several at once), play any of them, next, the mic. Shared by every mode.
+  function songsBlock({ pickLabel = null, mic = true } = {}) {
+    const a = app.audio, cur = app.currentSongId();
+    const file = h('input', { type: 'file', accept: 'audio/*', multiple: true, hidden: true });
+    file.addEventListener('change', () => { if (file.files.length) app.addSongs([...file.files]); });
+    const list = app.songs.list;
+    return h('div', { class: 'songs' },
+      h('div', { class: 'run-actions' },
+        h('button', { class: 'dropzone slim', onclick: () => file.click() }, h('span', { html: icon('music') }), h('b', {}, 'Add songs')),
+        mic ? h('button', { class: 'btn', html: `${icon('mic')}<span>Mic</span>`, onclick: () => app.useMic() }) : null,
+        mic && a.mode !== 'off' ? h('button', { class: 'btn', html: `${icon('stop')}<span>Stop</span>`, onclick: () => app.stopAudio() }) : null),
+      file,
+      list.length
+        ? h('div', { class: 'song-list' }, list.map(sg => h('div', { class: `song${sg.id === cur ? ' on' : ''}` },
+          h('button', {
+            class: 'song-name', title: pickLabel || 'Play',
+            onclick: () => (!pickLabel && sg.id === cur ? (a.togglePlay(), setTimeout(renderBody, 60)) : app.playSongId(sg.id)),
+          }, h('span', { html: icon(sg.id === cur && a.playing ? 'pause' : 'play') }), h('span', {}, sg.name)),
+          h('button', { class: 'song-x', 'aria-label': `Forget ${sg.name}`, html: icon('x'), onclick: () => app.songs.remove(sg.id) }))))
+        : h('p', { class: 'muted small' }, 'Drop songs anywhere on the page (several at once is fine). They stay in this browser so you can flip between them — nothing is uploaded.'));
+  }
+
+  // how hard the music hits: one choice for Patterns and Worlds
+  function reactivityBlock() {
+    return [
+      h('div', { class: 'chips' }, Object.entries(app.LEVELS).map(([id, L]) =>
+        h('button', { class: `chip${app.reactivity === id ? ' on' : ''}`, onclick: () => { app.setReactivity(id); renderBody(); } }, L.name))),
+      h('p', { class: 'muted small' }, app.LEVELS[app.reactivity]?.blurb),
+    ];
+  }
+
+  // the top bar's now-playing pill
+  const nowEl = document.getElementById('nowPlaying');
+  function renderNow() {
+    const a = app.audio;
+    nowEl.hidden = a.mode === 'off';
+    if (nowEl.hidden) return;
+    nowEl.replaceChildren(...[
+      h('span', { class: 'now-pill-name', title: a.name }, a.mode === 'mic' ? '🎙 Mic' : `♪ ${a.name}`),
+      a.mode === 'file' ? iconBtn(a.playing ? 'pause' : 'play', 'Play / pause', () => { a.togglePlay(); setTimeout(renderNow, 60); }) : null,
+      a.mode === 'file' && app.songs.list.length > 1 ? iconBtn('next', 'Next song', () => app.nextSong()) : null,
+      iconBtn('stop', 'Stop', () => app.stopAudio()),
+    ].filter(Boolean));
   }
 
   function tempoControls() {
@@ -872,7 +909,7 @@ export function createUI(app) {
   function songControls() {
     const isOn = ([key, src]) => app.worldMods[key]?.src === src;
     return [
-      h('div', { class: 'sub-label' }, 'What the music does'),
+      h('div', { class: 'sub-label' }, 'Ties'),
       slider('How much the music moves it', { min: 0, max: 2, step: 0.05, fmt: v => `${Math.round(v * 100)}%`, get: () => app.musicCfg.amount, set: v => { app.musicCfg.amount = v; }, hint: 'Scales the sway, the thump, loudness → intensity, the flashes and every ∿ tie. 0% = the music changes nothing.' }),
       h('div', { class: 'chips' }, RECIPES.map(r => h('button', { class: `chip${isOn(r) ? ' on' : ''}`, onclick: () => {
         const [key, src, amt] = r;
@@ -893,14 +930,20 @@ export function createUI(app) {
     const state = A.when === 'off' ? 'Off — the look only changes when you pick one.'
       : live ? `Morphing now — ${A.on === 'sections' && app.songAnalysis ? 'on each new section of the song' : `every ${A.every} bars`}.`
         : A.when === 'song' ? 'Waiting for a song to play.' : 'Waiting for sound — play a song or turn on the mic.';
-    return section('Music & auto-morph', a.mode === 'off' ? 'nothing playing' : a.mode === 'mic' ? '● listening to the mic' : `♪ ${a.name}`,
-      h('div', { class: 'run-actions' },
-        ...songPicker('Play a song', 'it finds the beat, then everything moves with it', f => app.loadSong(f)).map(el => { if (el.classList) el.classList.add('slim'); return el; }),
-        h('button', { class: 'btn', html: `${icon('mic')}<span>Mic</span>`, onclick: () => app.useMic() }),
-        a.mode !== 'off' ? h('button', { class: 'btn', html: `${icon('stop')}<span>Stop</span>`, onclick: () => app.stopAudio() }) : null),
-      tempoControls(),
+    const C = app.musicCfg;
+    const shape = (key, label, hint) => slider(label, { min: 0, max: 2, get: () => C[key], set: v => { C[key] = v; }, hint });
+    return [section('Music', a.mode === 'off' ? 'nothing playing' : a.mode === 'mic' ? '● listening to the mic' : `♪ ${a.name}`,
+      songsBlock(),
+      h('div', { class: 'sub-label' }, 'How hard it hits'),
+      reactivityBlock(),
+      h('div', { class: 'sub-label' }, 'The sound itself'),
+      shape('wave', 'Sound wave', 'Like an oscilloscope: straight lines become traces of the live waveform, rings ripple round'),
+      shape('spectrum', 'Spectrum spikes', 'Bass in the middle, treble out to the sides; the last few seconds ride the lines further out'),
+      shape('land', 'Sound landscape', 'The sheet rises into hills of the spectrum, rolling away from you — best with the camera tilted back (try Line Landscape)'),
       songControls(),
-      h('div', { class: 'sub-label' }, 'Auto-morph — glide to new looks by itself'),
+      h('div', { class: 'sub-label' }, 'Tempo'),
+      tempoControls()),
+    section('Auto-morph', 'glide to new looks by itself',
       h('div', { class: 'chips' }, AUTO_WHEN.map(([id, label]) => chip(A.when === id, label, () => { A.when = id; renderBody(); }))),
       A.when !== 'off' ? [
         h('div', { class: 'chips' },
@@ -917,7 +960,7 @@ export function createUI(app) {
           }))),
       ] : null,
       h('p', { class: 'muted small' }, state),
-      slider('Glide length', { min: 0.25, max: 8, step: 0.25, fmt: v => `${v} bars`, get: () => w.morphBars, set: v => { w.morphBars = v; } }));
+      slider('Glide length', { min: 0.25, max: 8, step: 0.25, fmt: v => `${v} bars`, get: () => w.morphBars, set: v => { w.morphBars = v; } }))];
   }
 
   function renderWorlds() {
@@ -1010,6 +1053,7 @@ export function createUI(app) {
       section('Smart music mode', 'a new film for any song',
         h('p', { class: 'muted small' }, 'It finds the tempo, the bars and the sections, then writes a film with the same rules as PPP — different every time.'),
         ...songPicker('Make a film for a song', 'drop it on the page or click to choose', file => app.loadFilmFile(file, { forceAuto: true })),
+        app.songs.list.length ? [h('div', { class: 'sub-label' }, 'Or pick one of your songs'), songsBlock({ pickLabel: 'Make a film for this song', mic: false })] : null,
         h('p', { class: 'muted small' }, 'Turned the camera on in Worlds? Your face, hands and movement show up in the films too.'),
         f.analysis && f.kind === 'ppp' ? h('button', { class: 'btn wide', html: `${icon('dice')}<span>Let the machine direct PPP instead</span>`, onclick: () => app.reshuffle() }) : null),
     ];
@@ -1083,6 +1127,7 @@ export function createUI(app) {
   return {
     refresh() { renderTop(); renderTabs(); renderBody(); },
     refreshYou() { if (app.mode === 'worlds') renderBody(); },
+    renderNow,
     renderExplore,
     refreshRun() { if (app.mode === 'films') renderBody(); },
     runTick, runScene,

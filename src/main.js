@@ -17,6 +17,7 @@ import { RANGES } from './state.js';
 import { WARP_BY_ID } from './catalog.js';
 import { Media } from './media.js';
 import { Tracker } from './tracking.js';
+import { SongLibrary, isSong } from './songs.js';
 import { applyMacrosWorld, applyMacrosPatterns, defaultMacros, breedWorld, breedPatterns } from './macros.js';
 import { defaultValues, expand } from './film/timeline.js';
 import { hexToRgb } from './film/params.js';
@@ -47,7 +48,8 @@ const app = {
   formulaError: null,
   tool: 'ripple',
   brush: { size: 0.16, strength: 0.7, spring: 0.35 },
-  audioCfg: { pulse: 0.45, ripples: 0.15, intensity: 0.6, wobble: 0.2 },
+  audioCfg: { pulse: 0.6, ripples: 0.3, intensity: 0.9, wobble: 0.3, wave: 0.45, spectrum: 0.3 },   // Patterns (set by the reactivity level)
+  reactivity: 'lively',     // subtle | lively | wild — one choice for Patterns and Worlds, then fine-tune
   paused: false,
   thumbs: { presets: {}, patterns: {}, warps: {}, worlds: {} },
   history: [],
@@ -60,10 +62,13 @@ const app = {
   songAnalysis: null,       // analysis of the song loaded in the Sound panel (gives the bar clock)
   mods: {},                 // Patterns: slider → music source, e.g. { density: { src: 'bass', amt: 0.4 } }
   worldMods: {},            // Worlds: the same, by film parameter, e.g. { bulge: { src: 'bass', amt: 0.5 } } — kept across looks
-  musicCfg: { amount: 1 },  // Worlds: how much the music moves things overall (the built-in reactions and every ∿)
+  // Worlds: how much the music moves things overall (the built-in reactions and every ∿), and the sound's
+  // own shapes: the waveform bending the lines, the spectrum spiking them, a landscape of the spectrum
+  musicCfg: { amount: 1.4, wave: 0.45, spectrum: 0.3, land: 0 },
   macros: { worlds: defaultMacros(), patterns: defaultMacros() },
   media: new Media(),       // a picture under the membrane: camera / image / video / words
   tracker: new Tracker(),   // your face, hands, body and movement through the camera
+  songs: new SongLibrary(), // your songs, kept in this browser
   // the camera. subject = what counts as you: none | scene | body | face | hands (and what they hold) |
   // bodyhands (both) | box (a frame you set) | motion. The rest are extras.
   you: { subject: 'scene', puppet: false, hands: false, motion: false, look: false, handScale: 1, feather: 6, box: { x: 0.5, y: 0.55, w: 0.6, h: 0.7 } },
@@ -340,10 +345,13 @@ app.deleteSave = id => {
 };
 
 // ------------------------------------------------------------------ audio
-app.audio.onchange = () => { if (ui.tab === 'sound' || app.mode === 'worlds') ui.refresh(); };
+app.audio.onchange = () => { ui.renderNow(); if (ui.tab === 'sound' || app.mode === 'worlds') ui.refresh(); };
+app.songs.onchange = () => { if (app.mode !== 'patterns' || ui.tab === 'sound') ui.refresh(); };
 
-app.loadSong = async file => {
+// the same song keeps playing whichever mode you're in; every song you play is kept for next time
+app.loadSong = async (file, { keep = true } = {}) => {
   try {
+    if (keep) app.songs.add(file);
     await app.audio.loadFile(file);
     ui.toast(`Playing “${app.audio.name}” — finding the beat…`);
     analyseLoadedSong(file);
@@ -351,6 +359,27 @@ app.loadSong = async file => {
     console.warn(e);
     ui.toast('Could not play that file');
   }
+};
+app.currentSongId = () => (app.audio.mode === 'file' && app.audio.file ? `${app.audio.file.name}|${app.audio.file.size}` : null);
+app.playSongId = async id => {
+  const file = await app.songs.get(id).catch(() => null);
+  if (!file) { app.songs.remove(id); return ui.toast('That song is gone from this browser'); }
+  if (app.mode === 'films') return app.loadFilmFile(file, { forceAuto: true });
+  return app.loadSong(file, { keep: false });
+};
+app.addSongs = files => {
+  const songs = files.filter(isSong);
+  if (!songs.length) return ui.toast('Those aren’t songs');
+  songs.slice(1).forEach(f => app.songs.add(f));
+  if (app.mode === 'films') app.loadFilmFile(songs[0]);
+  else app.loadSong(songs[0]);
+  if (songs.length > 1) ui.toast(`${songs.length} songs added — playing “${songs[0].name.replace(/\.[^.]+$/, '')}”`);
+};
+app.nextSong = () => {
+  const L = app.songs.list;
+  if (!L.length) return;
+  const i = L.findIndex(x => x.id === app.currentSongId());
+  app.playSongId(L[(i + 1) % L.length].id);
 };
 app.useMic = async () => {
   try {
@@ -373,7 +402,7 @@ function liveMusic(dt) {
   else if (!app.paused) clock.bar += dt / barLen();
   clock.hit = a.beat ? 1 : clock.hit * Math.exp(-dt * 7);
   const on = a.mode !== 'off';
-  return { bar: clock.bar, barLen: barLen(), loud: on ? a.level : 0.5, bass: on ? a.bass : 0, mid: on ? a.mid : 0, high: on ? a.high : 0, hit: clock.hit, time: rt.realTime };
+  return { on, bar: clock.bar, barLen: barLen(), loud: on ? a.level : 0.5, bass: on ? a.bass : 0, mid: on ? a.mid : 0, high: on ? a.high : 0, hit: clock.hit, time: rt.realTime };
 }
 
 app.tapTempo = () => {
@@ -411,7 +440,7 @@ function sourceValue(src, m) {
     case 'bass': return m.bass;
     case 'mid': return m.mid;
     case 'high': return m.high;
-    case 'loud': return m.loud;
+    case 'loud': return m.on === false ? 0 : m.loud;   // silence shouldn't nudge anything
     case 'beat': return m.hit;
     case 'bar': return 0.5 + 0.5 * Math.sin(m.bar * Math.PI * 2);
     case 'slow': return 0.5 + 0.5 * Math.sin(m.bar * Math.PI / 4);
@@ -443,10 +472,36 @@ app.setWorldMod = (key, src, amt) => {
   if (!src) delete app.worldMods[key];
   else app.worldMods[key] = { src, amt: amt ?? app.worldMods[key]?.amt ?? 0.4 };
 };
+// Reactivity: one choice for how hard the music hits, in Patterns and Worlds. Its ties are marked so
+// switching level swaps only them — ties you made yourself stay.
+app.LEVELS = {
+  subtle: { name: 'Subtle', blurb: 'sways and breathes with the music',
+    worlds: { amount: 0.8, wave: 0, spectrum: 0, land: 0 }, ties: {},
+    patterns: { pulse: 0.3, ripples: 0.1, intensity: 0.4, wobble: 0.1, wave: 0, spectrum: 0 } },
+  lively: { name: 'Lively', blurb: 'the lines carry the sound wave; the beat punches in',
+    worlds: { amount: 1.4, wave: 0.45, spectrum: 0.3, land: 0 }, ties: { frame: ['beat', -0.05], bulge: ['bass', 0.3] },
+    patterns: { pulse: 0.6, ripples: 0.3, intensity: 0.9, wobble: 0.3, wave: 0.45, spectrum: 0.3 } },
+  wild: { name: 'Wild', blurb: 'everything follows the song — waves, spikes, a landscape of sound',
+    worlds: { amount: 2, wave: 1.1, spectrum: 0.8, land: 0.8 },
+    ties: { frame: ['beat', -0.09], freq: ['beat', 0.1], twist: ['loud', 0.3], warpN: ['mid', 0.45], bulge: ['bass', 0.5] },
+    patterns: { pulse: 1, ripples: 0.6, intensity: 1, wobble: 0.6, wave: 1, spectrum: 0.7 } },
+};
+app.setReactivity = id => {
+  const L = app.LEVELS[id];
+  if (!L) return;
+  app.reactivity = id;
+  Object.assign(app.musicCfg, L.worlds);
+  Object.assign(app.audioCfg, L.patterns);
+  for (const [key, t] of Object.entries(app.worldMods)) if (t.level) delete app.worldMods[key];
+  for (const [key, [src, amt]] of Object.entries(L.ties)) if (!app.worldMods[key]) app.worldMods[key] = { src, amt, level: true };
+};
+app.setReactivity('lively');
+
 // runs before speeds are integrated, so a speed tied to the bass really speeds up with it
 function applyWorldMods(v, m) {
-  const k = app.musicCfg.amount;
+  const C = app.musicCfg, k = C.amount, s = Math.min(1, k);
   for (const key of ['sway', 'swayX', 'pulse', 'react', 'breathe', 'grab', 'hitFlash']) v[key] *= k;
+  v.swave = C.wave * s; v.sspec = C.spectrum * s; v.sland = C.land * s;
   for (const [key, { src, amt }] of Object.entries(app.worldMods)) {
     const p = PARAM_BY_NAME[key];
     if (!p || typeof v[key] !== 'number') continue;
@@ -540,6 +595,7 @@ const songName = () => film.file?.name.replace(/\.[^.]+$/, '') || 'your song';
 app.loadFilmFile = async (file, { forceAuto = false } = {}) => {
   try {
     app.filmStop();
+    app.songs.add(file);
     const an = await prepareSong(file);
     const ppp = !forceAuto && /ppp/i.test(file.name) && Math.abs(an.duration - PPP_FILM.duration) < 4;
     if (ppp) useFilm(PPP_FILM);
@@ -1015,10 +1071,8 @@ addEventListener('drop', e => {
   const files = [...e.dataTransfer.files];
   const pic = files.find(x => /^(image|video)\//.test(x.type) || /\.(png|jpe?g|gif|webp|avif|mp4|mov|webm|m4v)$/i.test(x.name));
   if (pic) return app.loadPicture(pic);
-  const f = files.find(x => x.type.startsWith('audio/') || /\.(mp3|wav|m4a|aac|ogg|flac|opus)$/i.test(x.name));
-  if (!f) return ui.toast('Drop a song, a picture or a video');
-  if (app.mode === 'films') app.loadFilmFile(f);
-  else app.loadSong(f);
+  if (!files.some(isSong)) return ui.toast('Drop a song, a picture or a video');
+  app.addSongs(files);
 });
 
 // ------------------------------------------------------------------ mouse / touch
@@ -1180,6 +1234,7 @@ function frame(now) {
   const s = app.state;
   const a = app.audio, cfg = app.audioCfg;
   a.update(dt, rt.realTime);
+  renderer.setSound(a.wave, a.hist);
   updateInputs(dt);
 
   if (!app.paused) {
@@ -1195,6 +1250,8 @@ function frame(now) {
   rt.intensity = a.mode === 'off' ? 1 : 1 + (a.level - 0.35) * cfg.intensity * 1.6;
   rt.pulse = Math.pow(a.bass, 1.6) * cfg.pulse * 0.35;
   rt.wobble = a.mid * cfg.wobble;
+  rt.sWave = cfg.wave;
+  rt.sSpec = cfg.spectrum;
   rt.face.mouth = Math.min(1, a.mid * 1.2);
   if (a.beat && cfg.ripples > 0 && app.mode === 'patterns') {
     const aspect = canvas.width / canvas.height;
@@ -1317,6 +1374,7 @@ async function boot() {
   if (app.mode === 'worlds') app.presetName = 'Silk';
   app.tool = app.mode === 'worlds' ? 'hand' : 'ripple';
   ui = createUI(app);
+  app.songs.load();
   resize();
   requestAnimationFrame(frame);
   setTimeout(makeThumbs, 300);

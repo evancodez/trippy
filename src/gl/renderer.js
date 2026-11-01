@@ -2,7 +2,7 @@
 // picture under the sheet (sharp, plus a blurred copy for the relief), the live sound, and the finishing pass.
 import { VERT, DISP_FRAG, COMP_FRAG, BLUR_FRAG } from './passes.js';
 import { WORLD_FRAG } from '../engine/shader.js';
-import { SOUND_W, SOUND_ROWS } from '../audio.js';
+import { SOUND_W, SOUND_ROWS, WAVE_ROWS } from '../audio.js';
 import { hexToRgb } from '../engine/params.js';
 
 export const MAX_RIPPLES = 16;
@@ -34,7 +34,7 @@ export class Renderer {
     this.mediaTex = this.makeTexture(1, 1, false, true);
     this.mediaRaw = this.makeTexture(1, 1, false, true);
     this.mediaAspect = 1;
-    this.setSound(new Uint8Array(SOUND_W).fill(128), new Uint8Array(SOUND_W * SOUND_ROWS));   // silence
+    this.setSound(new Uint8Array(SOUND_W).fill(128), new Uint8Array(SOUND_W * SOUND_ROWS), new Uint8Array(SOUND_W * WAVE_ROWS).fill(128));   // silence
   }
 
   program(fragSrc) {
@@ -118,9 +118,10 @@ export class Renderer {
     }
   }
 
-  // the live sound: row 0 the waveform (0.5 = silence), rows 1–64 the spectrum's past, newest first
-  setSound(wave, hist) {
-    const gl = this.gl, W = wave.length, H = hist.length / W + 1;
+  // the live sound: row 0 the waveform (0.5 = silence), rows 1–64 the spectrum's past, rows 65–128 the
+  // waveform's past — newest first
+  setSound(wave, hist, waveHist) {
+    const gl = this.gl, W = wave.length, H = 1 + hist.length / W + waveHist.length / W;
     if (!this.soundTex) {
       this.soundTex = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, this.soundTex);
@@ -133,6 +134,7 @@ export class Renderer {
     }
     this.soundBuf.set(wave, 0);
     this.soundBuf.set(hist, W);
+    this.soundBuf.set(waveHist, W + hist.length);
     gl.bindTexture(gl.TEXTURE_2D, this.soundTex);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, W, H, gl.RED, gl.UNSIGNED_BYTE, this.soundBuf);

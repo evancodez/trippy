@@ -19,7 +19,10 @@ The side panel has four tabs.
   - Color palettes, one click each.
   - The four sliders that matter most for this look.
   - Lines and motion: line count, weight, spin, flow, waves rolling through.
-  - **Camera**: tilt toward the horizon, turn and zoom, or switch on the **cinematic camera**. It glides from shot to shot on the bar: straight down, high, low across the lines to the horizon, tilted. It never quite stops panning, and it can change the look as it goes and send waves through the lines.
+  - **Camera**: tilt toward the horizon, turn and zoom, or switch on the **cinematic camera**.
+    - It sweeps from shot to shot on the bar: straight down, high, low across the lines to the horizon, tilted.
+    - In between it keeps flying: forward across open looks like a drone over a landscape, banking into its turns; around looks with a middle, circling them.
+    - **Speed** runs from drifting to racing. It can change the look as it goes and send waves through the lines.
   - Three feel knobs that work on every look: Calm ↔ Wild, Still ↔ Moving, Thin ↔ Bold.
   - Folded away: your own colors (a second ink on every other line, a color cycle, glow) and everything else by group.
   - Tweaks stay with their look until you **Reset** it. A pink dot marks what you changed; double-click a slider to put just that one back. **Save** keeps a tweaked look in Looks.
@@ -32,8 +35,15 @@ The side panel has four tabs.
   - **Picture**: an image, a video or words.
 - **Sound**: your songs and how they move the picture.
   - Songs you add are kept in this browser (IndexedDB) so you can flip between them. Nothing is uploaded.
+  - **Play live**: pick an input (a guitar through an audio interface such as a Focusrite, a headset mic, any mic).
+    - The browser's call processing (echo cancelling, noise suppression, auto gain) is off, and the input is mixed to mono so input 1 alone still fills both speakers.
+    - **Hear it through the speakers, like an amp**, with a volume, an input level, and a choice of output device (Chrome / Edge).
+    - Strums and plucks count as beats.
   - **How hard it hits**: Off, Subtle, Lively (the default) or Wild.
-  - **The sound itself**: the waveform runs through the lines like an oscilloscope, rings spike with the spectrum, and the sheet can rise into a landscape of it.
+  - **The sound itself**:
+    - Each line carries the waveform from a slightly different moment: the newest down the middle, older ones further out, mirrored. The lines ripple outward with what you hear, and the waveform is auto-gained so a quiet guitar still makes big waves.
+    - Rings carry it round the circle and spike with the spectrum.
+    - The sheet can rise into a landscape of the spectrum, and the rolling waves grow when it's loud.
   - What the music does to things you've added (the ball hops, the hands grab, the orbs swell).
   - **Ties**: any slider can follow the bass, mids, highs, loudness, the beat or the bar (its ∿ button).
   - Tempo, and changing look by itself (off unless you turn it on).
@@ -84,7 +94,7 @@ Import the GitHub repo in Vercel and keep the defaults: Framework Preset **Other
   - Speeds are added up per bar, so spins and flight stay smooth and settle back to rest.
 - **The music** arrives two ways:
   - As levels: bass, mids, highs, loudness, beats and a bar clock (`src/audio.js`; the tempo comes from `src/analysis.js`).
-  - As the sound itself: a texture holding the live waveform (triggered so it stands still) and ~2.7 s of log-spaced spectrum, which both bend the line equation.
+  - As the sound itself: a texture holding the live waveform (triggered so it stands still), its last ~2 s, and ~2.7 s of log-spaced spectrum, which all bend the line equation.
 
 ## Files
 

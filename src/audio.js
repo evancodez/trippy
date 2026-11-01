@@ -1,46 +1,54 @@
-// Song / microphone analysis → smooth bass, mid, high and level values (0–1) plus beat detection,
-// and the sound itself for the shaders: a steady waveform (like an oscilloscope) and a few seconds of spectrum.
-export const SOUND_W = 512, SOUND_ROWS = 64;
+// The sound: a song, or a live input (a guitar through an audio interface, a mic) — and what the picture
+// needs from it: smooth bass, mid, high and level values (0–1), beats and note onsets, a steady waveform
+// (like an oscilloscope), the waveform's last couple of seconds, and the spectrum's last few seconds.
+// A live input can be heard through the speakers (like an amp) and the output device can be chosen.
+export const SOUND_W = 512, SOUND_ROWS = 64, WAVE_ROWS = 64;
+
 export class AudioEngine {
   constructor() {
     this.ctx = null;
     this.analyser = null;
     this.data = null;
-    this.el = null;            // <audio> for dropped songs
+    this.el = null;            // <audio> for songs
     this.source = null;
     this.micStream = null;
-    this.recDest = null;       // lets screen recordings include the song
-    this.mode = 'off';         // 'off' | 'file' | 'mic'
+    this.recDest = null;       // lets recordings include the sound
+    this.mode = 'off';         // 'off' | 'file' | 'mic' (any live input)
     this.name = '';
+    // live input: which device, how loud into the analysis, and whether (and how loud) you hear it
+    this.input = { deviceId: '', level: 1, monitor: false, volume: 0.8, outputId: '' };
     this.bass = 0; this.mid = 0; this.high = 0; this.level = 0;
     this.peaks = { bass: 0.2, mid: 0.2, high: 0.2 };
     this.avgs = { bass: 0, mid: 0, high: 0 };
-    this.bassAvg = 0;
+    this.bassAvg = 0; this.fluxAvg = 0;
     this.lastBeat = 0;
     this.beat = false;
     this.wave = new Uint8Array(SOUND_W).fill(128);                 // the waveform, 128 = silence
+    this.wavePeak = 8;
     this.spec = new Float32Array(SOUND_W);                         // the spectrum now, 0–1, log-spaced 30 Hz → 16 kHz, softened
     this.specRaw = new Float32Array(SOUND_W);
-    this.hist = new Uint8Array(SOUND_W * SOUND_ROWS);              // the spectrum's past, newest row first
-    this.histT = 0;
+    this.hist = new Uint8Array(SOUND_W * SOUND_ROWS).fill(0);      // the spectrum's past, newest row first
+    this.waveHist = new Uint8Array(SOUND_W * WAVE_ROWS).fill(128); // the waveform's past, newest row first
+    this.histT = 0; this.waveT = 0;
     this.onchange = () => {};
   }
 
   ensure() {
     if (this.ctx) return;
-    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    this.ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
     this.analyser = this.ctx.createAnalyser();
     this.analyser.fftSize = 2048;
     this.analyser.smoothingTimeConstant = 0.6;
     this.data = new Uint8Array(this.analyser.frequencyBinCount);
+    this.prev = new Uint8Array(this.analyser.frequencyBinCount);
     this.td = new Uint8Array(this.analyser.fftSize);
     this.recDest = this.ctx.createMediaStreamDestination();
+    if (this.input.outputId) this.setOutput(this.input.outputId);
   }
 
   disconnect() {
-    try { this.source?.disconnect(); } catch {}
-    try { this.analyser?.disconnect(); } catch {}
-    this.source = null;
+    for (const n of [this.source, this.analyser, this.inGain, this.monGain]) try { n?.disconnect(); } catch {}
+    this.source = this.inGain = this.monGain = null;
     if (this.el) { this.el.pause(); URL.revokeObjectURL(this.el.src); this.el = null; }
     if (this.micStream) { this.micStream.getTracks().forEach(t => t.stop()); this.micStream = null; }
   }
@@ -68,16 +76,64 @@ export class AudioEngine {
     this.onchange();
   }
 
-  async useMic() {
+  // a live input. Instruments want the raw signal: no echo cancelling, noise gating or auto gain.
+  // It's mixed to mono (a guitar in input 1 of an interface is only the left channel) and, if
+  // monitoring is on, sent to the speakers — the analyser itself never is, so it can't double up.
+  async useInput(deviceId = this.input.deviceId) {
     this.ensure();
     this.disconnect();
-    this.micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true } });
+    const audio = { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: { ideal: 2 } };
+    if (deviceId) audio.deviceId = { exact: deviceId };
+    this.micStream = await navigator.mediaDevices.getUserMedia({ audio });
+    const track = this.micStream.getAudioTracks()[0];
+    this.input.deviceId = track?.getSettings?.().deviceId || deviceId || '';
     this.source = this.ctx.createMediaStreamSource(this.micStream);
-    this.source.connect(this.analyser);   // not to the speakers — that would feed back
+    this.inGain = this.ctx.createGain();
+    this.inGain.channelCount = 1;
+    this.inGain.channelCountMode = 'explicit';
+    this.inGain.gain.value = this.input.level;
+    this.monGain = this.ctx.createGain();
+    this.monGain.gain.value = this.input.monitor ? this.input.volume : 0;
+    this.source.connect(this.inGain);
+    this.inGain.connect(this.analyser);
+    this.inGain.connect(this.monGain);
+    this.monGain.connect(this.ctx.destination);
+    this.inGain.connect(this.recDest);
     this.mode = 'mic';
-    this.name = 'Microphone';
+    this.name = track?.label?.replace(/\s*\(.*?\)\s*$/, '') || 'Live input';
     await this.ctx.resume();
     this.onchange();
+  }
+  async useMic() { return this.useInput(); }
+
+  setInputLevel(x) {
+    this.input.level = x;
+    this.inGain?.gain.setTargetAtTime(x, this.ctx.currentTime, 0.02);
+  }
+
+  setMonitor(on, volume = this.input.volume) {
+    this.input.monitor = on;
+    this.input.volume = volume;
+    this.monGain?.gain.setTargetAtTime(on ? volume : 0, this.ctx.currentTime, 0.03);
+  }
+
+  // where the sound comes out (Chrome / Edge); false if this browser can't choose
+  async setOutput(id) {
+    this.input.outputId = id;
+    if (!this.ctx) return true;
+    if (!this.ctx.setSinkId) return false;
+    try { await this.ctx.setSinkId(id || ''); return true; } catch (e) { console.warn(e); return false; }
+  }
+  get canChooseOutput() { return typeof AudioContext !== 'undefined' && 'setSinkId' in AudioContext.prototype; }
+
+  // the inputs and outputs (their names only show up once the browser has been allowed one input)
+  static async devices() {
+    const list = await navigator.mediaDevices?.enumerateDevices?.() || [];
+    const name = (d, i, what) => d.label || `${what} ${i + 1}`;
+    return {
+      inputs: list.filter(d => d.kind === 'audioinput').map((d, i) => ({ id: d.deviceId, label: name(d, i, 'Input') })),
+      outputs: list.filter(d => d.kind === 'audiooutput').map((d, i) => ({ id: d.deviceId, label: name(d, i, 'Output') })),
+    };
   }
 
   stop() {
@@ -94,14 +150,21 @@ export class AudioEngine {
 
   get playing() { return this.mode === 'mic' || (this.el && !this.el.paused); }
 
-  // the waveform, triggered on a rising zero crossing so it stands still like an oscilloscope's;
-  // and the spectrum on a log scale, so the bass gets as much room as the treble
-  readShape() {
+  // the waveform, triggered on a rising zero crossing so it stands still like an oscilloscope's, and
+  // auto-gained so a quiet guitar draws as big a wave as a loud song; the spectrum on a log scale, so the
+  // bass gets as much room as the treble
+  readShape(dt) {
     const td = this.td, n = SOUND_W;
     this.analyser.getByteTimeDomainData(td);
-    let t0 = 0;
+    let t0 = 0, peak = 0;
     for (let i = 1; i < td.length - n * 2; i++) if (td[i - 1] < 128 && td[i] >= 128) { t0 = i; break; }
-    for (let j = 0; j < n; j++) this.wave[j] = (this.wave[j] + td[t0 + j * 2]) >> 1;
+    for (let j = 0; j < n; j++) peak = Math.max(peak, Math.abs(td[t0 + j * 2] - 128));
+    this.wavePeak = Math.max(peak, this.wavePeak * Math.exp(-dt * 0.6), 6);
+    const g = 110 / this.wavePeak;
+    for (let j = 0; j < n; j++) {
+      const x = 128 + (td[t0 + j * 2] - 128) * g;
+      this.wave[j] = (this.wave[j] + Math.max(0, Math.min(255, x))) >> 1;
+    }
     const hz = this.ctx.sampleRate / this.analyser.fftSize, d = this.data;
     for (let j = 0; j < n; j++) {
       const f = 30 * Math.pow(16000 / 30, j / (n - 1));
@@ -123,13 +186,18 @@ export class AudioEngine {
     }
   }
 
-  // a new row of spectrum history 24 times a second (64 rows ≈ the last 2.7 seconds)
+  // history: a spectrum row 24 times a second (≈ 2.7 s), a waveform row 30 times a second (≈ 2.1 s)
   pushHistory(dt) {
-    this.histT += dt;
-    if (this.histT < 1 / 24) return;
-    this.histT = 0;
-    this.hist.copyWithin(SOUND_W, 0, SOUND_W * (SOUND_ROWS - 1));
-    for (let j = 0; j < SOUND_W; j++) this.hist[j] = this.spec[j] * 255;
+    if ((this.histT += dt) >= 1 / 24) {
+      this.histT = 0;
+      this.hist.copyWithin(SOUND_W, 0, SOUND_W * (SOUND_ROWS - 1));
+      for (let j = 0; j < SOUND_W; j++) this.hist[j] = this.spec[j] * 255;
+    }
+    if ((this.waveT += dt) >= 1 / 30) {
+      this.waveT = 0;
+      this.waveHist.copyWithin(SOUND_W, 0, SOUND_W * (WAVE_ROWS - 1));
+      this.waveHist.set(this.wave, 0);
+    }
   }
 
   band(lo, hi) {
@@ -150,7 +218,7 @@ export class AudioEngine {
       return;
     }
     this.analyser.getByteFrequencyData(this.data);
-    this.readShape();
+    this.readShape(dt);
     this.pushHistory(dt);
     const raw = { bass: this.band(30, 140), mid: this.band(400, 2000), high: this.band(4000, 12000) };
     // auto-gain: scale each band between its recent average and its slowly-decaying peak,
@@ -164,9 +232,17 @@ export class AudioEngine {
       this[key] += (v - this[key]) * attack;
     }
     this.level = (this.bass * 0.5 + this.mid * 0.3 + this.high * 0.2);
-    // beat = bass jumps well above its recent average
+    // a beat: the bass jumps well above its recent average — or any note starts (spectral flux), which
+    // is what a strummed guitar gives you
+    let flux = 0;
+    for (let i = 2; i < this.data.length; i++) { const dd = this.data[i] - this.prev[i]; if (dd > 0) flux += dd; }
+    this.prev.set(this.data);
+    flux /= this.data.length * 255;
     this.bassAvg += (raw.bass - this.bassAvg) * Math.min(1, dt * 3);
-    if (raw.bass > this.bassAvg * 1.25 && raw.bass > 0.25 && now - this.lastBeat > 0.28) {
+    const bassHit = raw.bass > this.bassAvg * 1.25 && raw.bass > 0.25;
+    const onset = flux > this.fluxAvg * 2.2 + 0.006;
+    this.fluxAvg += (flux - this.fluxAvg) * Math.min(1, dt * 4);
+    if ((bassHit || onset) && now - this.lastBeat > 0.2) {
       this.beat = true;
       this.lastBeat = now;
     }

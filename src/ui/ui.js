@@ -334,9 +334,9 @@ export function createUI(app) {
       slider('Zoom', { min: 0.25, max: 3, get: () => 1 / V.zoom, set: x => { V.zoom = 1 / x; }, fmt: x => `${x.toFixed(2)}×`, reset: () => { V.zoom = 1; } }),
     ];
     return section('Camera', 'right-drag turns it · scroll zooms',
-      toggle('Cinematic', () => C.on, on => app.setCinema(on), 'drifts from shot to shot on its own: top down, out to the horizon, tilted'),
+      toggle('Cinematic', () => C.on, on => app.setCinema(on), 'sweeps from shot to shot on its own: top down, out to the horizon, tilted'),
       C.on ? h('div', { class: 'cine' },
-        slider('Pace', { min: 0, max: 1, get: () => C.pace, set: x => { C.pace = x; }, fmt: x => (x < 0.3 ? 'slow' : x < 0.7 ? 'moderate' : 'fast') }),
+        slider('Speed', { min: 0, max: 1, get: () => C.speed, set: x => { C.speed = x; }, fmt: x => (x < 0.25 ? 'drifting' : x < 0.5 ? 'cruising' : x < 0.8 ? 'sweeping' : 'racing') }),
         slider('Waves through the lines', { min: 0, max: 1.5, get: () => C.waves, set: x => { C.waves = x; } }),
         toggle('Change the look as it goes', () => C.looks, x => { C.looks = x; renderBody(); }),
         C.looks ? chips(GROUPS.map(([id, name]) => [id, name]), id => C.groups.includes(id), id => {
@@ -460,7 +460,7 @@ export function createUI(app) {
     return [
       h('div', { class: 'run-actions' },
         h('button', { class: 'btn grow', html: `${icon('music')}<span>Add songs</span>`, onclick: () => file.click() }),
-        h('button', { class: `btn${a.mode === 'mic' ? ' on' : ''}`, html: `${icon('mic')}<span>Mic</span>`, onclick: () => app.useMic() }),
+        h('button', { class: `btn${a.mode === 'mic' ? ' on' : ''}`, html: `${icon('mic')}<span>Live</span>`, 'data-tip': 'Listen to an input instead (set it up in Play live)', onclick: () => app.useMic() }),
         a.mode !== 'off' ? iconBtn('stop', 'Stop', () => app.stopAudio()) : null),
       file,
       list.length
@@ -470,6 +470,29 @@ export function createUI(app) {
           h('button', { class: 'song-x', 'aria-label': `Forget ${sg.name}`, html: icon('x'), onclick: () => app.songs.remove(sg.id) }))))
         : h('p', { class: 'muted small' }, 'Drop songs anywhere on the page — several at once is fine. They stay in this browser so you can flip between them. Nothing is uploaded.'),
     ];
+  }
+
+  // play live: a guitar through an interface, a headset mic… optionally heard through the speakers
+  function liveSection() {
+    const a = app.audio, I = a.input, D = app.devices, live = a.mode === 'mic';
+    const pick = (list, value, onchange) => {
+      const el = h('select', { class: 'select' }, list.map(d => h('option', { value: d.id, selected: d.id === value ? true : null }, d.label)));
+      el.addEventListener('change', () => onchange(el.value));
+      return el;
+    };
+    const outputs = [{ id: '', label: 'System default' }, ...D.outputs.filter(o => o.id && o.id !== 'default')];
+    return section('Play live', live ? `● ${a.name}` : 'a guitar, a mic, anything',
+      h('p', { class: 'muted small' }, 'Plug a guitar into an audio interface (a Focusrite, say) or use any mic — the lines move with what you play.'),
+      D.inputs.length ? h('label', { class: 'field' }, h('span', {}, 'Input'), pick(D.inputs, I.deviceId, id => app.useInput(id))) : null,
+      h('div', { class: 'run-actions' },
+        live
+          ? h('button', { class: 'btn', html: `${icon('stop')}<span>Stop listening</span>`, onclick: () => app.stopAudio() })
+          : h('button', { class: 'btn primary', html: `${icon('mic')}<span>Start listening</span>`, onclick: () => app.useInput() })),
+      toggle('Hear it through the speakers, like an amp', () => I.monitor, on => app.setMonitor(on), 'with a mic, use headphones — or it’ll howl'),
+      I.monitor ? slider('Volume', { min: 0, max: 1.5, get: () => I.volume, set: x => a.setMonitor(true, x) }) : null,
+      slider('Input level', { min: 0.2, max: 4, get: () => I.level, set: x => a.setInputLevel(x), fmt: x => `${x.toFixed(1)}×`, hint: 'How hard the input drives the speakers (the picture adjusts itself)' }),
+      a.canChooseOutput ? h('label', { class: 'field' }, h('span', {}, 'Sound comes out of'), pick(outputs, I.outputId, id => app.setOutput(id))) : null,
+      h('p', { class: 'muted small' }, 'Going through the browser adds a little delay. For none at all, monitor on the interface itself and leave the speakers off here.'));
   }
 
   const RECIPES = [
@@ -485,8 +508,9 @@ export function createUI(app) {
     const tieOn = ([key, src]) => app.ties[key]?.src === src;
     const t = app.tempo;
     return [
-      section('Songs', app.audio.mode === 'off' ? 'nothing playing' : app.audio.mode === 'mic' ? '● the mic' : `♪ ${app.audio.name}`, songsBlock(),
+      section('Songs', app.audio.mode === 'file' ? `♪ ${app.audio.name}` : app.audio.mode === 'mic' ? 'listening live instead' : 'nothing playing', songsBlock(),
         h('div', { class: 'meters' }, meters.bass, meters.mid, meters.high)),
+      liveSection(),
       section('How hard it hits', null,
         chips(Object.entries(app.LEVELS).map(([id, L]) => [id, L.name]), id => S.level === id, id => { app.setLevel(id); renderBody(); }),
         h('p', { class: 'muted small' }, app.LEVELS[S.level]?.blurb),

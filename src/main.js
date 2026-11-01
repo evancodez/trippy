@@ -39,10 +39,10 @@ const LEVELS = {
   subtle: { name: 'Subtle', blurb: 'it sways and breathes with the music',
     sound: { amount: 0.8, wave: 0, spectrum: 0, land: 0, ballBounce: 0.3, handsGrab: 0.3, orbsBass: 0.3 }, ties: {} },
   lively: { name: 'Lively', blurb: 'the lines carry the sound wave; the beat punches in; the ball hops',
-    sound: { amount: 1.4, wave: 0.45, spectrum: 0.3, land: 0, ballBounce: 0.7, handsGrab: 0.6, orbsBass: 0.8 },
+    sound: { amount: 1.4, wave: 0.6, spectrum: 0.3, land: 0, ballBounce: 0.7, handsGrab: 0.6, orbsBass: 0.8 },
     ties: { frame: ['beat', -0.05], bulge: ['bass', 0.3] } },
   wild: { name: 'Wild', blurb: 'everything follows the song — waves, spikes, a landscape of sound',
-    sound: { amount: 2, wave: 1.1, spectrum: 0.8, land: 0.8, ballBounce: 1, handsGrab: 1, orbsBass: 1.5 },
+    sound: { amount: 2, wave: 1.3, spectrum: 0.8, land: 0.8, ballBounce: 1, handsGrab: 1, orbsBass: 1.5 },
     ties: { frame: ['beat', -0.09], freq: ['beat', 0.1], twist: ['loud', 0.3], warpN: ['mid', 0.45], bulge: ['bass', 0.5] } },
 };
 
@@ -61,12 +61,13 @@ const app = {
   // the sound
   LEVELS,
   sound: { level: 'lively', ...LEVELS.lively.sound },
+  devices: { inputs: [], outputs: [] },    // audio inputs and outputs, once the browser lets us name them
   ties: {},                 // a value → a music source: { bulge: { src: 'bass', amt: 0.3 } }
   auto: { when: 'off', every: 8, groups: GROUPS.map(g => g[0]) },
   tempo: { bpm: 70, beatsPerBar: 2, fromSong: false },
   songAnalysis: null,
   // the cinematic camera: glides from shot to shot on the bar; can change the look as it goes
-  cine: { on: false, pace: 0.4, looks: true, every: 2, groups: ['lines', 'rings', 'tiles', 'sheets'], waves: 0.5 },
+  cine: { on: false, speed: 0.6, looks: true, every: 2, groups: ['lines', 'rings', 'tiles', 'sheets'], waves: 0.6 },
   director: new Director(),
   // tools, and your own camera moves (on top of the look's, or the director's)
   tool: 'ripple',
@@ -302,7 +303,7 @@ function applyCinema(v, m, dt) {
   const C = app.cine, D = app.director;
   if (D.due(m, C) && C.looks && (D.shots + 1) % C.every === 0) {
     const ids = Object.keys(LOOKS).filter(k => k !== app.lookId && C.groups.includes(LOOKS[k].group));
-    if (ids.length) app.pickLook(ids[Math.floor(Math.random() * ids.length)], Math.round(16 - 12 * C.pace) * m.barLen * 0.65);
+    if (ids.length) app.pickLook(ids[Math.floor(Math.random() * ids.length)], Math.max(2, Math.round(12 - 10 * C.speed)) * m.barLen * 0.75);
   }
   D.update(dt, v, LOOKS[app.lookId].group, m, C);
   D.apply(v);
@@ -365,14 +366,32 @@ app.nextSong = () => {
   const i = L.findIndex(x => x.id === app.currentSongId());
   app.playSongId(L[(i + 1) % L.length].id);
 };
-app.useMic = async () => {
+// live input: a guitar through an audio interface, a headset mic… heard through the speakers if you like
+app.refreshDevices = async () => {
+  try { app.devices = await AudioEngine.devices(); } catch { app.devices = { inputs: [], outputs: [] }; }
+  ui?.soundChanged();
+};
+app.useInput = async (deviceId = app.audio.input.deviceId) => {
   try {
-    await app.audio.useMic();
-    ui.toast('Listening — make some noise');
-  } catch {
-    ui.toast('Microphone access was blocked');
+    await app.audio.useInput(deviceId);
+    await app.refreshDevices();
+    ui.toast(`Listening to ${app.audio.name}${app.audio.input.monitor ? ' — and playing it through the speakers' : ''}`);
+  } catch (e) {
+    console.warn(e);
+    ui.toast(e.name === 'NotAllowedError' ? 'The browser wasn’t allowed to use that input' : 'Couldn’t open that input');
   }
 };
+app.useMic = () => app.useInput();
+app.setMonitor = on => {
+  app.audio.setMonitor(on);
+  if (on) ui.toast('You’ll hear the input through the speakers. With a mic near speakers, use headphones — it’ll howl.');
+  ui.soundChanged();
+};
+app.setOutput = async id => {
+  if (!(await app.audio.setOutput(id))) ui.toast('This browser can’t choose where the sound comes out');
+  ui.soundChanged();
+};
+navigator.mediaDevices?.addEventListener?.('devicechange', () => app.refreshDevices());
 app.stopAudio = () => app.audio.stop();
 
 // ------------------------------------------------------------------ add-ons
@@ -889,7 +908,7 @@ function frame(now) {
   rt.realTime = (now - t0) / 1000;
   const a = app.audio;
   a.update(dt, rt.realTime);
-  renderer.setSound(a.wave, a.hist);
+  renderer.setSound(a.wave, a.hist, a.waveHist);
   updateInputs(dt);
   const m = liveMusic(dt);
   autoMorph(m);
@@ -931,6 +950,7 @@ function boot() {
   app.world.morphTo(lookValues(app.lookId), 0.05);
   ui = createUI(app);
   app.songs.load();
+  app.refreshDevices();
   resize();
   requestAnimationFrame(frame);
 }

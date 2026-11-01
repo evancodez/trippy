@@ -21,7 +21,7 @@ uniform sampler2D uPrev;
 uniform sampler2D uDisp;
 uniform sampler2D uMedia;      // relief source, blurred: rgb = picture, a = mask (body / face / hands / a box)
 uniform sampler2D uMediaSharp; // the same picture unblurred at full size: the photo and the engraving
-uniform sampler2D uSound;      // row 0: the live waveform (0.5 = silence); rows 1–64: the spectrum's past, newest first
+uniform sampler2D uSound;      // row 0: the live waveform (0.5 = silence); rows 1–64: the spectrum's past; 65–128: the waveform's past
 uniform float uMediaAspect;
 uniform vec4 uRipples[16];
 uniform float uRipplesOn;      // skip the mouse-ripple loop when nothing was dropped recently
@@ -51,9 +51,12 @@ float gnoise(vec2 p) {
              mix(dot(hash22(i + vec2(0, 1)), f - vec2(0, 1)), dot(hash22(i + vec2(1, 1)), f - vec2(1, 1)), u.x), u.y) * 1.6;
 }
 float fbm(vec2 p) { float s = 0.0, a = 0.5; for (int i = 0; i < 4; i++) { s += a * gnoise(p); p = rot(0.5) * p * 2.03 + 17.1; a *= 0.5; } return s; }
-// the sound: x 0..1 along the waveform → −1..1; the spectrum at f 0..1 (bass → treble), age 0 (now) .. 1 (2.7 s ago)
-float soundWave(float x) { return (texture(uSound, vec2(x, 0.5 / 65.0)).r - 0.5) * 2.0; }
-float soundSpec(float f, float age) { return texture(uSound, vec2(f, (1.5 + clamp(age, 0.0, 1.0) * 63.0) / 65.0)).r; }
+// the sound: x 0..1 along the waveform → −1..1, now or some time ago (0 now .. 1 ≈ 2 s); the spectrum at
+// f 0..1 (bass → treble), age 0 (now) .. 1 (2.7 s ago); and how loud it was, age ago
+float soundWave(float x) { return (texture(uSound, vec2(x, 0.5 / 129.0)).r - 0.5) * 2.0; }
+float soundWaveAt(float x, float age) { return (texture(uSound, vec2(x, (65.5 + clamp(age, 0.0, 1.0) * 63.0) / 129.0)).r - 0.5) * 2.0; }
+float soundSpec(float f, float age) { return texture(uSound, vec2(f, (1.5 + clamp(age, 0.0, 1.0) * 63.0) / 129.0)).r; }
+float soundLevel(float age) { return (soundSpec(0.08, age) + soundSpec(0.3, age) + soundSpec(0.55, age)) * 0.5; }
 
 float smin(float a, float b, float k) { float h = max(k - abs(a - b), 0.0) / max(k, 1e-5); return min(a, b) - h * h * k * 0.25; }
 float sdCapsule(vec3 p, vec3 a, vec3 b, float r) { vec3 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return length(pa - ba * h) - r; }
@@ -121,7 +124,8 @@ float heightField(vec2 q) {
   float h = 0.0;
   float calm = MEDIACALM > 0.0 ? 1.0 - MEDIACALM * mediaMaskSoft(q, 1.5) : 1.0;
   if (SWELL > 0.0) {                         // long waves rolling across the sheet
-    h += calm * SWELL * 0.05 * (sin(dot(q, vec2(0.8, 0.6)) * SWELLF - SWELLPH) + 0.45 * sin(dot(q, vec2(-0.45, 0.89)) * SWELLF * 1.7 - SWELLPH * 2.0));
+    float env = 1.0 + 2.2 * soundSpec(0.15, clamp(dot(q - vec2(TX, TY), vec2(0.8, 0.6)) / (FRAME * 2.4) + 0.5, 0.0, 1.0));   // louder → bigger
+    h += calm * SWELL * 0.06 * env * (sin(dot(q, vec2(0.8, 0.6)) * SWELLF - SWELLPH) + 0.45 * sin(dot(q, vec2(-0.45, 0.89)) * SWELLF * 1.7 - SWELLPH * 2.0));
   }
   if (FOLDS > 0.0) {
     float f = FOLDF;
@@ -392,12 +396,14 @@ vec3 calcNormal(vec3 p, float t) {
 // ---------------------------------------------------------------- the line equation
 // qw returns the warped coordinates, so a picture can be bent by the same warps as the lines
 float lines(vec2 q, float z, out float rr, out vec2 qw) {
+  vec2 qv = rot(FROT) * (q - vec2(TX, TY));                  // the same point, measured from the middle of the view
   q = rot(FROT) * q;
   float r = length(q);
   float c = gCalm;
-  if (SWELL > 0.0) {                                                           // waves running along the lines
+  if (SWELL > 0.0) {                                         // waves running along the lines, bigger when it's loud
     vec2 d = vec2(cos(LINA), sin(LINA));
-    q += d * c * SWELL * 0.035 * sin(dot(q, vec2(-d.y, d.x)) * SWELLF * 1.3 - SWELLPH);
+    float env = 1.0 + 2.2 * soundSpec(0.15, clamp(dot(qv, vec2(0.8, 0.6)) / (FRAME * 2.4) + 0.5, 0.0, 1.0));
+    q += d * c * SWELL * 0.05 * env * sin(dot(q, vec2(-d.y, d.x)) * SWELLF * 1.3 - SWELLPH);
   }
   if (PINCH > 0.0) q.x += c * PINCH * 0.24 * tanh((q.x - PINCHX) / 0.035);   // a band the lines squeeze through
   if (VORTEX != 0.0) q = rot(c * VORTEX * 0.55 * log(max(r, 0.015))) * q;     // wound into the center, forever
@@ -414,18 +420,20 @@ float lines(vec2 q, float z, out float rr, out vec2 qw) {
     q = mix(q, length(q) * vec2(cos(af), sin(af)), KALEIDO * c);
   }
   if (SWAVE > 0.0 || SSPEC > 0.0) {
-    // the sound bends the lines: straight lines become traces of the waveform (and of the spectrum, the
-    // past further out); rings spike outward with it, round the circle
+    // the sound bends the lines. Each line carries the waveform from a slightly different moment: the
+    // newest through the middle of the view, older ones further out, mirrored left and right, so the
+    // lines ripple outward with what you're hearing. Rings carry it round the circle, the past further out.
     vec2 d = vec2(cos(LINA), sin(LINA));
-    float along = dot(q, vec2(-d.y, d.x)), across = dot(q, d);
+    float along = dot(qv, vec2(-d.y, d.x)), across = dot(qv, d);
+    float x = clamp(abs(along) / (FRAME * 2.2), 0.0, 1.0), age = clamp(abs(across) / (FRAME * 1.3), 0.0, 1.0);
     float a = abs(atan(q.y, q.x)) / PI, rq = length(q);
     float lin = WLIN + CONTOUR * 0.5, rad = WRAD + WANG * 0.5;
     if (SWAVE > 0.0) {
-      q += d * c * SWAVE * 0.09 * soundWave(fract(along * 0.32 + 0.5)) * lin;
-      q *= 1.0 - c * SWAVE * 0.12 * soundWave(a) * rad;
+      q += d * c * SWAVE * 0.16 * (1.0 - 0.35 * age) * soundWaveAt(x, age) * lin;
+      q *= 1.0 - c * SWAVE * 0.16 * soundWaveAt(a, rq / (FRAME * 1.6)) * rad;
     }
     if (SSPEC > 0.0) {
-      q -= d * c * SSPEC * 0.12 * soundSpec(abs(along) * 0.9, abs(across) * 0.9) * lin;
+      q -= d * c * SSPEC * 0.14 * soundSpec(x, age) * lin;
       q *= 1.0 - c * SSPEC * 0.28 * soundSpec(a, rq * 0.7) * rad;
     }
   }

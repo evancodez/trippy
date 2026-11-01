@@ -561,6 +561,29 @@ void main() {
 }
 `;
 
+// A separable gaussian blur, run in floating point: it turns an 8-bit picture into a smooth relief.
+export const BLUR_FRAG = `#version 300 es
+precision highp float;
+out vec4 outColor;
+uniform sampler2D uSrc;
+uniform vec2 uDir;
+uniform vec2 uRes;
+uniform float uSigma;
+void main() {
+  vec2 st = gl_FragCoord.xy / uRes;
+  vec4 acc = vec4(0.0);
+  float wsum = 0.0;
+  float stride = max(1.0, uSigma / 4.0);
+  for (int i = -12; i <= 12; i++) {
+    float x = float(i) * stride;
+    float w = exp(-x * x / (2.0 * uSigma * uSigma));
+    acc += texture(uSrc, st + uDir * x / uRes) * w;
+    wsum += w;
+  }
+  outColor = acc / wsum;
+}
+`;
+
 // Mixes scene A and B with a transition, then adds the film look.
 export const COMP_FRAG = `#version 300 es
 precision highp float;

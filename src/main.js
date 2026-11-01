@@ -15,6 +15,11 @@ import { LOOKS, look } from './film/looks.js';
 import { World } from './world.js';
 import { RANGES } from './state.js';
 import { WARP_BY_ID } from './catalog.js';
+import { Media } from './media.js';
+import { Tracker } from './tracking.js';
+import { applyMacrosWorld, applyMacrosPatterns, defaultMacros, breedWorld, breedPatterns } from './macros.js';
+import { defaultValues, expand } from './film/timeline.js';
+import { hexToRgb } from './film/params.js';
 
 const canvas = document.getElementById('stage');
 let renderer;
@@ -54,6 +59,13 @@ const app = {
   tempo: { bpm: 70, beatsPerBar: 2, fromSong: false },
   songAnalysis: null,       // analysis of the song loaded in the Sound panel (gives the bar clock)
   mods: {},                 // Patterns: slider → music source, e.g. { density: { src: 'bass', amt: 0.4 } }
+  macros: { worlds: defaultMacros(), patterns: defaultMacros() },
+  media: new Media(),       // a picture under the membrane: camera / image / video / words
+  tracker: new Tracker(),   // your face, hands, body and movement through the camera
+  // what the camera does: relief = none | scene | body | face | motion
+  you: { relief: 'scene', puppet: false, hands: false, motion: false, look: false, handScale: 1 },
+  mediaCfg: { amount: 1.2, ink: 0.6, size: 1, x: 0, y: 0, invert: 0, soft: 2.4, warp: 0 },
+  explore: { open: false, parent: null, kids: [], history: [], strength: 0.5, locks: { colors: false, camera: false, shapes: false, lines: false } },
 };
 
 // Everything that moves every frame.
@@ -627,6 +639,238 @@ function filmTime(dt) {
   return Math.max(0, film.clock - (app.audio.ctx?.outputLatency || 0));
 }
 
+// ------------------------------------------------------------------ you: camera, pictures, words
+const media = app.media, tracker = app.tracker;
+rt.fingers = new Float32Array(15);
+rt.handMirror = new Float32Array([1, 1, 1]);
+const track = { hands: [0, 1].map(() => ({ on: 0, x: 0, y: 0, s: 1, a: 0, curls: [0, 0, 0, 0, 0], spread: 0.5, mirror: 1 })), face: { on: 0, x: 0, y: 0, s: 0.6, roll: 0, turn: 0, mouth: 0, eyes: 1 }, lastRipple: 0, dt: 1 / 60 };
+
+function syncTrackerWants() {
+  const y = app.you;
+  tracker.setWant('face', y.puppet || y.look || y.relief === 'face');
+  tracker.want.faceMask = y.relief === 'face';
+  tracker.setWant('hands', y.hands);
+  tracker.setWant('body', y.relief === 'body');
+  tracker.setWant('motion', y.motion || y.relief === 'motion');
+  media.cam.relief = y.relief;
+}
+tracker.onchange = () => ui?.refreshYou();
+
+app.cameraOn = async () => {
+  try {
+    await tracker.start();
+    media.attachCamera(tracker.video);
+    syncTrackerWants();
+    if (app.mode === 'patterns') app.setMode('worlds');
+    ui.toast('Camera on — it stays on this computer');
+  } catch {
+    ui.toast('Camera access was blocked');
+  }
+  ui.refreshYou();
+};
+app.cameraOff = () => {
+  tracker.stop();
+  media.detachCamera();
+  rt.fingers.fill(0);
+  ui.refreshYou();
+};
+app.setYou = (key, value) => {
+  app.you[key] = value;
+  syncTrackerWants();
+  ui.refreshYou();
+};
+
+app.loadPicture = async file => {
+  try {
+    if (file.type.startsWith('video/') || /\.(mp4|mov|webm|m4v)$/i.test(file.name)) await media.setVideo(file);
+    else await media.setImage(file);
+    if (app.mode === 'patterns') app.setMode('worlds');
+    ui.toast(`“${file.name}” is under the lines now`);
+  } catch (e) {
+    console.warn(e);
+    ui.toast('Could not open that file');
+  }
+  ui.refreshYou();
+};
+app.setWords = (text, font) => {
+  media.setText(text, font);
+  if (text.trim() && app.mode === 'patterns') app.setMode('worlds');
+};
+app.clearPicture = () => { media.clear(); ui.refreshYou(); };
+
+function updateInputs(dt) {
+  track.dt = dt;
+  if (tracker.on) tracker.update();
+  const masks = { canvas: tracker.maskCanvas, body: !!tracker.bodyMask, face: !!tracker.face, motion: tracker.motion.canvas };
+  media.setBlur(0);
+  const sigma = 0.8 + app.mediaCfg.soft * 1.4;
+  if (app.mode !== 'patterns' && (media.update(rt.realTime, masks) || Math.abs(sigma - (track.sigma || 0)) > 0.05)) {
+    track.sigma = sigma;
+    renderer.setMedia(media.output, media.aspect, sigma);
+  }
+}
+
+const ease = (cur, target, rate) => cur + (target - cur) * (1 - Math.exp(-track.dt * rate));
+
+// write the camera / picture into the film values (Worlds and Films)
+function applyInputs(v, still = false) {
+  const cfg = app.mediaCfg, y = app.you;
+  const picture = ['image', 'video', 'text'].includes(media.kind);
+  const camRelief = media.kind === 'camera' && y.relief !== 'none';
+  const hh = v.frame * cfg.size, cx = v.tx + cfg.x * v.frame, cy = v.ty + cfg.y * v.frame;
+  if (picture || camRelief) {
+    Object.assign(v, { media: cfg.amount, mediaInk: cfg.ink, mediaInv: cfg.invert, mediaSoft: 0, mediaWarp: cfg.warp, mediaS: hh, mediaX: cx, mediaY: cy, mediaMask: media.masked ? 1 : 0 });
+  } else { v.media = 0; v.mediaInk = 0; }
+  if (!tracker.on) { rt.fingers.fill(0); return; }
+  const A = tracker.aspect;
+  const toSheet = (u, vv) => [cx + (u - 0.5) * 2 * hh * A, cy + (0.5 - vv) * 2 * hh];
+
+  // your hands → the 3D hands, finger by finger
+  for (let i = 0; i < 2; i++) {
+    const T = track.hands[i], H = y.hands ? tracker.hands[i] : null;
+    T.on = ease(T.on, H ? 1 : 0, 6);
+    if (H) {
+      const [x, yy] = toSheet(H.u, H.v);
+      T.x = ease(T.x, x, 18); T.y = ease(T.y, yy, 18);
+      T.s = ease(T.s, (H.size * 2 * hh) / 0.2 * y.handScale, 10);
+      T.a = ease(T.a, H.angle, 14);
+      T.curls = T.curls.map((c, j) => ease(c, H.curls[j], 16));
+      T.spread = ease(T.spread, H.spread, 10);
+      T.mirror = H.mirror;
+    }
+    if (T.on > 0.01) {
+      Object.assign(v, {
+        [`h${i}on`]: T.on, [`h${i}x`]: T.x, [`h${i}y`]: T.y - 0.12 * T.s, [`h${i}s`]: T.s, [`h${i}a`]: T.a,
+        [`h${i}z`]: Math.min(0.45, Math.max(0.03, 0.05 + (T.s - 1) * 0.18)), [`h${i}curl`]: 0, [`h${i}spread`]: T.spread,
+      });
+      T.curls.forEach((c, j) => { rt.fingers[i * 5 + j] = c * 1.1; });
+      rt.handMirror[i] = T.mirror;
+    } else for (let j = 0; j < 5; j++) rt.fingers[i * 5 + j] = 0;
+  }
+
+  // your face → the ghost puppet, and/or the camera moves as your head moves
+  const F = track.face, f = tracker.face;
+  F.on = ease(F.on, f ? 1 : 0, 5);
+  if (f) {
+    const [x, yy] = toSheet(f.u, f.v);
+    F.x = ease(F.x, x, 14); F.y = ease(F.y, yy, 14);
+    F.s = ease(F.s, f.height * 2 * hh * 0.95, 8);
+    F.roll = ease(F.roll, f.roll, 12); F.turn = ease(F.turn, f.turn, 12);
+    F.mouth = ease(F.mouth, f.mouth, 20); F.eyes = ease(F.eyes, f.eyes, 25);
+    F.u = f.u; F.v = f.v;
+  }
+  if (y.puppet && F.on > 0.01) {
+    Object.assign(v, { face: Math.max(v.face, 1.1 * F.on), faceX: F.x, faceY: F.y, faceS: F.s, faceRoll: F.roll, faceTurn: F.turn, mouth: F.mouth, eyes: F.eyes });
+  }
+  if (y.look && F.on > 0.01 && F.u != null) {
+    const hx = (F.u - 0.5) * 2 * F.on, hy = (0.5 - F.v) * 2 * F.on;
+    v.yaw -= hx * 0.35;
+    v.pitch = Math.min(1.35, Math.max(-0.25, v.pitch - hy * 0.25));
+    v.tx += hx * 0.25 * v.frame;
+    v.ty += hy * 0.2 * v.frame;
+  }
+
+  // movement → ripples in the fabric where you moved
+  const m = tracker.motion;
+  if (!still && y.motion && m.energy > 0.015 && rt.realTime - track.lastRipple > 0.28) {
+    spawnRipple((m.u - 0.5) * A * cfg.size + cfg.x * 0.5, (0.5 - m.v) * cfg.size + cfg.y * 0.5, Math.min(1.6, m.energy * 25));
+    track.lastRipple = rt.realTime;
+  }
+}
+
+// ------------------------------------------------------------------ breeding: 9 children of what you're looking at
+let thumbR = null;
+function thumbRenderer() {
+  if (!thumbR) { thumbR = new Renderer(document.createElement('canvas'), { preserve: true }); thumbR.setFormula(compileFormula('sin(x*d)')); }
+  return thumbR;
+}
+const neutralMusic = { bar: 0.3, barLen: 1.7, loud: 0.5, bass: 0.2, mid: 0.2, high: 0.2, hit: 0, time: 2 };
+function worldStill(set, w = 320, h = 180) {
+  const tr = thumbRenderer();
+  tr.resize(w, h);
+  if (media.kind !== 'none') tr.setMedia(media.output, media.aspect, track.sigma || 3);
+  const v = defaultValues();
+  for (const [k, x] of Object.entries(expand(set))) if (k in v) v[k] = Array.isArray(v[k]) ? (Array.isArray(x) ? x : hexToRgb(x)) : x;
+  applyMacrosWorld(v, app.macros.worlds);
+  applyMusic(v, neutralMusic);
+  applyInputs(v, true);
+  const P = new Float32Array(SHADER_COUNT);
+  tr.clearSlot(0);
+  tr.renderFilm(toShader(v, P), { realTime: 0, ripples: new Float32Array(MAX_RIPPLES * 4), stepK: stepFactor(v), fingers: rt.fingers, handMirror: rt.handMirror }, 0);
+  tr.composite({ a: 0, post: { ...toPost(v), grain: 0.05 } });
+  return tr.canvas.toDataURL('image/jpeg', 0.8);
+}
+function patternStill(state, w = 320, h = 180) {
+  const tr = thumbRenderer();
+  tr.resize(w, h);
+  const s = applyMacrosPatterns(state, app.macros.patterns);
+  s.warps.forEach(x => { x._ph = 2.5 * x.speed; });
+  const c = compileFormula(s.formula, s.bendX, s.bendY);
+  if (c.ok) tr.setFormula(c);
+  tr.clearDisp = true;
+  tr.render({ ...s, echo: 0 }, {
+    time: 2.5, phase: 2.5 * s.flow, phase2: 0, spin: 0, cycle: 0, realTime: 0, fade: 0, intensity: 1, face: { mouth: 0.2, eyes: 1 },
+    center: [0, 0], mouse: [0, 0], ripples: new Float32Array(MAX_RIPPLES * 4), rippleScale: 1, pulse: 0, wobble: 0,
+    audio: { bass: 0, mid: 0, high: 0, level: 0 }, brush: { x: 0, y: 0, vx: 0, vy: 0, size: 0.1, strength: 0, mode: 0, relax: 0 },
+  });
+  return tr.canvas.toDataURL('image/jpeg', 0.8);
+}
+
+function currentParent() {
+  if (app.mode === 'patterns') return cloneState(app.state);
+  const v = app.world.values();
+  return v;
+}
+app.exploreBreed = (parent = app.explore.parent) => {
+  const X = app.explore;
+  X.parent = parent;
+  X.kids = [];
+  for (let i = 0; i < 8; i++) {
+    const seed = (Math.random() * 1e9) | 0;
+    const set = app.mode === 'patterns'
+      ? breedPatterns(parent, X.strength, mutateState, randomState, seed)
+      : breedWorld(parent, X.strength, X.locks, seed);
+    X.kids.push({ set, img: null });
+  }
+  X.parentImg = app.mode === 'patterns' ? patternStill(parent) : worldStill(parent);
+  ui.renderExplore();
+  // render the stills one at a time so the grid fills in without a freeze
+  X.kids.forEach((k, i) => setTimeout(() => {
+    if (X.kids[i] !== k) return;
+    k.img = app.mode === 'patterns' ? patternStill(k.set) : worldStill(k.set);
+    ui.renderExplore();
+  }, 30 * (i + 1)));
+};
+app.exploreOpen = () => {
+  if (app.mode === 'films') return ui.toast('Explore works in Worlds and Patterns');
+  app.explore.open = true;
+  app.explore.history = [];
+  app.exploreBreed(currentParent());
+};
+app.explorePick = i => {
+  const X = app.explore, kid = X.kids[i];
+  if (!kid) return;
+  X.history.push(X.parent);
+  if (app.mode === 'patterns') {
+    pushHistory();
+    app.presetName = 'Bred';
+    setState(makeState(cloneState(kid.set)), { fade: 0.6 });
+  } else {
+    app.world.morphTo(kid.set, app.world.morphBars * barLen() * 0.6);
+    app.presetName = 'Bred';
+    ui.renderName();
+  }
+  app.exploreBreed(kid.set);
+};
+app.exploreBack = () => {
+  const X = app.explore, prev = X.history.pop();
+  if (!prev) return;
+  if (app.mode === 'patterns') setState(makeState(cloneState(prev)), { fade: 0.5 });
+  else app.world.morphTo(prev, 1);
+  app.exploreBreed(prev);
+};
+app.exploreClose = () => { app.explore.open = false; ui.renderExplore(); };
+
 function renderFilmFrame(dt) {
   const t = filmTime(dt);
   const tl = film.tl, A = film.analysis;
@@ -639,6 +883,7 @@ function renderFilmFrame(dt) {
     loud: sample(A.rms, t), bass: sample(A.bass, t), mid: sample(A.mid, t), high: sample(A.high, t),
     hit: film.hit, time: t,
   });
+  applyInputs(v);
   film.lastValues = v;
   rt.stepK = stepFactor(v) * (rt.ripples.some((x, i) => i % 4 === 3 && x > 0 && rt.realTime - rt.ripples[i - 1] < 5) ? 0.7 : 1);
   renderer.updateDisp(rt);
@@ -664,7 +909,7 @@ function renderWorldFrame(dt) {
   const cur = w.current || w.values();
   h.x += (cur.tx + pointer.x * 2 * cur.frame - h.x) * (1 - Math.exp(-dt * 10));
   h.y += (cur.ty + pointer.y * 2 * cur.frame - 0.12 - h.y) * (1 - Math.exp(-dt * 10));
-  const { P, post } = w.frame(app.paused ? 0 : dt, m);
+  const { P, post } = w.frame(app.paused ? 0 : dt, m, { pre: v => applyMacrosWorld(v, app.macros.worlds), post: applyInputs });
   rt.stepK = stepFactor(w.current) * (rt.ripples.some((x, i) => i % 4 === 3 && x > 0 && rt.realTime - rt.ripples[i - 1] < 5) ? 0.7 : 1);
   renderer.updateDisp(rt);
   renderer.renderFilm(P, rt, 0);
@@ -681,8 +926,11 @@ addEventListener('drop', e => {
   e.preventDefault();
   dragDepth = 0;
   dropEl.classList.remove('show');
-  const f = [...e.dataTransfer.files].find(x => x.type.startsWith('audio/') || /\.(mp3|wav|m4a|aac|ogg|flac|opus)$/i.test(x.name));
-  if (!f) return ui.toast('That is not an audio file');
+  const files = [...e.dataTransfer.files];
+  const pic = files.find(x => /^(image|video)\//.test(x.type) || /\.(png|jpe?g|gif|webp|avif|mp4|mov|webm|m4v)$/i.test(x.name));
+  if (pic) return app.loadPicture(pic);
+  const f = files.find(x => x.type.startsWith('audio/') || /\.(mp3|wav|m4a|aac|ogg|flac|opus)$/i.test(x.name));
+  if (!f) return ui.toast('Drop a song, a picture or a video');
   if (app.mode === 'films') app.loadFilmFile(f);
   else app.loadSong(f);
 });
@@ -786,7 +1034,7 @@ addEventListener('keydown', e => {
     app.loadPreset(PRESETS[(i + d + PRESETS.length) % PRESETS.length].id);
   };
   const act = {
-    ' ': app.togglePause, h: app.toggleUI, f: app.toggleFullscreen, r: app.reset, m: app.mutate,
+    ' ': app.togglePause, h: app.toggleUI, f: app.toggleFullscreen, r: app.reset, m: app.mutate, e: app.exploreOpen,
     d: app.surprise, s: app.snapshot, z: app.undo,
     arrowright: () => presetStep(1), arrowleft: () => presetStep(-1),
     '[': () => { app.brush.size = Math.max(0.04, app.brush.size * 0.85); ui.renderDock(); updateBrushRing(); },
@@ -799,6 +1047,7 @@ addEventListener('keydown', e => {
     return;
   }
   const n = parseInt(k, 10);
+  if (app.explore.open && n >= 1 && n <= 8) return app.explorePick(n - 1);
   const tools = TOOLS.filter(t => !t.modes || t.modes.includes(app.mode));
   if (n >= 1 && n <= tools.length) app.setTool(tools[n - 1].id);
 });
@@ -845,6 +1094,7 @@ function frame(now) {
   const s = app.state;
   const a = app.audio, cfg = app.audioCfg;
   a.update(dt, rt.realTime);
+  updateInputs(dt);
 
   if (!app.paused) {
     const sdt = dt * s.speed;
@@ -885,7 +1135,7 @@ function frame(now) {
 
   if (app.mode === 'films' && film.active && film.tl) renderFilmFrame(dt);
   else if (app.mode === 'worlds') renderWorldFrame(dt);
-  else renderer.render(modulated(s, liveMusic(dt)), rt);
+  else renderer.render(applyMacrosPatterns(modulated(s, liveMusic(dt)), app.macros.patterns), rt);
   if (afterRender.length) { const fns = afterRender; afterRender = []; fns.forEach(f => f()); }
   ui.tick(dt);
   adapt(dt);

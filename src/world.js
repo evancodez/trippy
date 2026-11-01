@@ -98,12 +98,14 @@ export class World {
   }
 
   // one frame. music = { bar, barLen, loud, bass, mid, high, hit, time }
-  frame(dt, music) {
+  // hooks.pre(v) runs before speeds are integrated (the macro knobs), hooks.post(v) last (camera, hands)
+  frame(dt, music, hooks = {}) {
     this.t += dt;
     const v = this.values();
+    hooks.pre?.(v);
     const dBars = dt / (music.barLen || 2);
     for (const [rate, target] of Object.entries(RATE_TARGETS)) {
-      this.acc[rate] = settle(rate, this.acc[rate] + v[rate] * dBars, v[rate], dBars, v.gyro, v.gyroS);
+      this.acc[rate] = settle(rate, this.acc[rate] + v[rate] * dBars, v[rate], dBars, v);
       v[target] += this.acc[rate];
     }
     // your hand, pressing through from behind
@@ -116,6 +118,7 @@ export class World {
       v.handSoft = Math.min(v.handSoft, 0.2);
     }
     applyMusic(v, music);
+    hooks.post?.(v);
     this.current = v;
     toShader(v, this.P);
     return { P: this.P, post: toPost(v) };

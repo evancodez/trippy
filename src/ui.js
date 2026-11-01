@@ -6,6 +6,8 @@ import { PATTERNS, WARPS, PALETTES, PATTERN_BY_ID, WARP_BY_ID, MAX_INKS, MIX_MOD
 import { PPP_FILM } from './film/ppp.js';
 import { LOOKS } from './film/looks.js';
 import { PARAMS, rgbToHex } from './film/params.js';
+import { MACROS } from './macros.js';
+import { FONTS } from './media.js';
 import { PRESETS, FORMULA_PRESETS, BLOCKS } from './presets.js';
 import { RANGES, DEFAULTS, warpDefaults } from './state.js';
 import { VARIABLES, FUNCTION_HELP, formatNumber } from './formula.js';
@@ -133,6 +135,7 @@ export function createUI(app) {
     { id: 'reset', icon: 'reset', tip: 'Reset to the base mode (R)', run: () => app.reset() },
     { id: 'mutate', icon: 'sparkle', tip: 'Nudge everything a little (M)', run: () => app.mutate(), text: 'Mutate' },
     { id: 'surprise', icon: 'dice', tip: 'Brand-new random look (D)', run: () => app.surprise(), text: 'Surprise' },
+    { id: 'explore', icon: 'grid', tip: 'Breed it: 8 variations, pick one, repeat (E)', run: () => app.exploreOpen(), text: 'Explore' },
     'sep',
     { id: 'pause', icon: () => (app.paused ? 'play' : 'pause'), tip: 'Pause / play (Space)', run: () => app.togglePause() },
     { id: 'snap', icon: 'camera', tip: 'Save a picture (S)', run: () => app.snapshot() },
@@ -261,12 +264,14 @@ export function createUI(app) {
   }
 
   function renderBody() {
+    const keep = body.scrollTop;
     meters = null;
     runEls = null;
     const view = app.mode === 'worlds' ? renderWorlds()
       : app.mode === 'films' ? renderFilms()
         : { presets: renderPresets, play: renderPlay, smart: renderSmart, sound: renderSound }[tab]();
     body.replaceChildren(...[view].flat(3).filter(Boolean));
+    body.scrollTop = keep;
   }
 
   // ---------------------------------------------------------------- Presets tab
@@ -284,7 +289,8 @@ export function createUI(app) {
       : h('p', { class: 'muted small' }, 'Nothing saved yet. Saves live in this browser only.');
 
     return [
-      h('p', { class: 'lead' }, 'Pick a starting point. Then drag on it, try the tools at the bottom, or hit ', h('b', {}, 'Mutate'), ' a few times.'),
+      knobStrip('patterns'),
+      h('p', { class: 'lead' }, 'Pick a starting point. Then drag on it, try the tools at the bottom, hit ', h('b', {}, 'Mutate'), ', or breed it with ', h('b', {}, 'Explore'), '.'),
       cards,
       section('Your saves', null,
         h('button', { class: 'btn wide', html: `${icon('save')}<span>Save the current look</span>`, onclick: () => promptSave() }),
@@ -403,6 +409,7 @@ export function createUI(app) {
       ];
 
     return [
+      knobStrip('patterns'),
       recipe,
       section('Pattern', 'the thing being warped', patterns, ...patSliders),
       section('Warps', 'applied top → bottom', warps,
@@ -657,6 +664,117 @@ export function createUI(app) {
         [2, 3, 4].map(n => h('button', { class: `chip${t.beatsPerBar === n ? ' on' : ''}`, onclick: () => { t.beatsPerBar = n; renderBody(); } }, String(n)))));
   }
 
+  // ---------------------------------------------------------------- the four big knobs
+  function knob(mac, get, set) {
+    const R = 22, C = 2 * Math.PI * R * 0.75;
+    const svg = h('div', { class: 'knob-dial', html:
+      `<svg viewBox="0 0 60 60"><circle cx="30" cy="30" r="${R}" class="k-track" stroke-dasharray="${C} 999" transform="rotate(135 30 30)"/>` +
+      `<circle cx="30" cy="30" r="${R}" class="k-val" transform="rotate(135 30 30)"/><line x1="30" y1="30" x2="30" y2="12" class="k-tick"/></svg>` });
+    const val = svg.querySelector('.k-val'), tick = svg.querySelector('.k-tick');
+    const paint = () => {
+      const x = get();
+      val.setAttribute('stroke-dasharray', `${C * x} 999`);
+      tick.setAttribute('transform', `rotate(${-135 + x * 270} 30 30)`);
+      el.classList.toggle('moved', Math.abs(x - 0.5) > 0.02);
+    };
+    let start = null;
+    svg.addEventListener('pointerdown', e => { svg.setPointerCapture(e.pointerId); start = { y: e.clientY, x: e.clientX, v: get() }; });
+    svg.addEventListener('pointermove', e => {
+      if (!start) return;
+      set(Math.min(1, Math.max(0, start.v + ((start.y - e.clientY) + (e.clientX - start.x)) / 180)));
+      paint();
+    });
+    svg.addEventListener('pointerup', () => { start = null; });
+    svg.addEventListener('dblclick', () => { set(0.5); paint(); });
+    svg.addEventListener('wheel', e => { e.preventDefault(); set(Math.min(1, Math.max(0, get() - e.deltaY / 800))); paint(); }, { passive: false });
+    const el = h('div', { class: 'knob', title: 'Drag up/down · double-click to reset' }, svg,
+      h('div', { class: 'knob-labels' }, h('span', {}, mac.left), h('span', {}, mac.right)));
+    paint();
+    return el;
+  }
+
+  function knobStrip(which) {
+    const M = app.macros[which];
+    const acc = h('input', { type: 'color', value: M.accent, 'aria-label': 'Accent color', 'data-tip': 'The color the Color knob brings in' });
+    acc.addEventListener('input', () => { M.accent = acc.value; });
+    return h('div', { class: 'knobs-strip' },
+      MACROS.map(mac => knob(mac, () => M[mac.id], x => { M[mac.id] = x; })),
+      h('label', { class: 'knob-accent' }, acc, h('span', {}, 'accent')));
+  }
+
+  // ---------------------------------------------------------------- you: the camera
+  function youSection() {
+    const tr = app.tracker, y = app.you;
+    const st = tr.status;
+    const label = { loading: 'loading…', on: 'on', error: 'didn’t load', off: '' };
+    const status = ['face', 'hands', 'body'].filter(k => tr.want[k] && st[k] !== 'off').map(k => `${{ face: 'Face tracking', hands: 'Hand tracking', body: 'Body outline' }[k]}: ${label[st[k]]}`).join(' · ');
+    const relief = h('div', { class: 'chips' }, [['none', 'Nothing'], ['scene', 'Whole scene'], ['body', 'Just my body'], ['face', 'Just my face'], ['motion', 'Movement trails']].map(([id, name]) =>
+      h('button', { class: `chip${y.relief === id ? ' on' : ''}`, onclick: () => app.setYou('relief', id) }, name)));
+    return section('You', tr.on ? '● camera on' : 'your camera, right here',
+      tr.on
+        ? h('button', { class: 'btn wide', html: `${icon('stop')}<span>Turn the camera off</span>`, onclick: () => app.cameraOff() })
+        : h('button', { class: 'btn wide primary', html: `${icon('camera')}<span>Turn on the camera</span>`, onclick: () => app.cameraOn() }),
+      h('p', { class: 'muted small' }, 'Everything is worked out in this browser — no picture leaves your computer. Trackers download once (a few MB) the first time you switch them on.'),
+      h('div', { class: 'sub-label' }, 'What presses through the lines'),
+      relief,
+      toggle('Ghost puppet — the face in the lines copies yours', () => y.puppet, v => app.setYou('puppet', v)),
+      toggle('Hands — the 3D hands copy yours, finger by finger', () => y.hands, v => app.setYou('hands', v)),
+      toggle('Movement makes ripples', () => y.motion, v => app.setYou('motion', v)),
+      toggle('Look around — move your head and the 3D shifts', () => y.look, v => app.setYou('look', v)),
+      y.hands ? slider('Hand size', { min: 0.4, max: 2.5, get: () => y.handScale, set: v => { y.handScale = v; } }) : null,
+      status ? h('p', { class: 'muted small' }, status) : null);
+  }
+
+  // ---------------------------------------------------------------- pictures & words
+  function pictureSection() {
+    const md = app.media, cfg = app.mediaCfg;
+    const file = h('input', { type: 'file', accept: 'image/*,video/*', hidden: true });
+    file.addEventListener('change', () => { if (file.files[0]) app.loadPicture(file.files[0]); });
+    const words = h('textarea', { class: 'code words', rows: 2, placeholder: 'Type words to press through the lines…', spellcheck: 'false' });
+    words.value = md.kind === 'text' ? md.text.value : '';
+    let timer = 0;
+    words.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => app.setWords(words.value, md.text.font), 160); });
+    const fonts = h('div', { class: 'chips' }, Object.keys(FONTS).map(f =>
+      h('button', { class: `chip${md.text.font === f ? ' on' : ''}`, onclick: () => { md.text.font = f; if (words.value.trim()) app.setWords(words.value, f); renderBody(); } }, f)));
+    const what = { none: 'nothing yet', image: `🖼 ${md.name}`, video: `🎞 ${md.name}`, text: '✎ words', camera: '● the camera' }[md.kind];
+    const c = (key, label, min, max, step) => slider(label, { min, max, step, get: () => cfg[key], set: v => { cfg[key] = v; } });
+    return section('Pictures & words', what,
+      h('div', { class: 'run-actions' },
+        h('button', { class: 'btn', html: `${icon('image')}<span>Image or video</span>`, onclick: () => file.click() }),
+        ['image', 'video', 'text'].includes(md.kind) ? h('button', { class: 'btn', html: `${icon('x')}<span>Remove</span>`, onclick: () => app.clearPicture() }) : null),
+      file,
+      h('p', { class: 'muted small' }, 'Or just drop one anywhere on the page.'),
+      words, fonts,
+      c('amount', 'Relief height', 0, 3), c('ink', 'Drawn in line thickness', 0, 2), c('size', 'Size', 0.2, 3), c('x', 'Move ↔', -1.5, 1.5), c('y', 'Move ↕', -1.5, 1.5),
+      c('soft', 'Soften', 0, 6), c('warp', 'Bend it with the warps', 0, 1),
+      toggle('Invert', () => cfg.invert > 0.5, v => { cfg.invert = v ? 1 : 0; }));
+  }
+
+  // ---------------------------------------------------------------- explore: breed variations
+  const exploreEl = h('div', { id: 'explore', class: 'explore', hidden: true });
+  document.body.append(exploreEl);
+  function renderExplore() {
+    const X = app.explore;
+    exploreEl.hidden = !X.open;
+    if (!X.open) return;
+    const cell = (img, label, onclick, cls = '') => h('button', { class: `ex-cell ${cls}`, onclick },
+      img ? h('img', { src: img, alt: '' }) : h('span', { class: 'spinner' }), h('small', {}, label));
+    const kids = X.kids.map((k, i) => cell(k.img, `#${i + 1}`, () => app.explorePick(i)));
+    const grid = [...kids.slice(0, 4), cell(X.parentImg, 'now — shuffle', () => app.exploreBreed(), 'parent'), ...kids.slice(4)];
+    const locks = app.mode === 'patterns' ? null : h('div', { class: 'chips' }, h('span', { class: 'muted small' }, 'Keep:'),
+      Object.keys(X.locks).map(k => h('button', { class: `chip${X.locks[k] ? ' on' : ''}`, onclick: () => { X.locks[k] = !X.locks[k]; renderExplore(); } }, k)));
+    exploreEl.replaceChildren(
+      h('div', { class: 'ex-head' },
+        h('div', {}, h('b', {}, 'Explore'), h('span', { class: 'muted small' }, 'Pick the one you like — it has 8 children. Keep going.')),
+        h('div', { class: 'ex-ctrls' },
+          slider('Mutation', { min: 0.05, max: 1, get: () => X.strength, set: v => { X.strength = v; }, fmt: v => (v < 0.35 ? 'gentle' : v < 0.7 ? 'medium' : 'wild') }),
+          locks,
+          iconBtn('undo', 'Back a generation', () => app.exploreBack(), !X.history.length),
+          h('button', { class: 'btn primary', onclick: () => app.exploreClose() }, 'Done'))),
+      h('div', { class: 'ex-grid' }, grid));
+  }
+  addEventListener('keydown', e => { if (e.key === 'Escape' && app.explore.open) app.exploreClose(); });
+
   // ---------------------------------------------------------------- Worlds (the film engine, live)
   const WORLD_GROUPS = [
     ['lines', 'Lines', 'the equation: straight lines, rings, tunnel, spiral, crossings'],
@@ -694,8 +812,11 @@ export function createUI(app) {
         params.filter(p => typeof p.def !== 'string').map(worldSlider));
     });
     return [
-      h('p', { class: 'lead' }, 'One world made of lines. Pick a look and ', h('b', {}, 'everything glides there'), ' — the equation re-forms instead of cutting. Use the ', h('b', {}, 'Hand'), ' tool to press through it.'),
+      knobStrip('worlds'),
+      h('p', { class: 'lead' }, 'One world made of lines. Pick a look and ', h('b', {}, 'everything glides there'), ' — the equation re-forms instead of cutting. Try ', h('b', {}, 'Explore'), ' up top to breed new ones.'),
       cards,
+      youSection(),
+      pictureSection(),
       section('Morph', 'how the glide feels',
         slider('Glide length', { min: 0.25, max: 8, step: 0.25, fmt: v => `${v} bars`, get: () => w.morphBars, set: v => { w.morphBars = v; } }),
         toggle('Auto-morph to a new look on the bar', () => w.auto, v => { w.auto = v; w.lastAutoBar = -1e9; }),
@@ -769,6 +890,7 @@ export function createUI(app) {
       section('Smart music mode', 'a new film for any song',
         h('p', { class: 'muted small' }, 'It finds the tempo, the bars and the sections, then writes a film with the same rules as PPP — different every time.'),
         ...songPicker('Make a film for a song', 'drop it on the page or click to choose', file => app.loadFilmFile(file, { forceAuto: true })),
+        h('p', { class: 'muted small' }, 'Turned the camera on in Worlds? Your face, hands and movement show up in the films too.'),
         f.analysis && f.kind === 'ppp' ? h('button', { class: 'btn wide', html: `${icon('dice')}<span>Let the machine direct PPP instead</span>`, onclick: () => app.reshuffle() }) : null),
     ];
   }
@@ -840,6 +962,8 @@ export function createUI(app) {
 
   return {
     refresh() { renderTop(); renderTabs(); renderBody(); },
+    refreshYou() { if (app.mode === 'worlds') renderBody(); },
+    renderExplore,
     refreshRun() { if (app.mode === 'films') renderBody(); },
     runTick, runScene,
     refreshTop: renderTop,

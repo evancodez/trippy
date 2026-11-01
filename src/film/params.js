@@ -68,11 +68,31 @@ export const PARAMS = [
   P('faceS', 0.6, 0.2, 2.5, 'shape', 'Face size'),
   P('faceX', 0, -1.5, 1.5),
   P('faceY', 0, -1.5, 1.5),
+  P('faceRoll', 0, -1.5, 1.5),
+  P('faceTurn', 0, -1.5, 1.5),
   P('orbs', 0, 0, 1.5, 'shape', 'Orbs rising'),
   P('orbN', 5, 2, 14, 'shape', 'Orb grid'),
   P('gyro', 0, 0, 1, 'shape', 'Lattice'),
   P('gyroS', 5, 1, 14, 'shape', 'Lattice size'),
   P('gyroType', 0, 0, 1, 'shape', 'Lattice: organic ↔ portals'),
+  P('sponge', 0, 0, 1, 'space', 'Menger sponge (fractal)'),
+  P('kifs', 0, 0, 1, 'space', 'Fractal crystals'),
+  P('kifsA', 0.6, -3.14, 3.14, 'space', 'Crystal fold angle'),
+  P('spaceS', 1.2, 0.3, 4, 'space', 'Fractal scale'),
+  P('columns', 0, 0, 1, 'space', 'Colonnade rising'),
+  P('colN', 0.9, 0.3, 3, 'space', 'Column spacing'),
+  P('colH', 0.9, 0.1, 3, 'space', 'Column height'),
+  P('penrose', 0, 0, 1, 'objects', 'Impossible triangle'),
+  P('reveal', 0, -3.14, 3.14, 'objects', 'Reveal the trick (turn it)'),
+  P('mobius', 0, 0, 1, 'objects', 'Möbius strip'),
+  P('rings', 0, 0, 1, 'objects', 'Gyroscope rings'),
+  P('objX', 0, -2, 2, 'objects', 'Object ↔'),
+  P('objY', 0, -2, 2, 'objects', 'Object ↕'),
+  P('objZ', 0.35, -0.5, 1.5, 'objects', 'Object pushes through'),
+  P('objS', 0.42, 0.1, 2, 'objects', 'Object size'),
+  P('objSoft', 0.06, 0.005, 0.4, 'objects', 'Fabric over objects'),
+  P('objTilt', 0.9, -3.14, 3.14, 'objects', 'Object tilt'),
+  P('objRot', 0, 0, 0),
   P('handSoft', 0.15, 0.01, 0.45, 'shape', 'Fabric over hands'),
   P('mouth', 0, 0, 1),
   P('eyes', 1, 0, 1),
@@ -87,6 +107,16 @@ export const PARAMS = [
   P('echo', 0, 0, 0.95, 'look', 'Echo trails'),
   P('exposure', 0, -1, 2, 'look', 'Exposure'),
   P('time', 0, 0, 0),
+  // a picture under the membrane: the camera, an image, a video or words
+  P('media', 0, 0, 3, 'media', 'Relief height'),
+  P('mediaInk', 0, 0, 2, 'media', 'Drawn in line thickness'),
+  P('mediaS', 0.6, 0.1, 3, 'media', 'Picture size'),
+  P('mediaX', 0, -2, 2, 'media', 'Picture ↔'),
+  P('mediaY', 0, -2, 2, 'media', 'Picture ↕'),
+  P('mediaInv', 0, 0, 1, 'media', 'Invert the picture'),
+  P('mediaSoft', 1.5, 0, 6, 'media', 'Soften'),
+  P('mediaMask', 0, 0, 1),
+  P('mediaWarp', 0, 0, 1, 'media', 'Bend it with the warps'),
   ...HANDS,
   // the film-look pass
   P('glow', 0, 0, 1.5, 'film', 'Halation glow', 'post'),
@@ -111,10 +141,11 @@ export const PARAMS = [
   P('orbitRate', 0, -0.4, 0.4, 'motion', 'Orbit', 'rate'),
   P('flyRate', 0, -1.2, 1.2, 'motion', 'Fly forward', 'rate'),
   P('ripRate', 2.5, 0, 10, null, null, 'rate'),
+  P('objSpin', 0.15, -1, 1, 'motion', 'Object spin', 'rate'),
 ];
 
 // rates add into these values
-export const RATE_TARGETS = { flow: 'phase', spinRate: 'frot', orbitRate: 'yaw', flyRate: 'fly', ripRate: 'ripPhase' };
+export const RATE_TARGETS = { flow: 'phase', spinRate: 'frot', orbitRate: 'yaw', flyRate: 'fly', ripRate: 'ripPhase', objSpin: 'objRot' };
 
 export const PARAM_BY_NAME = Object.fromEntries(PARAMS.map(p => [p.name, p]));
 export const DEFAULTS = Object.fromEntries(PARAMS.map(p => [p.name, p.def]));

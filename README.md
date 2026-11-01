@@ -14,6 +14,23 @@ A browser playground for trippy black-and-white op art, from flat patterns to a 
   - **PPP — a film in lines**: a 17-chapter film choreographed to Beach House's *PPP*, one continuous morph on its 6/8 bar lines.
   - **Smart music mode** writes a new film for any song, different every time.
 
+**Everywhere:**
+- **Four big knobs** (Calm↔Wild, Flat↔Deep, Mono↔Color, Still↔Moving) each move dozens of settings at once. The accent color is yours to pick.
+- **Explore** (`E`) breeds what you're looking at: 8 variations around it. Pick one and it has 8 children; keep going. You can keep colors, camera, shapes or lines fixed, and set how wild the mutations are.
+- **You (camera)**, worked out locally with MediaPipe. Nothing leaves the browser. You can choose:
+  - What presses through the lines: the whole scene, just your body (silhouette), just your face, or movement trails.
+  - **Ghost puppet:** the line-face copies your expressions (mouth, blinks, head turn and tilt).
+  - **Hands:** the 3D hands copy yours finger by finger.
+  - Movement makes ripples.
+  - **Look around:** move your head and the 3D perspective shifts.
+  - These work in Worlds and in the films.
+- **Pictures & words:** drop an image or video, or type words. They press up under the lines as relief and are drawn in line thickness (engraving), and the warps can bend them.
+- **New geometry:**
+  - Penrose's impossible triangle (built from the camera's own view, with a "reveal" that turns it to show the trick).
+  - A Möbius strip and gyroscope rings that push through the fabric.
+  - An infinite Menger sponge and a field of twisting Sierpiński crystals to fly through.
+  - A colonnade rising out of a floor of lines.
+
 Also: a View menu (the eye button) that toggles each piece of the interface including the brush ring, `H` to hide everything, saves, share links, PNG export and video recording (a whole film run with its audio).
 
 No build step and no dependencies: plain HTML + ES modules + WebGL2.
@@ -68,6 +85,8 @@ Import the GitHub repo in Vercel and keep the defaults: Framework Preset **Other
 | `src/film/timeline.js` | Keyframes → per-parameter tracks, integrated speeds, music modulation |
 | `src/film/ppp.js`, `src/film/auto.js` | The PPP film; the smart film writer |
 | `src/world.js` | Worlds mode: the film engine live, glides, auto-morph, the hand tool |
+| `src/media.js`, `src/tracking.js` | Pictures, video, words and the camera as relief; face / hand / body / motion tracking |
+| `src/macros.js` | The four knobs and breeding (Explore) |
 | `src/shaders.js`, `src/renderer.js` | Patterns-mode GLSL; WebGL2 setup, film pass, compositing + film look |
 | `src/catalog.js`, `src/presets.js`, `src/state.js` | Patterns: patterns, warps, palettes (incl. the Depression Cherry reds), presets, state |
 | `src/formula.js` | Friendly-math → GLSL compiler for the Math tab |

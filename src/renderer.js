@@ -1,4 +1,4 @@
-import { VERT, mainFrag, DISP_FRAG, COMP_FRAG, MAX_WARPS, MAX_NUMS } from './shaders.js';
+import { VERT, mainFrag, DISP_FRAG, COMP_FRAG, BLUR_FRAG, MAX_WARPS, MAX_NUMS } from './shaders.js';
 import { PATTERN_BY_ID, WARP_BY_ID } from './catalog.js';
 import { FILM_FRAG } from './film/shader.js';
 
@@ -45,6 +45,47 @@ export class Renderer {
     this.di = 0;
     this.clearDisp = true;
     this.zeroTex = this.makeTexture(1, 1, false);
+    this.mediaTex = this.makeTexture(1, 1, false, true);   // picture under the membrane (camera / image / video / words)
+    this.mediaAspect = 1;
+    this.fingers = new Float32Array(15);
+    this.handMirror = new Float32Array([1, 1, 1]);
+  }
+
+  // upload a canvas / image / video frame as the media relief (rgb = picture, a = mask), then blur it
+  // in floating point at half size — a smooth relief needs smooth slopes, which 8 bits can't give
+  setMedia(source, aspect, sigma = 3) {
+    const gl = this.gl;
+    if (!this.mediaRaw) this.mediaRaw = this.makeTexture(1, 1, false);
+    gl.bindTexture(gl.TEXTURE_2D, this.mediaRaw);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    this.mediaAspect = aspect || 1;
+    const sw = source.videoWidth || source.naturalWidth || source.width, sh = source.videoHeight || source.naturalHeight || source.height;
+    const w = Math.max(32, Math.round(sw / 2)), h = Math.max(32, Math.round(sh / 2));
+    if (!this.mediaBlur || this.mediaBlur[0].w !== w || this.mediaBlur[0].h !== h) {
+      if (this.mediaBlur) this.freeTargets(this.mediaBlur);
+      this.mediaBlur = [this.makeTarget(w, h, this.floatDisp, true), this.makeTarget(w, h, this.floatDisp, true)];
+    }
+    if (!this.blurProg) this.blurProg = this.program(BLUR_FRAG);
+    const B = this.blurProg, [A, C] = this.mediaBlur;
+    gl.useProgram(B.prog);
+    gl.uniform2f(B.loc('uRes'), w, h);
+    gl.uniform1f(B.loc('uSigma'), Math.max(0.6, sigma));
+    gl.uniform1i(B.loc('uSrc'), 0);
+    gl.activeTexture(gl.TEXTURE0);
+    const pass = (src, dst, dx, dy) => {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fb);
+      gl.viewport(0, 0, w, h);
+      gl.bindTexture(gl.TEXTURE_2D, src);
+      gl.uniform2f(B.loc('uDir'), dx, dy);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    };
+    pass(this.mediaRaw, A, 1, 0);
+    pass(A.tex, C, 0, 1);
+    gl.bindTexture(gl.TEXTURE_2D, C.tex);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    this.mediaTex = C.tex;
   }
 
   program(fragSrc) {
@@ -272,6 +313,12 @@ export class Renderer {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, prev.tex);
     gl.uniform1i(u('uPrev'), 1);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, this.mediaTex);
+    gl.uniform1i(u('uMedia'), 2);
+    gl.uniform1f(u('uMediaAspect'), this.mediaAspect);
+    gl.uniform1fv(u('uFinger'), rt.fingers || this.fingers);
+    gl.uniform1fv(u('uHandMirror'), rt.handMirror || this.handMirror);
     gl.uniform2f(u('uRes'), this.w, this.h);
     gl.uniform1fv(u('uP'), P);
     gl.uniform4fv(u('uRipples'), rt.ripples);

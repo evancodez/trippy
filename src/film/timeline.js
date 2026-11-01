@@ -79,8 +79,8 @@ export class Timeline {
       const a = new Float32Array(n);
       for (let i = 1; i < n; i++) {
         const t = (i - 1) * this.step;
-        a[i] = settle(rate, a[i - 1] + this.valueAt(rate, t) * this.step / this.barLen, this.valueAt(rate, t), this.step / this.barLen,
-          this.valueAt('gyro', t), this.valueAt('gyroS', t));
+        const space = { gyro: this.valueAt('gyro', t), gyroS: this.valueAt('gyroS', t), sponge: this.valueAt('sponge', t), kifs: this.valueAt('kifs', t), spaceS: this.valueAt('spaceS', t) };
+        a[i] = settle(rate, a[i - 1] + this.valueAt(rate, t) * this.step / this.barLen, this.valueAt(rate, t), this.step / this.barLen, space);
       }
       this.acc[rate] = a;
     }
@@ -109,12 +109,16 @@ export class Timeline {
 // Keep accumulated motion tidy: spins and orbits wrap invisibly at a full turn and unwind back to rest
 // when their speed returns to zero; flight wraps by the lattice's own period (invisible inside it)
 // and glides back out when it stops. `dBars` is the time step in bars.
-export function settle(rate, a, speed, dBars, gyro = 0, gyroS = 5) {
-  if (rate === 'spinRate' || rate === 'orbitRate') {
+export function settle(rate, a, speed, dBars, space = {}) {
+  if (rate === 'spinRate' || rate === 'orbitRate' || rate === 'objSpin') {
     a -= Math.PI * 2 * Math.round(a / (Math.PI * 2));
     if (Math.abs(speed) < 0.005) a *= Math.exp(-dBars / 1.5);
   } else if (rate === 'flyRate') {
-    if (gyro > 0.999) { const period = (Math.PI * 2) / gyroS; a -= period * Math.round(a / period); }
+    // inside a periodic space, flying one period forward looks exactly the same: wrap it
+    const period = space.gyro > 0.999 ? (Math.PI * 2) / space.gyroS
+      : space.sponge > 0.999 ? 2 / space.spaceS
+        : space.kifs > 0.999 ? 4 / space.spaceS : 0;
+    if (period) a -= period * Math.round(a / period);
     if (Math.abs(speed) < 1e-4) a *= Math.exp(-dBars / 1.2);
   }
   return a;
@@ -145,13 +149,14 @@ export function applyMusic(v, m) {
   v.mouth = clamp(m.mid * 1.25 - 0.2, 0, 1);
   v.eyes = blink(m.bar, m.barLen || 2);
   v.exposure += v.hitFlash * m.hit * 0.55;
+  v.kifsA += 0.14 * Math.sin(m.bar * TAU / 16);               // the crystals keep refolding, slowly
   v.time = m.time;
   return v;
 }
 
 // How steep can the membrane get? (a safe step size for the ray marcher; gentle sheets march faster)
 export function stepFactor(v) {
-  const slope = v.folds * 0.09 * v.foldF * v.height + v.face * 0.9 * v.height + v.ripple * 0.9 + 0.15;
+  const slope = v.folds * 0.09 * v.foldF * v.height + v.face * 0.9 * v.height + v.ripple * 0.9 + (v.media || 0) * 1.3 * v.height + 0.15;
   return Math.min(0.92, Math.max(0.4, 0.92 / Math.sqrt(1 + slope * slope)));
 }
 

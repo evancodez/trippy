@@ -29,10 +29,10 @@ const ACCENTS = [
 ];
 
 const POOLS = {
-  calm: ['snow', 'scanlines', 'silk', 'moire', 'spiral'],
-  build: ['silk', 'hands', 'landscape', 'road', 'tunnel', 'whirlpool', 'vasarely'],
-  loud: ['orbs', 'chrome', 'lattice', 'mandala', 'tunnel', 'landscape', 'hands'],
-  peak: ['bloom', 'lattice', 'mandala', 'orbs', 'whirlpool'],
+  calm: ['snow', 'scanlines', 'silk', 'moire', 'spiral', 'impossible'],
+  build: ['silk', 'hands', 'landscape', 'road', 'tunnel', 'whirlpool', 'vasarely', 'mobius', 'colonnade'],
+  loud: ['orbs', 'chrome', 'lattice', 'mandala', 'tunnel', 'landscape', 'hands', 'sponge', 'crystals', 'gyroscope'],
+  peak: ['bloom', 'lattice', 'mandala', 'orbs', 'whirlpool', 'sponge', 'crystals'],
 };
 
 function weighted(rng, items) {

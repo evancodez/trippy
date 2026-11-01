@@ -145,7 +145,7 @@ export function createUI(app) {
     viewMenu.hidden = false;
   }
   addEventListener('pointerdown', e => {
-    if (!viewMenu.hidden && !viewMenu.contains(e.target) && !e.target.closest('.act-view')) viewMenu.hidden = true;
+    if (!viewMenu.hidden && !viewMenu.contains(e.target) && !e.target.closest?.('.act-view')) viewMenu.hidden = true;
   });
 
   function renderTop() {
@@ -682,6 +682,8 @@ export function createUI(app) {
     }
   }
   function runScene(i) {
+    const sc = app.show.def?.scenes[i];
+    if (sc) { nameEl.textContent = `▶ ${sc.name}`; nameEl.classList.remove('dirty'); }
     if (!runEls) return;
     runEls.sceneEls.forEach((el, k) => el.classList.toggle('on', k === i));
     runEls.sceneEls[i]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });

@@ -7,7 +7,7 @@ export const DEFAULTS = {
   pattern: 'stripes', density: 12, thickness: 0, param: 0, angle: 0, flow: 0,
   formula: 'sin(x*d)', bendX: '0', bendY: '0',
   warps: [],
-  mixMode: 'off', mixPattern: 'stripes', mixDensity: 12, mixParam: 0.5, mixAngle: 8, mixFlow: 0, mixFlat: false,
+  mixMode: 'off', mixPattern: 'stripes', mixDensity: 12, mixParam: 0, mixAngle: 8, mixFlow: 0, mixFlat: false,
   speed: 1, zoom: 1, spin: 0, rotate: 0, follow: false,
   soft: 0, depth: 0.3, relief: 0, echo: 0, grain: 0.12, vignette: 0.3, invert: false,
   glow: 0, glowColor: '#d80146', aberr: 0, flicker: 0, weave: 0, letterbox: 0,

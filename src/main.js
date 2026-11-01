@@ -460,7 +460,9 @@ app.showStop = ({ keepLook = false } = {}) => {
   show.recordRun = false;
   app.audio.el?.pause();
   show.active = false;
+  show.current = -1;
   document.body.classList.remove('ui-hidden');
+  ui.renderName();
   ui.refreshRun();
 };
 

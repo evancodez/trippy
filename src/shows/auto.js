@@ -90,14 +90,21 @@ export function generateShow(an, seed = (Math.random() * 2 ** 31) | 0, name = 'y
   const glowColor = accent.color || '#ffffff';
   const peakAt = pieces.reduce((best, p, i) => (p.loud > pieces[best].loud ? i : best), 0);
 
-  // 3. choose a scene for every piece
+  // 3. choose a scene for every piece, favoring ones not used yet
   let last = null;
+  const used = {};
+  const choose = pool => {
+    const options = pool.filter(k => k !== last);
+    const least = Math.min(...options.map(k => used[k] || 0));
+    return pick(rng, options.filter(k => (used[k] || 0) === least));
+  };
   const scenes = pieces.map((p, i) => {
     const t = i === 0 ? 'calm' : i === pieces.length - 1 && p.loud < q(0.5) ? 'calm' : tier(p);
-    let kind = pick(rng, POOLS[t].filter(k => k !== last)) || 'silk';
+    let kind = choose(POOLS[t]) || 'silk';
     if (i === peakAt && rng() < 0.75) kind = 'bloom';
     if (i === pieces.length - 1 && p.loud < q(0.4)) kind = rng() < 0.5 ? 'afterglow' : 'staticGhost';
     last = kind;
+    used[kind] = (used[kind] || 0) + 1;
     const afterPeak = i > peakAt;
     const hot = t === 'peak' || (t === 'loud' && rng() < 0.3);
     const opts = {

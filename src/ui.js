@@ -1,6 +1,7 @@
 // All the DOM: top bar, side panel (Presets / Freeplay / Smart / Sound), tool dock, toasts.
 // Sliders write straight into app.state; anything that changes structure re-renders the open tab.
-import { PATTERNS, WARPS, PALETTES, PATTERN_BY_ID, WARP_BY_ID, MAX_INKS } from './catalog.js';
+import { PATTERNS, WARPS, PALETTES, PATTERN_BY_ID, WARP_BY_ID, MAX_INKS, MIX_MODES } from './catalog.js';
+import { PPP_SHOW } from './shows/ppp.js';
 import { PRESETS, FORMULA_PRESETS, BLOCKS } from './presets.js';
 import { RANGES, DEFAULTS, warpDefaults } from './state.js';
 import { VARIABLES, FUNCTION_HELP, formatNumber } from './formula.js';
@@ -46,6 +47,7 @@ export function createUI(app) {
   const hintEl = document.getElementById('hint');
   let tab = 'presets';
   let meters = null;
+  let runEls = null;
   let toastTimer = 0;
 
   // ---------------------------------------------------------------- building blocks
@@ -106,8 +108,45 @@ export function createUI(app) {
     { id: 'share', icon: 'link', tip: 'Copy a link to this exact look', run: () => app.share() },
     { id: 'full', icon: 'expand', tip: 'Fullscreen (F)', run: () => app.toggleFullscreen() },
     { id: 'panel', icon: 'panel', tip: 'Show / hide the menu', run: () => togglePanel() },
-    { id: 'hide', icon: 'eye', tip: 'Hide everything (H)', run: () => app.toggleUI() },
+    { id: 'view', icon: 'eye', tip: 'Choose what’s on screen (H hides everything)', run: e => toggleViewMenu(e.currentTarget) },
   ];
+
+  // ---------------------------------------------------------------- what's on screen
+  const VIEW_KEY = 'trippy.view.v1';
+  const VIEW_ITEMS = [['topbar', 'Top bar'], ['panel', 'Side panel'], ['dock', 'Tool dock'], ['ring', 'Brush ring (cursor circle)'], ['name', 'Preset name'], ['hint', 'Tips']];
+  const view = { topbar: true, panel: true, dock: true, ring: true, name: true, hint: true };
+  try { Object.assign(view, JSON.parse(localStorage.getItem(VIEW_KEY) || '{}')); } catch {}
+  function applyView(save = true) {
+    const b = document.body.classList;
+    b.toggle('no-topbar', !view.topbar);
+    b.toggle('panel-closed', !view.panel);
+    b.toggle('no-dock', !view.dock);
+    b.toggle('no-ring', !view.ring);
+    b.toggle('no-name', !view.name);
+    b.toggle('no-hint', !view.hint);
+    if (save) try { localStorage.setItem(VIEW_KEY, JSON.stringify(view)); } catch {}
+  }
+  function setView(k, v) {
+    view[k] = v;
+    applyView();
+    if (k === 'ring') renderDock();
+  }
+  const viewMenu = h('div', { class: 'view-menu glass chrome', hidden: true });
+  document.body.append(viewMenu);
+  function toggleViewMenu(anchor) {
+    if (!viewMenu.hidden) { viewMenu.hidden = true; return; }
+    viewMenu.replaceChildren(
+      h('b', {}, 'Show on screen'),
+      ...VIEW_ITEMS.map(([k, label]) => toggle(label, () => view[k], v => setView(k, v))),
+      h('button', { class: 'btn wide', onclick: () => { viewMenu.hidden = true; app.toggleUI(); } }, 'Hide everything (H)'));
+    const r = anchor.getBoundingClientRect();
+    viewMenu.style.top = `${r.bottom + 8}px`;
+    viewMenu.style.right = `${Math.max(8, innerWidth - r.right)}px`;
+    viewMenu.hidden = false;
+  }
+  addEventListener('pointerdown', e => {
+    if (!viewMenu.hidden && !viewMenu.contains(e.target) && !e.target.closest('.act-view')) viewMenu.hidden = true;
+  });
 
   function renderTop() {
     actionsEl.replaceChildren(...ACTIONS.map(a => {
@@ -128,9 +167,8 @@ export function createUI(app) {
     nameEl.classList.toggle('dirty', !!app.dirty);
   }
 
-  function togglePanel(force) {
-    const closed = force ?? !document.body.classList.contains('panel-closed');
-    document.body.classList.toggle('panel-closed', closed);
+  function togglePanel(closed) {
+    setView('panel', closed == null ? !view.panel : !closed);
   }
 
   // ---------------------------------------------------------------- tool dock
@@ -151,6 +189,10 @@ export function createUI(app) {
       mini('Size', 'size', 0.04, 0.5),
       mini('Strength', 'strength', 0.1, 1),
       app.tool === 'ripple' || app.tool === 'move' ? null : mini('Spring back', 'spring', 0, 1),
+      h('button', {
+        class: `icon-btn${view.ring ? ' on' : ''}`, 'data-tip': view.ring ? 'Hide the brush ring' : 'Show the brush ring',
+        'aria-label': 'Brush ring', html: icon(view.ring ? 'ring' : 'ringOff'), onclick: () => setView('ring', !view.ring),
+      }),
       iconBtn('wipe', 'Smooth out all brush marks', () => app.clearDistortion()));
     dock.replaceChildren(tools, opts);
   }
@@ -161,6 +203,7 @@ export function createUI(app) {
     { id: 'play', name: 'Freeplay' },
     { id: 'smart', name: 'Smart' },
     { id: 'sound', name: 'Sound' },
+    { id: 'run', name: 'Run' },
   ];
 
   function renderTabs() {
@@ -170,6 +213,7 @@ export function createUI(app) {
 
   function setTab(id) {
     tab = id;
+    if (id === 'run' && !app.show.def && app.show.status === 'idle') app.loadPPP();
     renderTabs();
     renderBody();
     body.scrollTop = 0;
@@ -177,7 +221,8 @@ export function createUI(app) {
 
   function renderBody() {
     meters = null;
-    const view = { presets: renderPresets, play: renderPlay, smart: renderSmart, sound: renderSound }[tab]();
+    runEls = null;
+    const view = { presets: renderPresets, play: renderPlay, smart: renderSmart, sound: renderSound, run: renderRun }[tab]();
     body.replaceChildren(...[view].flat().filter(Boolean));
   }
 
@@ -294,25 +339,56 @@ export function createUI(app) {
       }) : null,
       s.inks.length > 1 ? iconBtn('minus', 'Remove last ink', () => { s.inks.pop(); app.touch(); renderBody(); }) : null);
 
+    const mixChips = h('div', { class: 'chips' }, MIX_MODES.map(m =>
+      h('button', {
+        class: `chip${s.mixMode === m.id ? ' on' : ''}`, 'data-tip': m.blurb || null,
+        onclick: () => { s.mixMode = m.id; app.touch(); renderBody(); },
+      }, m.name)));
+    const layer2 = s.mixMode === 'off'
+      ? [h('p', { class: 'muted small' }, 'Overlay a second pattern. Try XOR with two stripe sets a few degrees apart — instant moiré. “Inside 3D” paints it onto spheres and ghost faces.')]
+      : [
+        h('div', { class: 'pats' }, PATTERNS.filter(p => p.id !== 'formula').map(p =>
+          h('button', {
+            class: `pat${s.mixPattern === p.id ? ' on' : ''}`,
+            onclick: () => { s.mixPattern = p.id; s.mixParam = p.param.def; app.touch(); renderBody(); },
+          }, thumbImg('patterns', p.id), h('span', {}, p.name)))),
+        stateSlider('mixDensity', 'Density', { fmt: v => v.toFixed(1) }),
+        stateSlider('mixAngle', 'Angle', { fmt: v => `${v.toFixed(1)}°` }),
+        stateSlider('mixParam', PATTERN_BY_ID[s.mixPattern].param.label),
+        stateSlider('mixFlow', 'Flow'),
+        toggle('Stay flat (ignore the warps)', () => s.mixFlat, v => { s.mixFlat = v; app.touch(); }),
+      ];
+
     return [
       recipe,
       section('Pattern', 'the thing being warped', patterns, ...patSliders),
       section('Warps', 'applied top → bottom', warps,
         s.warps.length ? null : h('p', { class: 'muted small' }, 'No warps — the pattern is flat. Add one!'),
         addBtn, addMenu),
+      section('Layer 2', 'merge a second pattern', mixChips, ...layer2),
       section('Motion', null,
         stateSlider('speed', 'Speed'),
         stateSlider('zoom', 'Zoom'),
         stateSlider('spin', 'Spin'),
+        stateSlider('rotate', 'Rotate', { fmt: v => `${Math.round(v)}°` }),
         toggle('Center follows the mouse', () => s.follow, v => { s.follow = v; app.touch(); })),
-      section('Look', 'the 3D illusion lives here',
+      section('3D look', 'the illusion lives here',
         stateSlider('depth', '3D depth shading', { hint: 'Where the pattern is squeezed it fades into shadow, like it is far away' }),
         stateSlider('relief', 'Chrome relief', { hint: 'Lights the ink like raised, shiny metal' }),
         stateSlider('soft', 'Softness'),
         stateSlider('echo', 'Echo trails'),
-        stateSlider('grain', 'Film grain'),
-        stateSlider('vignette', 'Vignette'),
         toggle('Invert', () => s.invert, v => { s.invert = v; app.touch(); })),
+      section('Film look', 'post effects',
+        stateSlider('glow', 'Halation glow', { hint: 'Bright areas bleed a soft colored glow, like old film' }),
+        h('div', { class: 'color-row' },
+          colorInput(() => s.glowColor, v => { s.glowColor = v; }, 'Glow color'),
+          colorInput(() => s.fog, v => { s.fog = v; }, 'Shadow / fog color')),
+        stateSlider('aberr', 'Color split'),
+        stateSlider('flicker', 'Flicker'),
+        stateSlider('weave', 'Gate weave'),
+        stateSlider('letterbox', 'Letterbox'),
+        stateSlider('grain', 'Film grain'),
+        stateSlider('vignette', 'Vignette')),
       section('Color', 'black & white by default', palettes, colorRow,
         s.inks.length > 1 ? stateSlider('cycle', 'Color cycling') : h('p', { class: 'muted small' }, 'Add a second ink and the stripes take turns. Then try color cycling.')),
     ];
@@ -503,14 +579,112 @@ export function createUI(app) {
       drop, file,
       h('button', { class: 'btn wide', html: `${icon('mic')}<span>Use the microphone instead</span>`, onclick: () => app.useMic() }),
       now,
+      a.mode === 'file' ? h('button', { class: 'btn wide primary', html: `${icon('film')}<span>Make a music video from this song</span>`, onclick: () => app.autoFromCurrentSong() }) : null,
       section('Levels', null, h('div', { class: 'meters' }, meters.bass, meters.mid, meters.high, meters.beat)),
       section('What reacts', null,
         cfgSlider('pulse', 'Bass → zoom thump'),
         cfgSlider('ripples', 'Beats → ripples'),
-        cfgSlider('boost', 'Loudness → speed'),
+        cfgSlider('intensity', 'Loudness → intensity', 'Louder music pushes the warps harder (not faster)'),
         cfgSlider('wobble', 'Mids → wobble')),
       h('p', { class: 'muted small' }, 'Formulas can use ', h('code', {}, 'bass'), ', ', h('code', {}, 'mid'), ' and ', h('code', {}, 'high'), ' too — try the Heartbeat recipe in Smart.'),
     ];
+  }
+
+  // ---------------------------------------------------------------- Run tab (music videos)
+  const fmtT = t => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+
+  function songPicker(label, sub, onFile) {
+    const file = h('input', { type: 'file', accept: 'audio/*', hidden: true });
+    file.addEventListener('change', () => { if (file.files[0]) onFile(file.files[0]); });
+    return [h('button', { class: 'dropzone', onclick: () => file.click() },
+      h('span', { html: icon('music') }), h('b', {}, label), h('small', {}, sub)), file];
+  }
+
+  function renderRun() {
+    const sh = app.show, def = sh.def;
+    const playing = app.showPlaying();
+    const status = sh.status === 'loading'
+      ? h('div', { class: 'status' }, h('span', { class: 'spinner' }), sh.message)
+      : sh.status === 'error' ? h('div', { class: 'status bad' }, sh.message) : null;
+
+    const pppCard = h('div', { class: `film${sh.kind === 'ppp' ? ' on' : ''}` },
+      h('div', { class: 'film-art' }),
+      h('div', { class: 'film-text' },
+        h('b', {}, PPP_SHOW.title),
+        h('small', {}, `${PPP_SHOW.artist} · 6:09 · 6/8 at ${PPP_SHOW.bpm} bpm`),
+        h('p', {}, PPP_SHOW.logline)),
+      sh.kind === 'ppp' ? null : h('button', { class: 'btn primary', onclick: () => app.loadPPP() }, 'Load'));
+
+    const need = sh.status === 'need-song'
+      ? [h('p', { class: 'muted small' }, sh.message), ...songPicker('Choose the PPP mp3', 'it stays on your computer', f => app.loadShowFile(f))]
+      : [];
+
+    let player = null, timeline = null;
+    if (def) {
+      const dur = show_duration(def);
+      const time = h('span', { class: 'run-time' }, `${fmtT(sh.clock)} / ${fmtT(dur)}`);
+      const scrub = h('input', { type: 'range', min: 0, max: dur, step: 0.01, 'aria-label': 'Song position' });
+      scrub.value = sh.clock;
+      scrub.style.setProperty('--p', `${(sh.clock / dur) * 100}%`);
+      let dragging = false;
+      scrub.addEventListener('pointerdown', () => { dragging = true; });
+      scrub.addEventListener('pointerup', () => { dragging = false; });
+      scrub.addEventListener('input', () => { app.showSeek(+scrub.value); scrub.style.setProperty('--p', `${(scrub.value / dur) * 100}%`); });
+      const ticks = h('div', { class: 'ticks' }, def.scenes.map(sc => h('i', { style: `left:${(sc.at / dur) * 100}%` })));
+      const sceneEls = def.scenes.map((sc, i) => h('button', {
+        class: `scene${i === sh.current ? ' on' : ''}`, onclick: () => app.showSeek(sc.at + 0.02),
+      },
+      h('span', { class: 'scene-time' }, fmtT(sc.at), sc.bar != null ? h('i', {}, `bar ${sc.bar}`) : null),
+      h('span', { class: 'scene-body' }, h('b', {}, sc.name), h('span', {}, sc.story), h('small', {}, sc.how))));
+      runEls = { time, scrub, dur, sceneEls, isDragging: () => dragging };
+
+      player = h('div', { class: 'player' },
+        h('div', { class: 'transport' },
+          h('button', { class: 'play', 'aria-label': playing ? 'Pause' : 'Play', html: icon(playing ? 'pause' : 'play'), onclick: () => (playing ? app.showPause() : app.showPlay()) }),
+          h('div', { class: 'transport-mid' },
+            h('b', {}, def.title),
+            time),
+          iconBtn('stop', 'Stop and go back to the editor', () => app.showStop())),
+        h('div', { class: 'scrub' }, ticks, scrub),
+        h('div', { class: 'run-actions' },
+          h('button', { class: 'btn', html: `${icon('record')}<span>Record the whole run</span>`, onclick: () => app.recordRun() }),
+          h('button', { class: 'btn', html: `${icon('save')}<span>Keep this look</span>`, 'data-tip': 'Stop and edit whatever is on screen', onclick: () => app.showStop({ keepLook: true }) }),
+          sh.kind === 'auto' ? h('button', { class: 'btn', html: `${icon('dice')}<span>New cut</span>`, onclick: () => app.reshuffle() }) : null),
+        toggle('Cinema mode (hide controls while it plays)', () => sh.cinema, v => { sh.cinema = v; }),
+        h('p', { class: 'muted small' }, sh.kind === 'auto' ? def.logline : 'Your mouse tools still work while it plays — try Ripple.'));
+      timeline = section(sh.kind === 'ppp' ? 'How it was made' : 'The cut', 'scene by scene · tap to jump', h('div', { class: 'scenes' }, sceneEls));
+    }
+
+    return [
+      h('p', { class: 'lead' }, 'Music videos made of pure geometry. Everything is cut on the song’s bar lines; loudness changes how ', h('b', {}, 'intense'), ' things get, never how fast.'),
+      pppCard, ...need, status, player, timeline,
+      section('Smart music mode', 'auto-directs any song',
+        h('p', { class: 'muted small' }, 'Give it any song: it finds the tempo, bars and sections, then cuts a new film from the same building blocks. Every cut is different — hit “New cut” for another.'),
+        ...songPicker('Auto-direct a song', 'drop it on the page or click to choose', f => app.loadShowFile(f, { forceAuto: true })),
+        sh.analysis && sh.kind === 'ppp' ? h('button', { class: 'btn wide', html: `${icon('dice')}<span>Auto-direct PPP instead (random cut)</span>`, onclick: () => app.reshuffle() }) : null),
+      h('details', { class: 'sec details' },
+        h('summary', {}, 'How the director works'),
+        h('ul', { class: 'explain' },
+          h('li', {}, 'The song is decoded and analysed once: loudness, bass/mid/treble, note onsets, tempo (autocorrelation of the onsets) and section changes (where the sound shifts most).'),
+          h('li', {}, 'Every scene is a look plus a little program that runs each frame. Sway, flight speed and spin are tied to the bar and beat counters, so motion stays on tempo.'),
+          h('li', {}, 'Loudness raises the intensity of the warps (deeper folds, bigger bulges); strong onsets drop ripples, flashes or glitches.'),
+          h('li', {}, 'Transitions render both scenes at once and mix them: dissolve, iris, op-art ring wipe, blinds, ink bleed, flash or a hard cut on the downbeat.'))),
+    ];
+  }
+  const show_duration = def => def.duration || app.show.director?.duration || 1;
+
+  function runTick(t) {
+    if (!runEls) return;
+    runEls.time.textContent = `${fmtT(t)} / ${fmtT(runEls.dur)}`;
+    if (!runEls.isDragging()) {
+      runEls.scrub.value = t;
+      runEls.scrub.style.setProperty('--p', `${(t / runEls.dur) * 100}%`);
+    }
+  }
+  function runScene(i) {
+    if (!runEls) return;
+    runEls.sceneEls.forEach((el, k) => el.classList.toggle('on', k === i));
+    runEls.sceneEls[i]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
 
   // ---------------------------------------------------------------- toasts, hint, per-frame
@@ -554,20 +728,23 @@ export function createUI(app) {
   }
 
   // ---------------------------------------------------------------- boot
+  applyView(false);
   renderTop();
   renderDock();
   renderTabs();
   renderBody();
-  if (matchMedia('(max-width: 760px)').matches) togglePanel(true);
+  if (matchMedia('(max-width: 760px)').matches) document.body.classList.add('panel-closed');   // not saved
   showHint();
 
   return {
     refresh() { renderTop(); renderBody(); },
+    refreshRun() { if (tab === 'run') renderBody(); },
+    runTick, runScene,
     refreshTop: renderTop,
     renderName,
     renderDock,
     setTab,
     get tab() { return tab; },
-    toast, tick, setThumb, dismissHint, togglePanel,
+    toast, tick, setThumb, dismissHint, togglePanel, setView,
   };
 }

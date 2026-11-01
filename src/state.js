@@ -7,9 +7,11 @@ export const DEFAULTS = {
   pattern: 'stripes', density: 12, thickness: 0, param: 0, angle: 0, flow: 0,
   formula: 'sin(x*d)', bendX: '0', bendY: '0',
   warps: [],
-  speed: 1, zoom: 1, spin: 0, follow: false,
+  mixMode: 'off', mixPattern: 'stripes', mixDensity: 12, mixParam: 0.5, mixAngle: 8, mixFlow: 0, mixFlat: false,
+  speed: 1, zoom: 1, spin: 0, rotate: 0, follow: false,
   soft: 0, depth: 0.3, relief: 0, echo: 0, grain: 0.12, vignette: 0.3, invert: false,
-  paper: '#f4f3ee', inks: ['#0b0b0b'], cycle: 0,
+  glow: 0, glowColor: '#d80146', aberr: 0, flicker: 0, weave: 0, letterbox: 0,
+  paper: '#f4f3ee', inks: ['#0b0b0b'], fog: '#000000', cycle: 0,
 };
 
 // Slider ranges for every numeric top-level setting (used by the UI and by mutate/randomize).
@@ -29,6 +31,16 @@ export const RANGES = {
   grain: { min: 0, max: 1 },
   vignette: { min: 0, max: 1 },
   cycle: { min: 0, max: 4 },
+  rotate: { min: -180, max: 180, step: 1 },
+  mixDensity: { min: 1, max: 40, step: 0.1 },
+  mixParam: { min: 0, max: 1 },
+  mixAngle: { min: -90, max: 90, step: 0.5 },
+  mixFlow: { min: -2, max: 2 },
+  glow: { min: 0, max: 1.5 },
+  aberr: { min: 0, max: 1 },
+  flicker: { min: 0, max: 1 },
+  weave: { min: 0, max: 1 },
+  letterbox: { min: 0, max: 1 },
 };
 
 export function warpDefaults(type) {
@@ -44,10 +56,14 @@ export function makeState(partial = {}) {
   const s = { ...structuredClone(DEFAULTS), ...structuredClone(partial) };
   if (partial.palette) {
     const pal = PALETTES.find(p => p.id === partial.palette);
-    if (pal) { s.paper = pal.paper; s.inks = [...pal.inks]; }
+    if (pal) {
+      s.paper = partial.paper ?? pal.paper;
+      s.inks = partial.inks ? [...partial.inks] : [...pal.inks];
+    }
     delete s.palette;
   }
   if (!PATTERN_BY_ID[s.pattern]) s.pattern = 'stripes';
+  if (!PATTERN_BY_ID[s.mixPattern] || s.mixPattern === 'formula') s.mixPattern = 'stripes';
   if (partial.param === undefined) s.param = PATTERN_BY_ID[s.pattern].param.def;
   s.warps = (s.warps || []).filter(w => WARP_BY_ID[w.type]).slice(0, MAX_WARPS).map(w => ({ ...warpDefaults(w.type), ...w }));
   s.inks = (s.inks || []).slice(0, MAX_INKS);
@@ -86,7 +102,7 @@ export function mutateState(s, amount = 1) {
   return makeState(m);
 }
 
-const SPACE_WARPS = ['tunnel', 'floor', 'tiles', 'kaleido', 'fold'];
+const SPACE_WARPS = ['tunnel', 'floor', 'tiles', 'kaleido', 'fold', 'sphere', 'tilt', 'lenses'];
 
 function randomWarp(existing = []) {
   // only one "space-changing" warp at a time, otherwise it turns to mush
@@ -120,6 +136,13 @@ export function randomState() {
     soft: Math.random() < 0.12 ? rand(0.2, 0.6) : 0,
     warps: [],
   };
+  if (Math.random() < 0.18) {
+    s.mixMode = pick(['xor', 'xor', 'and', 'add']);
+    s.mixPattern = pick(['stripes', 'rings', 'checker', 'rays']);
+    s.mixDensity = rand(6, 24);
+    s.mixAngle = rand(-12, 12);
+    s.mixFlat = Math.random() < 0.5;
+  }
   if (Math.random() < 0.15) {
     const f = pick(FORMULA_PRESETS);
     Object.assign(s, { pattern: 'formula', formula: f.formula, bendX: f.bendX || '0', bendY: f.bendY || '0', density: f.density ?? 10 });
@@ -129,6 +152,7 @@ export function randomState() {
   // put space-changing warps first so the others bend the result
   s.warps.sort((a, b) => SPACE_WARPS.includes(b.type) - SPACE_WARPS.includes(a.type));
   const pal = Math.random() < 0.65 ? PALETTES[Math.random() < 0.8 ? 0 : 1] : pick(PALETTES);
+  if (Math.random() < 0.25) { s.glow = rand(0.2, 0.7); s.fog = Math.random() < 0.5 ? '#000000' : '#5e021d'; }
   s.paper = pal.paper;
   s.inks = [...pal.inks];
   s.cycle = pal.inks.length > 1 && Math.random() < 0.5 ? rand(0.3, 1.5) : 0;

@@ -6,6 +6,10 @@ import { makeState, cloneState, mutateState, randomState, encodeShare, decodeSha
 import { AudioEngine } from './audio.js';
 import { createUI, TOOLS } from './ui.js';
 import { MAX_RIPPLES } from './shaders.js';
+import { Director } from './director.js';
+import { analyzeAudio } from './analysis.js';
+import { PPP_SHOW } from './shows/ppp.js';
+import { generateShow } from './shows/auto.js';
 
 const canvas = document.getElementById('stage');
 let renderer;
@@ -33,7 +37,7 @@ const app = {
   formulaError: null,
   tool: 'ripple',
   brush: { size: 0.16, strength: 0.7, spring: 0.35 },
-  audioCfg: { pulse: 0.5, ripples: 0.5, boost: 0.3, wobble: 0.25 },
+  audioCfg: { pulse: 0.45, ripples: 0.5, intensity: 0.6, wobble: 0.2 },
   paused: false,
   thumbs: { presets: {}, patterns: {}, warps: {} },
   history: [],
@@ -44,7 +48,8 @@ const app = {
 
 // Everything that moves every frame.
 const rt = {
-  time: 0, phase: 0, spin: 0, cycle: 0, realTime: 0, fade: 0,
+  time: 0, phase: 0, phase2: 0, spin: 0, cycle: 0, realTime: 0, fade: 0, intensity: 1,
+  face: { mouth: 0, eyes: 1 },
   center: [0, 0], pan: [0, 0], mouse: [0, 0],
   ripples: new Float32Array(MAX_RIPPLES * 4), rippleScale: 1,
   pulse: 0, wobble: 0,
@@ -317,6 +322,191 @@ app.useMic = async () => {
 };
 app.stopAudio = () => app.audio.stop();
 
+// ------------------------------------------------------------------ music videos (Run tab)
+const PPP_FILE = 'Beach House - PPP.mp3';
+const show = app.show = {
+  kind: null,           // 'ppp' | 'auto'
+  def: null,            // the show: scenes laid against the song
+  director: null,
+  analysis: null,
+  file: null,
+  active: false,        // the director is driving the screen
+  clock: 0,
+  status: 'idle',       // idle | loading | ready | need-song | error
+  message: '',
+  seed: 0,
+  cinema: true,         // hide the interface while a film plays
+  recordRun: false,
+  current: -1,
+  lastState: null,
+};
+
+async function prepareSong(file) {
+  show.status = 'loading';
+  show.message = 'Listening to the song…';
+  ui.refreshRun();
+  const analysis = await analyzeAudio(await file.arrayBuffer(), msg => { show.message = `${msg}…`; ui.refreshRun(); });
+  await app.audio.loadFile(file, { autoplay: false, loop: false });
+  const el = app.audio.el;
+  if (el.readyState < 1) await new Promise(r => el.addEventListener('loadedmetadata', r, { once: true }));
+  el.addEventListener('ended', onShowEnded);
+  show.file = file;
+  show.analysis = analysis;
+  return analysis;
+}
+
+function useShow(def) {
+  show.def = def;
+  show.director = new Director(def, show.analysis);
+  show.director.onNewSlot = slot => renderer.clearSlot(slot);
+  show.director.spawn = (x, y, s) => spawnRipple(x, y, s);
+  show.kind = def.id;
+  show.status = 'ready';
+  show.message = '';
+  show.current = -1;
+}
+
+const songName = () => show.file?.name.replace(/\.[^.]+$/, '') || 'your song';
+
+app.loadShowFile = async (file, { forceAuto = false } = {}) => {
+  try {
+    app.showStop();
+    const an = await prepareSong(file);
+    const ppp = !forceAuto && /ppp/i.test(file.name) && Math.abs(an.duration - PPP_SHOW.duration) < 4;
+    if (ppp) useShow(PPP_SHOW);
+    else {
+      show.seed = (Math.random() * 2 ** 31) | 0;
+      useShow(generateShow(an, show.seed, songName()));
+    }
+    ui.refreshRun();
+    ui.toast(ppp ? 'PPP is ready — press play' : 'Your film is cut — press play');
+  } catch (e) {
+    console.warn(e);
+    show.status = 'error';
+    show.message = 'Could not read that song.';
+    ui.refreshRun();
+  }
+};
+
+// The PPP film uses the MP3 sitting next to the app when there is one; otherwise it asks for it.
+app.loadPPP = async () => {
+  if (show.kind === 'ppp' && show.analysis) return;
+  try {
+    const res = await fetch(encodeURI(PPP_FILE));
+    if (!res.ok || /text\/html/.test(res.headers.get('content-type') || '')) throw new Error('missing');
+    await app.loadShowFile(new File([await res.blob()], PPP_FILE, { type: 'audio/mpeg' }));
+  } catch {
+    show.status = 'need-song';
+    show.message = 'Drop “Beach House - PPP.mp3” onto the page — the song isn’t hosted with the app.';
+    ui.refreshRun();
+  }
+};
+
+app.reshuffle = () => {
+  if (!show.analysis) return;
+  show.seed = (Math.random() * 2 ** 31) | 0;
+  useShow(generateShow(show.analysis, show.seed, songName()));
+  ui.refreshRun();
+  ui.toast(`New cut · seed ${show.seed}`);
+};
+
+app.autoFromCurrentSong = () => {
+  const f = app.audio.file;
+  if (!f) return ui.toast('Load a song first');
+  ui.setTab('run');
+  app.loadShowFile(f, { forceAuto: true });
+};
+
+app.showPlaying = () => !!(show.active && app.audio.el && !app.audio.el.paused);
+
+app.showPlay = async () => {
+  if (!show.director || !app.audio.el) return;
+  show.active = true;
+  await app.audio.ctx.resume();
+  if (app.audio.el.ended) app.audio.el.currentTime = 0;
+  await app.audio.el.play();
+  show.clock = app.audio.el.currentTime;
+  if (show.cinema) {
+    document.body.classList.add('ui-hidden');
+    ui.toast('Press H for the controls · Space pauses · Esc stops');
+  }
+  ui.refreshRun();
+};
+
+app.showPause = () => {
+  app.audio.el?.pause();
+  ui.refreshRun();
+};
+
+app.showSeek = t => {
+  if (!app.audio.el || !show.director) return;
+  app.audio.el.currentTime = Math.max(0, Math.min(show.director.duration - 0.05, t));
+  show.clock = app.audio.el.currentTime;
+  show.active = true;
+};
+
+// stop the film; optionally keep the look on screen to keep playing with it
+app.showStop = ({ keepLook = false } = {}) => {
+  if (keepLook && show.lastState) {
+    pushHistory();
+    const s = makeState(cloneState(show.lastState));
+    app.base = makeState(cloneState(s));
+    app.presetId = null;
+    app.presetName = show.def?.scenes[show.current]?.name || 'From the film';
+    app.dirty = false;
+    setState(s, { fade: 0 });
+  }
+  if (show.recordRun && app.recording) app.recording.stop();
+  show.recordRun = false;
+  app.audio.el?.pause();
+  show.active = false;
+  document.body.classList.remove('ui-hidden');
+  ui.refreshRun();
+};
+
+app.recordRun = async () => {
+  if (!show.director) return;
+  app.showSeek(0);
+  await app.showPlay();
+  if (!app.recording) app.toggleRecord();
+  show.recordRun = true;
+};
+
+function onShowEnded() {
+  if (show.recordRun && app.recording) app.recording.stop();
+  show.recordRun = false;
+  document.body.classList.remove('ui-hidden');
+  ui.refreshRun();
+}
+
+// a smooth song clock: advances with the frame, gently pulled toward the audio element's time
+function showTime(dt) {
+  const el = app.audio.el;
+  if (!el) return show.clock;
+  if (!el.paused) {
+    show.clock += dt;
+    const ct = el.currentTime;
+    if (Math.abs(ct - show.clock) > 0.08) show.clock = ct;
+    else show.clock += (ct - show.clock) * 0.1;
+  } else show.clock = el.currentTime;
+  return Math.max(0, show.clock - (app.audio.ctx?.outputLatency || 0));
+}
+
+function renderShow(dt) {
+  const t = showTime(dt);
+  const f = show.director.frame(t, rt);
+  renderer.updateDisp(rt);
+  renderer.renderScene(f.a.state, f.a.rt, f.a.slot);
+  if (f.b) renderer.renderScene(f.b.state, f.b.rt, f.b.slot);
+  renderer.composite({ a: f.a.slot, b: f.b ? f.b.slot : null, mix: f.mix, transition: f.transition, flash: f.flash, post: f.post });
+  show.lastState = (f.b && f.mix > 0.5 ? f.b : f.a).state;
+  if (f.index !== show.current) {
+    show.current = f.index;
+    ui.runScene(f.index);
+  }
+  ui.runTick(t);
+}
+
 // drag a song anywhere onto the page
 const dropEl = document.getElementById('drop');
 let dragDepth = 0;
@@ -328,7 +518,9 @@ addEventListener('drop', e => {
   dragDepth = 0;
   dropEl.classList.remove('show');
   const f = [...e.dataTransfer.files].find(x => x.type.startsWith('audio/') || /\.(mp3|wav|m4a|aac|ogg|flac|opus)$/i.test(x.name));
-  if (f) { app.loadSong(f); ui.setTab('sound'); } else ui.toast('That is not an audio file');
+  if (!f) return ui.toast('That is not an audio file');
+  if (ui.tab === 'run') app.loadShowFile(f);
+  else { app.loadSong(f); ui.setTab('sound'); }
 });
 
 // ------------------------------------------------------------------ mouse / touch
@@ -398,7 +590,7 @@ canvas.addEventListener('wheel', e => {
 }, { passive: false });
 
 // the faint corner button that brings the UI back when it's hidden (for touch screens)
-document.getElementById('unhide').addEventListener('click', () => app.toggleUI());
+document.getElementById('unhide').addEventListener('click', () => (document.body.classList.contains('ui-hidden') ? app.toggleUI() : ui.setView('topbar', true)));
 
 // ------------------------------------------------------------------ keyboard
 addEventListener('keydown', e => {
@@ -408,6 +600,15 @@ addEventListener('keydown', e => {
     return;
   }
   const k = e.key.toLowerCase();
+  if (show.active) {
+    const filmKeys = {
+      ' ': () => (app.showPlaying() ? app.showPause() : app.showPlay()),
+      escape: () => app.showStop(),
+      arrowright: () => app.showSeek(show.clock + 5),
+      arrowleft: () => app.showSeek(show.clock - 5),
+    };
+    if (filmKeys[k]) { e.preventDefault(); filmKeys[k](); return; }
+  }
   const presetStep = d => {
     const i = PRESETS.findIndex(p => p.id === app.presetId);
     app.loadPreset(PRESETS[(i + d + PRESETS.length) % PRESETS.length].id);
@@ -472,15 +673,19 @@ function frame(now) {
   a.update(dt, rt.realTime);
 
   if (!app.paused) {
-    const sdt = dt * s.speed * (1 + a.level * cfg.boost * 2);
+    const sdt = dt * s.speed;
     rt.time += sdt;
     rt.phase += sdt * s.flow;
+    rt.phase2 += sdt * s.mixFlow;
     rt.spin += sdt * s.spin * 0.6;
     rt.cycle += sdt * s.cycle;
     for (const w of s.warps) w._ph = (w._ph || 0) + sdt * w.speed;
   }
+  // loudness turns up the *intensity* of the warps; the tempo stays the song's own
+  rt.intensity = a.mode === 'off' ? 1 : 1 + (a.level - 0.35) * cfg.intensity * 1.6;
   rt.pulse = Math.pow(a.bass, 1.6) * cfg.pulse * 0.35;
   rt.wobble = a.mid * cfg.wobble;
+  rt.face.mouth = Math.min(1, a.mid * 1.2);
   if (a.beat && cfg.ripples > 0) {
     const aspect = canvas.width / canvas.height;
     spawnRipple((Math.random() - 0.5) * aspect * 0.8, (Math.random() - 0.5) * 0.8, cfg.ripples * 1.5);
@@ -504,7 +709,8 @@ function frame(now) {
   b.relax = Math.pow(1 - (0.004 + app.brush.spring * 0.07), dt * 60);
   rt.rippleScale = app.brush.size / 0.16;
 
-  renderer.render(s, rt);
+  if (show.active && show.director && renderer.mainProg) renderShow(dt);
+  else renderer.render(s, rt);
   if (afterRender.length) { const fns = afterRender; afterRender = []; fns.forEach(f => f()); }
   ui.tick(dt);
   adapt(dt);
@@ -517,7 +723,8 @@ async function makeThumbs() {
   try { tr = new Renderer(document.createElement('canvas'), { preserve: true }); } catch { return; }
   const T = 2.5;
   const fakeRt = s => ({
-    time: T, phase: T * s.flow, spin: 0, cycle: 0, realTime: 0, fade: 0,
+    time: T, phase: T * s.flow, phase2: T * s.mixFlow, spin: 0, cycle: 0, realTime: 0, fade: 0, intensity: 1,
+    face: { mouth: 0.2, eyes: 1 },
     center: [0, 0], mouse: [0, 0], ripples: new Float32Array(MAX_RIPPLES * 4), rippleScale: 1,
     pulse: 0, wobble: 0, audio: { bass: 0, mid: 0, high: 0, level: 0 },
     brush: { x: 0, y: 0, vx: 0, vy: 0, size: 0.1, strength: 0, mode: 0, relax: 0 },

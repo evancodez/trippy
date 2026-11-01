@@ -37,23 +37,26 @@ export class AudioEngine {
     if (this.micStream) { this.micStream.getTracks().forEach(t => t.stop()); this.micStream = null; }
   }
 
-  async loadFile(file) {
+  async loadFile(file, { autoplay = true, loop = true } = {}) {
     this.ensure();
     this.disconnect();
     const el = new Audio();
     el.src = URL.createObjectURL(file);
-    el.loop = true;
+    el.loop = loop;
     el.crossOrigin = 'anonymous';
     this.el = el;
+    this.file = file;
     this.source = this.ctx.createMediaElementSource(el);
     this.source.connect(this.analyser);
     this.analyser.connect(this.ctx.destination);
     this.source.connect(this.recDest);
     this.mode = 'file';
     this.name = file.name.replace(/\.[^.]+$/, '');
-    await this.ctx.resume();
-    await el.play();
     el.onplay = el.onpause = () => this.onchange();
+    if (autoplay) {
+      await this.ctx.resume();
+      await el.play();
+    }
     this.onchange();
   }
 

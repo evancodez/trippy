@@ -423,7 +423,11 @@ app.setMod = (key, src, amt = 0.4) => {
 app.setMode = mode => {
   if (app.mode === mode) return;
   if (app.mode === 'films') app.filmStop();
+  if (app.mode === 'patterns') app.patternsName = app.presetName;
   app.mode = mode;
+  if (mode === 'patterns') app.presetName = app.patternsName || PRESETS[0].name;
+  if (mode === 'worlds') app.presetName = `${LOOKS[app.world.lookId || 'silk'].name}${app.world.auto ? ' · auto-morphing' : ''}`;
+  if (mode === 'films') app.presetName = film.def?.title || 'Films';
   document.body.dataset.mode = mode;
   if (mode === 'patterns') scale = modeMaxScale();
   resize();
@@ -975,6 +979,7 @@ async function boot() {
   app.world.goLook('silk', 0.01);
   app.world.auto = !shared;
   app.world.lastAutoBar = 0;
+  app.patternsName = app.presetName;
   if (app.mode === 'worlds') app.presetName = 'Silk · auto-morphing';
   app.tool = app.mode === 'worlds' ? 'hand' : 'ripple';
   ui = createUI(app);

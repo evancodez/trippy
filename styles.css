@@ -647,3 +647,10 @@ body.ui-hidden .unhide { display: block; }
 .setup:hover { border-color: var(--line-2); }
 .setup.on { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
 .chips + .chips { margin-top: 6px; }
+
+/* the song → visuals ties in Worlds */
+.routes .slider { padding: 6px 8px; margin: 6px 0; border-radius: 10px; background: rgba(216, 1, 70, 0.08); }
+.routes .slider-label { color: #ff8db0; }
+.mod-x { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; margin-left: auto; margin-right: 6px; border-radius: 6px; color: var(--muted); }
+.mod-x:hover { color: var(--text); background: var(--hover); }
+.mod-x .icon { width: 12px; height: 12px; }

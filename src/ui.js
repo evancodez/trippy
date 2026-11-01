@@ -5,7 +5,7 @@
 import { PATTERNS, WARPS, PALETTES, PATTERN_BY_ID, WARP_BY_ID, MAX_INKS, MIX_MODES } from './catalog.js';
 import { PPP_FILM } from './film/ppp.js';
 import { LOOKS, LOOK_CATS } from './film/looks.js';
-import { PARAMS, rgbToHex } from './film/params.js';
+import { PARAMS, PARAM_BY_NAME, rgbToHex } from './film/params.js';
 import { MACROS } from './macros.js';
 import { FONTS } from './media.js';
 import { PRESETS, FORMULA_PRESETS, BLOCKS } from './presets.js';
@@ -58,7 +58,7 @@ export function createUI(app) {
   let toastTimer = 0;
 
   // ---------------------------------------------------------------- building blocks
-  function slider(label, { min, max, step = 0.01, get, set, fmt = fmt2, reset, hint, mod }) {
+  function slider(label, { min, max, step = 0.01, get, set, fmt = fmt2, reset, hint, mod, modStore }) {
     const input = h('input', { type: 'range', min, max, step, 'aria-label': typeof label === 'string' ? label : null });
     const out = h('output');
     const paint = () => {
@@ -71,30 +71,33 @@ export function createUI(app) {
     const top = h('div', { class: 'slider-top' }, h('span', { class: 'slider-label' }, label), out);
     const row = h('div', { class: 'slider', title: hint || (reset ? 'Double-click to reset' : null) }, top, input);
     if (reset) row.addEventListener('dblclick', e => { if (e.target.closest('.modrow, .mod-btn')) return; input.value = reset(); set(+input.value); paint(); });
-    if (mod) attachMod(row, top, mod);
+    if (mod) attachMod(row, top, mod, modStore);
     row.sync = () => { input.value = get(); paint(); };
     paint();
     return row;
   }
 
-  // ∿ — tie a slider to the music: a source (bass, beat, bar…) and a depth
+  // ∿ — tie a slider to the music: a source (bass, beat, bar…) and a depth.
+  // A store is where the ties live: Patterns' sliders or Worlds' film values.
   const MOD_LABELS = { bass: 'Bass', mid: 'Mids', high: 'Highs', loud: 'Loudness', beat: 'Beat', bar: 'Bar sway', slow: 'Slow wave' };
-  function attachMod(row, top, key) {
+  const patternMods = { list: () => app.mods, set: (k, src) => app.setMod(k, src) };
+  const worldMods = { list: () => app.worldMods, set: (k, src) => { app.setWorldMod(k, src); renderRoutes(); } };
+  function attachMod(row, top, key, store = patternMods) {
     const btn = h('button', { class: 'mod-btn', 'aria-label': 'Follow the music', 'data-tip': 'Follow the music', html: '∿' });
     top.insertBefore(btn, top.lastChild);
     let open = false, panel = null;
     const paint = () => {
-      const m = app.mods[key];
+      const m = store.list()[key];
       row.classList.toggle('modded', !!m);
       btn.textContent = m ? `∿ ${MOD_LABELS[m.src]}` : '∿';
     };
     const build = () => {
-      const m = app.mods[key];
+      const m = store.list()[key];
       panel = h('div', { class: 'modrow' },
         h('div', { class: 'chips' },
-          h('button', { class: `chip${!m ? ' on' : ''}`, onclick: () => { app.setMod(key, null); rebuild(); } }, 'Off'),
-          Object.entries(MOD_LABELS).map(([src, name]) => h('button', { class: `chip${m?.src === src ? ' on' : ''}`, onclick: () => { app.setMod(key, src); rebuild(); } }, name))),
-        m ? slider('Depth (− flips it)', { min: -1, max: 1, get: () => app.mods[key]?.amt ?? 0.4, set: v => { if (app.mods[key]) app.mods[key].amt = v; } }) : null);
+          h('button', { class: `chip${!m ? ' on' : ''}`, onclick: () => { store.set(key, null); rebuild(); } }, 'Off'),
+          Object.entries(MOD_LABELS).map(([src, name]) => h('button', { class: `chip${m?.src === src ? ' on' : ''}`, onclick: () => { store.set(key, src); rebuild(); } }, name))),
+        m ? slider('Depth (− flips it)', { min: -1, max: 1, get: () => store.list()[key]?.amt ?? 0.4, set: v => { if (store.list()[key]) store.list()[key].amt = v; } }) : null);
       row.append(panel);
     };
     const rebuild = () => { panel?.remove(); panel = null; if (open) build(); paint(); };
@@ -837,7 +840,48 @@ export function createUI(app) {
       return h('label', { class: 'color' }, inp, h('span', {}, p.label));
     }
     const step = p.max - p.min > 20 ? 0.1 : 0.01;
-    return slider(p.label, { min: p.min, max: p.max, step, get: () => w.to[p.name], set: v => { w.set(p.name, v); app.touch(); }, reset: () => p.def });
+    return slider(p.label, { min: p.min, max: p.max, step, get: () => w.to[p.name], set: v => { w.set(p.name, v); app.touch(); }, reset: () => p.def, mod: p.name, modStore: worldMods });
+  }
+
+  // ---------------------------------------------------------------- the song → the visuals (Worlds)
+  // one-click ties, and a list of every tie you've made (from here or from any slider's ∿)
+  const RECIPES = [
+    ['bulge', 'bass', 0.5, 'Bass bulges it'],
+    ['height', 'bass', 0.4, 'Bass lifts the relief'],
+    ['frame', 'beat', -0.08, 'Beat punches in'],
+    ['freq', 'beat', 0.12, 'Beat jumps the scale'],
+    ['twist', 'loud', 0.3, 'Loudness twists'],
+    ['warpN', 'mid', 0.5, 'Mids melt it'],
+    ['thick', 'high', 0.35, 'Highs thin the lines'],
+    ['spinRate', 'bass', 0.25, 'Bass spins it'],
+    ['vortex', 'loud', 0.25, 'Loudness winds the vortex'],
+    ['flow', 'bass', 0.3, 'Bass pushes the lines'],
+  ];
+  const routesEl = h('div', { class: 'routes' });
+  function renderRoutes() {
+    const entries = Object.entries(app.worldMods);
+    routesEl.replaceChildren(...entries.map(([key, m]) => {
+      const p = PARAM_BY_NAME[key];
+      const row = slider(`${MOD_LABELS[m.src]} → ${p?.label || key}`, { min: -1, max: 1, get: () => app.worldMods[key]?.amt ?? 0, set: v => { if (app.worldMods[key]) app.worldMods[key].amt = v; }, hint: 'Depth: how far the music pushes it (− flips it)' });
+      row.querySelector('.slider-top').insertBefore(h('button', { class: 'mod-x', 'aria-label': 'Remove', html: icon('x'), onclick: () => { app.setWorldMod(key, null); renderBody(); } }), row.querySelector('output'));
+      return row;
+    }));
+    return routesEl;
+  }
+
+  function songControls() {
+    const isOn = ([key, src]) => app.worldMods[key]?.src === src;
+    return [
+      h('div', { class: 'sub-label' }, 'What the music does'),
+      slider('How much the music moves it', { min: 0, max: 2, step: 0.05, fmt: v => `${Math.round(v * 100)}%`, get: () => app.musicCfg.amount, set: v => { app.musicCfg.amount = v; }, hint: 'Scales the sway, the thump, loudness → intensity, the flashes and every ∿ tie. 0% = the music changes nothing.' }),
+      h('div', { class: 'chips' }, RECIPES.map(r => h('button', { class: `chip${isOn(r) ? ' on' : ''}`, onclick: () => {
+        const [key, src, amt] = r;
+        app.setWorldMod(key, isOn(r) ? null : src, isOn(r) ? undefined : amt);
+        renderBody();
+      } }, r[3]))),
+      renderRoutes(),
+      h('p', { class: 'muted small' }, 'Or tie any slider under “Fine-tune everything” to the bass, mids, highs, loudness, the beat or the bar with its ', h('b', {}, '∿'), '. Ties stay when the look changes.'),
+    ];
   }
 
   const AUTO_WHEN = [['off', 'Off'], ['song', 'While a song plays'], ['sound', 'With any sound'], ['always', 'Always']];
@@ -855,6 +899,7 @@ export function createUI(app) {
         h('button', { class: 'btn', html: `${icon('mic')}<span>Mic</span>`, onclick: () => app.useMic() }),
         a.mode !== 'off' ? h('button', { class: 'btn', html: `${icon('stop')}<span>Stop</span>`, onclick: () => app.stopAudio() }) : null),
       tempoControls(),
+      songControls(),
       h('div', { class: 'sub-label' }, 'Auto-morph — glide to new looks by itself'),
       h('div', { class: 'chips' }, AUTO_WHEN.map(([id, label]) => chip(A.when === id, label, () => { A.when = id; renderBody(); }))),
       A.when !== 'off' ? [

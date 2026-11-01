@@ -7,6 +7,11 @@ A browser playground for trippy black-and-white op art, from flat patterns to a 
 - **Worlds**: one 3D world made of lines.
   - Pick a look and *everything glides there*. The equation re-forms instead of cutting. Looks are grouped as flat op art, 3D sheets, fly-throughs, objects, and hands & faces.
   - Play a song or use the mic: loudness drives intensity while the bar drives the sway.
+  - **You decide what the music does:**
+    - One knob sets how much the music moves it, from 0% to 200%.
+    - One-click ties: bass bulges it, the beat jumps the scale, mids melt it, highs thin the lines, and more.
+    - Every slider has a **∿** to tie it to the bass, mids, highs, loudness, the beat, the bar or a slow wave, with a depth (negative flips it).
+    - Ties stay when the look changes.
   - **Auto-morph** only runs with music by default. You choose:
     - when: off, while a song plays, with any sound, or always
     - how often: every N bars, or when the song changes section

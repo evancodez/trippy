@@ -8,7 +8,7 @@ import { createUI, TOOLS } from './ui.js';
 import { MAX_RIPPLES } from './shaders.js';
 import { analyzeAudio, sample } from './analysis.js';
 import { Timeline, applyMusic, toShader, toPost, stepFactor } from './film/timeline.js';
-import { SHADER_COUNT } from './film/params.js';
+import { SHADER_COUNT, PARAM_BY_NAME } from './film/params.js';
 import { PPP_FILM } from './film/ppp.js';
 import { generateFilm } from './film/auto.js';
 import { LOOKS, look } from './film/looks.js';
@@ -59,6 +59,8 @@ const app = {
   tempo: { bpm: 70, beatsPerBar: 2, fromSong: false },
   songAnalysis: null,       // analysis of the song loaded in the Sound panel (gives the bar clock)
   mods: {},                 // Patterns: slider → music source, e.g. { density: { src: 'bass', amt: 0.4 } }
+  worldMods: {},            // Worlds: the same, by film parameter, e.g. { bulge: { src: 'bass', amt: 0.5 } } — kept across looks
+  musicCfg: { amount: 1 },  // Worlds: how much the music moves things overall (the built-in reactions and every ∿)
   macros: { worlds: defaultMacros(), patterns: defaultMacros() },
   media: new Media(),       // a picture under the membrane: camera / image / video / words
   tracker: new Tracker(),   // your face, hands, body and movement through the camera
@@ -435,6 +437,22 @@ app.setMod = (key, src, amt = 0.4) => {
   if (!src) delete app.mods[key];
   else app.mods[key] = { src, amt: app.mods[key]?.amt ?? amt };
 };
+
+// ------------------------------------------------------------------ Worlds: the song → the visuals
+app.setWorldMod = (key, src, amt) => {
+  if (!src) delete app.worldMods[key];
+  else app.worldMods[key] = { src, amt: amt ?? app.worldMods[key]?.amt ?? 0.4 };
+};
+// runs before speeds are integrated, so a speed tied to the bass really speeds up with it
+function applyWorldMods(v, m) {
+  const k = app.musicCfg.amount;
+  for (const key of ['sway', 'swayX', 'pulse', 'react', 'breathe', 'grab', 'hitFlash']) v[key] *= k;
+  for (const [key, { src, amt }] of Object.entries(app.worldMods)) {
+    const p = PARAM_BY_NAME[key];
+    if (!p || typeof v[key] !== 'number') continue;
+    v[key] = clampN(v[key] + sourceValue(src, m) * amt * k * (p.max - p.min) * 0.6, p.min, p.max);
+  }
+}
 
 // ------------------------------------------------------------------ modes
 app.setMode = mode => {
@@ -977,7 +995,7 @@ function renderWorldFrame(dt) {
   const cur = w.current || w.values();
   h.x += (cur.tx + pointer.x * 2 * cur.frame - h.x) * (1 - Math.exp(-dt * 10));
   h.y += (cur.ty + pointer.y * 2 * cur.frame - 0.12 - h.y) * (1 - Math.exp(-dt * 10));
-  const { P, post } = w.frame(app.paused ? 0 : dt, m, { pre: v => applyMacrosWorld(v, app.macros.worlds), post: applyInputs });
+  const { P, post } = w.frame(app.paused ? 0 : dt, m, { pre: v => { applyMacrosWorld(v, app.macros.worlds); applyWorldMods(v, m); }, post: applyInputs });
   rt.stepK = stepFactor(w.current) * (rt.ripples.some((x, i) => i % 4 === 3 && x > 0 && rt.realTime - rt.ripples[i - 1] < 5) ? 0.7 : 1);
   renderer.updateDisp(rt);
   renderer.renderFilm(P, rt, 0);

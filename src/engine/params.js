@@ -114,8 +114,10 @@ export const PARAMS = [
   P('fig', 0, 0, 1), P('figA', 0, 0, 64), P('figB', 0, 0, 64), P('figMix', 0, 0, 1), P('figS', 0.5, 0.05, 3),
   P('figX', 0, -3, 3), P('figY', 0, -3, 3), P('figZ', 0, -2, 2), P('figRot', 0, -7, 7), P('figT', 0, 0, 0),
   P('figLX', 0, -1, 1), P('figLY', 0, -1, 1), P('figSing', 0, 0, 1), P('figRep', 0, 0, 1), P('figSoft', 0.06, 0.005, 0.5),
+  // which way figures face (the camera's turn and tilt, eased), and how upright each stands
+  P('figCY', 0, -3.2, 3.2), P('figCP', 0, -1.5, 1.6), P('figStA', 0, 0, 1), P('figStB', 0, 0, 1),
   // the figure under your cursor when a figure is the tool
-  P('ftOn', 0, 0, 1), P('ftId', 0, 0, 64), P('ftX', 0, -4, 4), P('ftY', 0, -4, 4), P('ftZ', 0, -2, 2), P('ftS', 0.5, 0.05, 3),
+  P('ftOn', 0, 0, 1), P('ftId', 0, 0, 64), P('ftX', 0, -4, 4), P('ftY', 0, -4, 4), P('ftZ', 0, -2, 2), P('ftS', 0.5, 0.05, 3), P('ftSt', 0, 0, 1),
   ...HANDS,
   P('ball', 0, 0, 1), P('ballX', 0, -4, 4), P('ballY', 0, -4, 4), P('ballZ', 0, -1, 2), P('ballR', 0.12, 0.02, 1),
   P('ballVX', 1, -1, 1), P('ballVY', 0, -1, 1), P('ballWake', 0.5, 0, 2), P('ballFlow', 1, 0, 2),

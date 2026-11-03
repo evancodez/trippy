@@ -8,7 +8,7 @@ import { FIGURES, FIGURE_INDEX } from './engine/figures.js';
 export const ADDS = [
   { id: 'camera', name: 'You', icon: 'camera', blurb: 'your camera, inside the lines' },
   { id: 'hands', name: 'Hands', icon: 'hand', blurb: 'a pair of hands pressing through' },
-  { id: 'figures', name: 'Figures', icon: 'figure', blurb: 'a face, a skull, someone trapped behind the sheet… pressing through' },
+  { id: 'figures', name: 'Figures', icon: 'figure', blurb: 'a skull, a serpent, a face, tentacles… coming up out of the sheet' },
   { id: 'face', name: 'Ghost face', icon: 'face', blurb: 'a face in the lines — or yours, from the camera' },
   { id: 'ball', name: 'Ball', icon: 'ball', blurb: 'a chrome ball the lines flow around' },
   { id: 'orbs', name: 'Orbs', icon: 'orbs', blurb: 'spheres rising through the sheet' },
@@ -18,7 +18,7 @@ export const ADDS = [
 export const defaultAdds = () => ({
   camera: { on: false, pinned: false },
   hands: { on: false, pinned: false, size: 1, push: 0.35, open: 0.55, apart: 0.55, copy: false },
-  figures: { on: false, pinned: false, pick: 'face', size: 1, depth: 1, fabric: 0.45, spin: 0, cycle: false, every: 4, repeat: false, follow: false },
+  figures: { on: false, pinned: false, pick: 'skull', size: 1, depth: 1, fabric: 0.45, spin: 0, cycle: false, every: 4, repeat: false, follow: false },
   face: { on: false, pinned: false, size: 1, depth: 1, copy: false },
   ball: { on: false, pinned: false, size: 0.13, speed: 0.45, wake: 0.7, flow: 1, follow: false },
   orbs: { on: false, pinned: false, amount: 1, grid: 5 },
@@ -133,6 +133,9 @@ export function figureLight(v, k) {
   v.refract = Math.max(v.refract, 0.6 * k);
 }
 
+// how much the fabric clings to a figure (its veil), as a soft-union radius
+export const figureSoft = (cfg, veil, S) => (0.02 + 0.2 * cfg.fabric * veil) * S;
+
 // ---------------------------------------------------------------- figures pressing through the sheet
 // One figure at a time, and picking another doesn't cut: the old one re-forms into the new one.
 // With "change with the music" it moves on by itself every few bars. Eyes follow your pointer;
@@ -145,31 +148,37 @@ export class Figures {
     this.look = [0, 0];
     this.sing = 0;
     this.x = 0; this.y = 0; this.placed = false;
+    this.cy = null; this.cp = 0;              // which way they face: after the camera, unhurried
     this.nextBar = null; this.nextTime = 0;
+    this.swap = null;                         // one from another group, waiting for this one to sink away
   }
 
-  get current() { return FIGURES[this.mix > 0.5 ? this.b : this.a].id; }
+  get current() { return FIGURES[this.swap ?? (this.mix > 0.5 ? this.b : this.a)].id; }
 
+  // one from the same group re-forms out of this one; one from another group waits for this one to sink
+  // away (main.js does that, while the shader for its group is built), then comes up
   pick(id) {
     const i = FIGURE_INDEX[id] ?? 0;
     if (this.mix > 0) { this.a = this.mix > 0.5 ? this.b : this.a; this.mix = 0; }
+    this.swap = null;
     if (i === this.a) return;
+    if (FIGURES[i].group !== FIGURES[this.a].group) { this.swap = i; return; }
     this.b = i;
     this.mix = 0.0001;
   }
 
-  // the next one when changing with the music: somewhere else in the library, never the same twice
+  // the next one when changing with the music: another from the same group (so the shader already has
+  // it), never the same twice
   nextId(cur) {
-    let i;
-    do i = Math.floor(Math.random() * FIGURES.length); while (FIGURES[i].id === cur);
-    return FIGURES[i].id;
+    const g = FIGURES[FIGURE_INDEX[cur] ?? 0].group, pool = FIGURES.filter(f => f.group === g && f.id !== cur);
+    return pool[Math.floor(Math.random() * pool.length)].id;
   }
 
   // cfg: the add's settings; m: the music; pointer: where your pointer is on the sheet (or null); center: the view's middle
   // Returns the id it moved on to, if it changed by itself this frame.
   step(dt, cfg, m, pointer, center) {
     let changed = null;
-    if (this.mix > 0) {
+    if (this.mix > 0 && this.canMorph !== false) {           // (once the shader can draw the new one)
       this.mix = Math.min(1, this.mix + dt / 1.6);
       if (this.mix >= 1) { this.a = this.b; this.mix = 0; }
     }
@@ -200,15 +209,27 @@ export class Figures {
     return changed;
   }
 
+  // every figure (this one and a figure tool) turns to face the camera, a little behind it, so it watches
+  // you come round
+  turn(v, dt) {
+    if (this.cy == null) { this.cy = v.yaw; this.cp = v.pitch; }
+    const k = 1 - Math.exp(-dt * 1.6);
+    this.cy += Math.atan2(Math.sin(v.yaw - this.cy), Math.cos(v.yaw - this.cy)) * k;
+    this.cy = Math.atan2(Math.sin(this.cy), Math.cos(this.cy));
+    this.cp += (v.pitch - this.cp) * k;
+    Object.assign(v, { figCY: this.cy, figCP: this.cp });
+  }
+
   apply(v, cfg, pres) {
     if (pres < 0.01) return;
     const S = cfg.size * 0.95 * v.frame / 0.6;
+    const A = FIGURES[this.a], B = FIGURES[this.b], k = this.mix, lerp = key => A[key] + (B[key] - A[key]) * k;
     Object.assign(v, {
-      fig: pres, figA: this.a, figB: this.b, figMix: this.mix * this.mix * (3 - 2 * this.mix),
-      figS: S, figX: this.x, figY: this.y, figZ: ((cfg.depth - 1) * 0.12 + FIGURES[this.a].lift + (FIGURES[this.b].lift - FIGURES[this.a].lift) * this.mix) * S, figSoft: (0.015 + 0.09 * cfg.fabric) * S,
+      fig: pres, figA: this.a, figB: this.b, figMix: k * k * (3 - 2 * k), figStA: A.stand, figStB: B.stand,
+      // standing up to a low camera, it comes up a little further, so its chin clears the sheet
+      figS: S, figX: this.x, figY: this.y, figZ: ((cfg.depth - 1) * 0.12 + lerp('lift') + 0.1 * Math.sin(Math.max(this.cp, 0)) * (1 - lerp('stand'))) * S, figSoft: figureSoft(cfg, lerp('veil'), S),
       figRot: this.rot, figT: this.t, figLX: this.look[0], figLY: this.look[1], figSing: this.sing, figRep: cfg.repeat ? 1 : 0,
     });
-    // so the shape reads: the lines bend over it and light thins the ink on its slopes
     figureLight(v, pres);
   }
 }

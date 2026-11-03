@@ -29,10 +29,10 @@ The side panel has four tabs.
 - **Add**: things you can put into any look. None is on until you add it, and you can pin any of them to the toolbar.
   - **You (camera)**, with quick setups: Just me, Playing guitar, Hands & guitar, Lines over me, My face, Movement. Everything is worked out in the browser; no picture leaves your computer.
   - **Hands**: a mirrored pair pressing through, or a copy of yours, finger by finger.
-  - **Figures**: solid 3D shapes pressing up through the sheet, draped in it like the hands. Picking another makes the old one re-form into the new one. "Change with the music" moves on every few bars by itself. They can also turn, follow your mouse, repeat across the sheet, sit tight or loose under the fabric, and push through more or less.
-    - *Presences*: a smooth ghost-in-the-shell face, a skull (its jaw moves with the music), someone trapped behind the sheet with palms pressed flat, an arm reaching out, Magritte's veiled Lovers, a bust, a Vitruvian figure, a meditator with a halo, praying hands.
-    - *Creatures*: a raven (wings beat with the music), a moth, a rearing cobra, a stag skull with antlers, a sitting cat.
-    - *Symbols*: an eyeball that follows you, a turning Merkaba, an ouroboros.
+  - **Figures**: shapes rising out of the sheet like the hands, drawn by the look's own lines bending over them. Their hollows (eye sockets, mouths, a pupil, a tunnel) go deep, through the fabric too. They turn to face the camera: from above they push up through the sheet; to a low camera they stand up out of the floor. Picking another in the same group makes the old one re-form into the new one; one from another group comes up after the old one sinks away. "Change with the music" moves on every few bars, within the group. They can also turn, follow your mouse, repeat across the sheet, sit tight or loose under the fabric, and push through more or less.
+    - *Presences*: a skull (its jaw moves with the music), a smooth ghost-in-the-shell face, the same face as a hollow mask, the Scream, singing lips, a breathing ribcage over a pit, someone trapped behind the sheet with palms pressed flat, an arm reaching out, Magritte's veiled Lovers, a Vitruvian figure, a meditator with a halo, praying hands.
+    - *Creatures*: a coiled serpent with its head up, a cobra, tentacles curling up from underneath, a pulsing jellyfish, a nautilus cut open to its chambers, mushrooms, a raven (wings beat with the music), a moth, a stag skull with antlers, a sitting cat.
+    - *Symbols*: an eyeball that follows you (its pupil a hole), a portal with a tunnel through the sheet, a trefoil knot, a hollow lattice orb, a tesseract that breathes with the music, a turning Merkaba, an ouroboros round a hole.
     - **Drag any figure onto the toolbar** and it becomes a tool like the hand: it follows your cursor under the sheet and pushes through while you hold. Drag along the toolbar to reorder; right-click or drag off to remove.
   - **Ghost face**: a face in the lines, or a copy of yours.
   - **Ball**: a chrome ball the lines part around, with a turbulent wake (after Tame Impala's *Currents*). With music it hops on the beat and ripples where it lands.
@@ -111,7 +111,7 @@ Import the GitHub repo in Vercel and keep the defaults: Framework Preset **Other
 | `src/engine/world.js` | Gliding between looks, speeds, the music applied every frame |
 | `src/engine/feel.js` | The three feel knobs and breeding (Explore) |
 | `src/adds.js` | Add-ons: the ball's motion, the pair of hands, figures, the face, orbs |
-| `src/engine/figures.js` | The figure library: each one a relief in GLSL |
+| `src/engine/figures.js` | The figure library: each one a 3D shape in GLSL. The world's shader is built with just the groups on screen, in the background |
 | `src/director.js` | The cinematic camera: shots, glides on the bar, drift |
 | `src/media.js`, `src/tracking.js` | The camera, pictures, video and words; face / hand / body / motion tracking (MediaPipe) |
 | `src/audio.js`, `src/analysis.js`, `src/songs.js` | Live audio (levels, beat, waveform, spectrum); tempo from a song; your song library |

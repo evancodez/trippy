@@ -7,8 +7,8 @@ import { World, defaultValues, cloneValues, stepFactor, mulberry32 } from './eng
 import { LOOKS, GROUPS, NEUTRAL, look, PALETTES, COLOR_KEYS } from './engine/looks.js';
 import { PARAM_BY_NAME, hexToRgb, rgbToHex, isColorParam, DEFAULTS } from './engine/params.js';
 import { applyFeel, defaultFeel, breed } from './engine/feel.js';
-import { ADDS, defaultAdds, Ball, Figures, figureLight, applyHands, applyFace, applyOrbs } from './adds.js';
-import { FIGURES, FIGURE_INDEX } from './engine/figures.js';
+import { ADDS, defaultAdds, Ball, Figures, figureLight, figureSoft, applyHands, applyFace, applyOrbs } from './adds.js';
+import { FIGURES, FIGURE_INDEX, figureBank } from './engine/figures.js';
 import { Director } from './director.js';
 import { AudioEngine } from './audio.js';
 import { analyzeAudio } from './analysis.js';
@@ -402,6 +402,7 @@ app.figures = new Figures();
 app.pickFigure = id => {
   app.adds.figures.pick = id;
   app.figures.pick(id);
+  if (pres.figures < 0.01) { app.figures.a = app.figures.b = FIGURE_INDEX[id] ?? 0; app.figures.mix = 0; app.figures.swap = null; }   // nothing showing yet: no need to re-form
   if (!app.adds.figures.on) app.setAdd('figures', true);
   else ui.addsChanged();
 };
@@ -614,7 +615,20 @@ function applyAdds(v, m, dt) {
   v.pitch = clamp(v.pitch + V.pitch, -0.35, 1.42);
   // tilted back, a long lens would push the camera miles away: widen it as it tilts
   if (v.focal > 2.2) v.focal += (2.0 - v.focal) * clamp((v.pitch - 0.12) / 0.7, 0, 1);
-  for (const k of ['hands', 'face', 'orbs', 'figures']) pres[k] = ease(pres[k], A[k].on ? 1 : 0, k === 'figures' ? 1.2 : 3, dt);
+  // the figures on screen: the world's shader is rebuilt with just their groups (in the background, the
+  // first time), and each one comes up once it's in
+  const F = app.figures, toolFig = app.tool.startsWith('fig:') ? app.tool.slice(4) : null;
+  const showing = [];
+  if (A.figures.on || pres.figures > 0.01) showing.push(FIGURES[F.a].id, ...(F.mix > 0 ? [FIGURES[F.b].id] : []));
+  if (toolFig) showing.push(toolFig);
+  if (figTool.on > 0.001) showing.push(FIGURES[figTool.id].id);
+  renderer.useFigures(figureBank(showing));
+  F.canMorph = renderer.hasFigure(FIGURES[F.b].id);
+  if (F.swap != null && pres.figures < 0.02) { F.a = F.b = F.swap; F.swap = null; F.mix = 0; }   // the old one has gone: the next one comes up
+  for (const k of ['hands', 'face', 'orbs', 'figures']) {
+    const on = A[k].on && (k !== 'figures' || (F.swap == null && renderer.hasFigure(FIGURES[F.a].id)));
+    pres[k] = ease(pres[k], on ? 1 : 0, k === 'figures' ? (F.swap != null ? 3 : 1.2) : 3, dt);
+  }
   const copying = A.hands.copy && tracker.on && tracker.hands.length;
   if (!copying) { rt.handMirror[0] = 1; rt.handMirror[1] = -1; rt.fingers.fill(0); }
   applyHands(v, A.hands, copying ? 0 : pres.hands, m, app.sound);
@@ -622,13 +636,15 @@ function applyAdds(v, m, dt) {
   applyOrbs(v, A.orbs, pres.orbs, m, app.sound);
   if (A.figures.on || pres.figures > 0.01 || figTool.on > 0.001) {
     const at = pointer.inside ? [v.tx + pointer.x * 2 * v.frame, v.ty + pointer.y * 2 * v.frame] : null;
-    if (app.figures.step(dt, A.figures, m, at, [v.tx, v.ty])) ui.addsChanged();
-    app.figures.apply(v, A.figures, pres.figures);
+    F.turn(v, dt);
+    if (F.step(dt, A.figures, m, at, [v.tx, v.ty])) ui.addsChanged();
+    F.apply(v, A.figures, pres.figures);
     if (figTool.on > 0.001) {
-      const F = app.figures, S = 1.05 * v.frame / 0.6;
-      Object.assign(v, { ftOn: figTool.on, ftId: figTool.id, ftX: figTool.x, ftY: figTool.y, ftZ: (-0.1 + FIGURES[figTool.id].lift + figTool.press * 0.28) * S, ftS: S,
+      // hovering, it's a shape just under the sheet; held, it comes all the way up
+      const S = 1.05 * v.frame / 0.6, T = FIGURES[figTool.id];
+      Object.assign(v, { ftOn: figTool.on, ftId: figTool.id, ftX: figTool.x, ftY: figTool.y, ftZ: (T.lift - 0.16 + figTool.press * 0.26 + 0.1 * Math.sin(Math.max(F.cp, 0)) * (1 - T.stand)) * S, ftS: S, ftSt: T.stand,
         figT: F.t, figLX: F.look[0], figLY: F.look[1], figSing: F.sing });
-      if (pres.figures < 0.01) v.figSoft = 0.06 * S;
+      if (pres.figures < 0.01) v.figSoft = figureSoft(A.figures, T.veil, S);
       figureLight(v, figTool.on);
     }
   }
@@ -872,7 +888,7 @@ function updateTools(dt, v) {
   // a figure tool: the same, with whichever figure it is (it sinks away before another one comes up)
   const ft = app.tool.startsWith('fig:') ? FIGURE_INDEX[app.tool.slice(4)] ?? -1 : -1;
   if (ft >= 0 && ft !== figTool.id && figTool.on < 0.05) figTool.id = ft;
-  figTool.on = ease(figTool.on, ft >= 0 && ft === figTool.id && pointer.inside ? 1 : 0, 4, dt);
+  figTool.on = ease(figTool.on, ft >= 0 && ft === figTool.id && pointer.inside && renderer.hasFigure(FIGURES[ft].id) ? 1 : 0, 4, dt);
   figTool.press = ease(figTool.press, pointer.down && ft >= 0 && !pointer.move ? 1 : 0, 5, dt);
   if (v) {
     figTool.x = ease(figTool.x, v.tx + pointer.x * 2 * v.frame, 10, dt);
@@ -913,7 +929,7 @@ app.setTool = id => { app.tool = id; updateRing(); ui.renderDock(); };
 
 // figures you put on the toolbar (drag them there from Add → Figures); remembered between visits
 const FIG_TOOLS_KEY = 'trippy.figtools.v1';
-app.figTools = (() => { try { const a = JSON.parse(localStorage.getItem(FIG_TOOLS_KEY)); if (Array.isArray(a)) return a.filter(id => id in FIGURE_INDEX); } catch {} return ['face', 'skull']; })();
+app.figTools = (() => { try { const a = JSON.parse(localStorage.getItem(FIG_TOOLS_KEY)); if (Array.isArray(a)) return a.filter(id => id in FIGURE_INDEX); } catch {} return ['skull', 'serpent', 'face']; })();
 const saveFigTools = () => { try { localStorage.setItem(FIG_TOOLS_KEY, JSON.stringify(app.figTools)); } catch {} };
 app.addFigTool = (id, at = app.figTools.length) => {
   if (!(id in FIGURE_INDEX)) return;

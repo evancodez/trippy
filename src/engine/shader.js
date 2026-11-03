@@ -9,11 +9,12 @@
 //     triangles + moiré + contours, all weighted, so one look re-forms into the next
 // Lighting can thin the ink where it's bright (engraving), so 3D form is drawn with lines alone.
 import { shaderDefines, SHADER_COUNT, SHADER_SLOTS } from './params.js';
-import { FIGURES_GLSL } from './figures.js';
+import { figuresGLSL } from './figures.js';
 
 const HAND_BASE = SHADER_SLOTS.findIndex(s => s.name === 'h0on');
 
-export const WORLD_FRAG = `#version 300 es
+// the world's shader, able to draw these figures (only the ones on screen are compiled in)
+export const worldFrag = (figures = []) => `#version 300 es
 precision highp float;
 out vec4 outColor;
 uniform vec2 uRes;
@@ -212,7 +213,7 @@ float hands(vec3 p) {
   return d;
 }
 
-${FIGURES_GLSL}
+${figuresGLSL(figures)}
 
 // ---------------------------------------------------------------- orbs, columns
 float orbsSDF(vec3 p) {
@@ -387,14 +388,25 @@ float map(vec3 p) {
   if (COLUMNS > 0.001) d = smin(d, columnsSDF(p), 0.03);
   d = smin(d, objects(p), OBJSOFT);
   if (BALL > 0.001) d = smin(d, ballSDF(p), 0.02);
-  if (FIG > 0.001 || FTON > 0.001) d = smin(d, figuresSDF(p), FIGSOFT);   // figures, draped in the sheet like the hands
+  if (FIG > 0.001 || FTON > 0.001) {
+    // figures, joined to the sheet like the hands; their hollows go through both
+    float fd = figuresSDF(p);
+    d = smin(d, fd, FIGSOFT);
+    if (gFHole < 0.3 * gFS) d = smaxF(d, -gFHole, 0.01 * gFS);
+  }
   return smin(d, hands(p), HANDSOFT);
 }
 
 vec3 calcNormal(vec3 p, float t) {
   // a picture relief comes in 8-bit steps: look a little wider so the steps don't read as noise
-  vec2 e = vec2(1.0, -1.0) * (0.0006 * max(1.0, t) + (MEDIA > 0.0 ? 0.006 * MEDIAS : 0.0));
-  return normalize(e.xyy * map(p + e.xyy) + e.yyx * map(p + e.yyx) + e.yxy * map(p + e.yxy) + e.xxx * map(p + e.xxx));
+  float h = (0.0006 * max(1.0, t) + (MEDIA > 0.0 ? 0.006 * MEDIAS : 0.0)) * 1.732;
+  vec3 n = vec3(0.0);
+  int m = 4 + int(min(uStepK, 0.0));        // a loop the compiler can't unroll: map() is compiled in once here, not four times
+  for (int i = 0; i < m; i++) {
+    vec3 e = 0.5773 * (2.0 * vec3(float(((i + 3) >> 1) & 1), float((i >> 1) & 1), float(i & 1)) - 1.0);
+    n += e * map(p + e * h);
+  }
+  return normalize(n);
 }
 
 // ---------------------------------------------------------------- the line equation
@@ -520,6 +532,7 @@ void main() {
     ro.z = max(ro.z, floorZ);
   }
   if (BALL > 0.001) gBallH = heightField(vec2(BALLX, BALLY));
+  if (FIG > 0.001 || FTON > 0.001) figSetup();
 
   float t = 0.0, d = 1.0;
   float far = dist * 3.0 + 14.0;
@@ -543,6 +556,16 @@ void main() {
     bool onBall = BALL > 0.001 && ballSDF(p) < 0.004 + 0.001 * t;
     if (MEDIACALM > 0.0) gCalm = 1.0 - MEDIACALM * mediaMaskSoft(p.xy, 1.5);
     if (AURA > 0.0) gAura = AURA * 2.0 * mediaMaskSoft(p.xy, log2(float(textureSize(uMedia, 0).y) / 22.0));
+    // near a figure? It's drawn by the sheet's own lines, like the hands; it's lit from over your shoulder
+    // (so the side facing you is never lost in shadow), and its hollows dim as they go in
+    // (figM: on it and the fabric clinging to it; figL: on it, give or take)
+    float figM = 0.0, figL = 0.0, deep = 0.0;
+    if (FIG > 0.001 || FTON > 0.001) {
+      float fd = figuresSDF(p), s = gFS, on = max(FIG, FTON);
+      figM = on * (1.0 - smoothstep(0.0, FIGSOFT + 0.04 * s, max(min(fd, abs(gFHole)), 0.0)));
+      figL = on * (1.0 - smoothstep(0.0, 0.05 * s, max(fd, 0.0)));   // (within its bounding ball's margin, so no seam)
+      deep = (1.0 - smoothstep(0.0, 0.012 * s, abs(gFHole))) * smoothstep(0.05, -0.35, gFQ.z);
+    }
     float rr = 1.0;
     vec2 qw = p.xy;
     float v = 0.0;
@@ -553,7 +576,19 @@ void main() {
       v = lines(ballFlow(p.xy + rf.xy * BALLR * 3.0 / (0.35 + abs(rf.z))), 0.0, rr, qw);
       rr = 1.0;
     } else {
-      if (WRAP < 0.999) v = lines(ballFlow(p.xy + n.xy * REFRACT * 0.12), p.z, rr, qw);   // lines bend over the relief
+      // on a figure, the sheet's lines are laid flat toward you (at the figure) and bent over its form: seen
+      // from above that's just the sheet, as with the hands; standing up to a low camera, its face is drawn
+      // by the same lines face-on instead of having them stretched up it
+      vec2 sq0 = p.xy, nn = n.xy;
+      if (figM > 0.001) {
+        vec2 Rh = normalize(gRight.xy + vec2(1e-5, 0.0)), Uh = vec2(-Rh.y, Rh.x);
+        vec3 d = p - gFC;
+        sq0 = mix(sq0, gFC.xy + Rh * dot(d, gRight) + Uh * dot(d, gUp), figM);
+        nn = mix(nn, Rh * dot(n, gRight) + Uh * dot(n, gUp), figM);
+      }
+      sq0 = ballFlow(sq0 + nn * REFRACT * 0.12);
+      if (FIG > 0.001 || FTON > 0.001) sq0 = figFlow(sq0);
+      if (WRAP < 0.999) v = lines(sq0, p.z, rr, qw);   // lines bend over the relief
       if (WRAP > 0.001) {
         vec2 sq = surfaceUV(p, n);
         if (length(n.xy) < 0.7) sq = ballFlow(sq);
@@ -577,6 +612,8 @@ void main() {
       v += (0.55 - photo.a) * photoA * MEDIAINK * 2.2;         // drawn by line thickness (engraving)
     }
     vec3 L = normalize(vec3(-0.45, 0.55, 0.75));
+    // a figure is lit from over your shoulder, so the side facing you is never in its own shadow
+    if (figL > 0.001) L = normalize(mix(L, normalize(-0.45 * gRight + 0.55 * gUp + 0.75 * gBack), figL));
     float diff = max(dot(n, L), 0.0);
     float amb = 0.5 + 0.5 * n.z;
     if (!onBall) v -= (diff - 0.6) * ENGRAVE * 1.4;          // light thins the ink: form drawn with lines
@@ -589,7 +626,10 @@ void main() {
     if (onBall) {
       float fres = pow(1.0 - max(dot(n, -rd), 0.0), 2.0);
       col = col * (0.55 + 0.45 * diff) * (1.0 - 0.55 * fres) + pow(max(dot(reflect(-L, n), -rd), 0.0), 60.0) * 0.9;
-    } else col = mix(col, col * (0.25 + 0.55 * amb + 0.55 * diff) + spec * 0.3, LIGHT);
+    } else {
+      col = mix(col, col * (0.25 + 0.55 * amb + 0.55 * diff) + spec * 0.3, LIGHT);
+      col *= 1.0 - 0.45 * deep;
+    }
     if (MEDIAPHOTO > 0.0) {                                    // shown as a photo: a duotone in the palette, or true color
       bool pd = dot(paper, vec3(1.0)) < dot(ink1, vec3(1.0));
       vec3 duo = mix(pd ? paper : ink1, pd ? ink1 : paper, smoothstep(0.03, 0.97, photo.a));

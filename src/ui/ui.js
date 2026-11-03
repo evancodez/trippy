@@ -479,7 +479,7 @@ export function createUI(app) {
             h('button', { class: 'btn', html: `${icon('pin')}<span>${app.figTools.includes(F.pick) ? 'On the toolbar' : 'Put on the toolbar'}</span>`, disabled: app.figTools.includes(F.pick), onclick: () => { app.addFigTool(F.pick); renderBody(); } })),
           addSlider('figures', 'size', 'Size', 0.3, 2.5), addSlider('figures', 'depth', 'How far it pushes through', 0.2, 2), addSlider('figures', 'fabric', 'Fabric over it: tight ↔ loose', 0, 1),
           addSlider('figures', 'spin', 'Turning', -1, 1),
-          toggle('Change with the music', () => F.cycle, x => { app.setAddOption('figures', 'cycle', x); renderBody(); }, 'a new figure every few bars, each re-forming out of the last'),
+          toggle('Change with the music', () => F.cycle, x => { app.setAddOption('figures', 'cycle', x); renderBody(); }, 'a new one from the same group every few bars, each re-forming out of the last'),
           F.cycle ? addSlider('figures', 'every', 'Every', 1, 16, { step: 1, fmt: x => `${x} bar${x > 1 ? 's' : ''}` }) : null,
           toggle('Repeat across the sheet', () => F.repeat, x => app.setAddOption('figures', 'repeat', x)),
           toggle('Follow my mouse', () => F.follow, x => app.setAddOption('figures', 'follow', x), 'its eyes follow you either way'),

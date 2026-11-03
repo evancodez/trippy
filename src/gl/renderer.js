@@ -1,7 +1,7 @@
 // One WebGL2 context: the world pass (ray-marched, with echo trails), the brushes' distortion map, the
 // picture under the sheet (sharp, plus a blurred copy for the relief), the live sound, and the finishing pass.
 import { VERT, DISP_FRAG, COMP_FRAG, BLUR_FRAG } from './passes.js';
-import { WORLD_FRAG } from '../engine/shader.js';
+import { worldFrag } from '../engine/shader.js';
 import { SOUND_W, SOUND_ROWS, WAVE_ROWS } from '../audio.js';
 import { hexToRgb } from '../engine/params.js';
 
@@ -25,7 +25,11 @@ export class Renderer {
 
     this.dispProg = this.program(DISP_FRAG);
     this.compProg = this.program(COMP_FRAG);
-    this.worldProg = this.program(WORLD_FRAG);
+    // the world's shader is built with just the figures on screen: one per set, compiled in the background
+    this.parallel = gl.getExtension('KHR_parallel_shader_compile');
+    this.worldProg = this.program(worldFrag());
+    this.worldKey = '';
+    this.worldProgs = new Map([['', this.worldProg]]);
     this.w = 0; this.h = 0;
     this.frames = []; this.fi = 0;       // ping-pong, so echo trails can read the last frame
     this.disps = []; this.di = 0;
@@ -37,17 +41,14 @@ export class Renderer {
     this.setSound(new Uint8Array(SOUND_W).fill(128), new Uint8Array(SOUND_W * SOUND_ROWS), new Uint8Array(SOUND_W * WAVE_ROWS).fill(128));   // silence
   }
 
-  program(fragSrc) {
+  // later: don't wait for it — P.done() says when it has finished compiling (in the background, where
+  // the browser can), and P.ok whether it worked
+  program(fragSrc, later = false) {
     const gl = this.gl;
     const compile = (type, src) => {
       const sh = gl.createShader(type);
       gl.shaderSource(sh, src);
       gl.compileShader(sh);
-      if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
-        const log = gl.getShaderInfoLog(sh);
-        gl.deleteShader(sh);
-        throw new Error(log || 'shader failed to compile');
-      }
       return sh;
     };
     const vs = compile(gl.VERTEX_SHADER, VERT), fs = compile(gl.FRAGMENT_SHADER, fragSrc);
@@ -55,16 +56,50 @@ export class Renderer {
     gl.attachShader(prog, vs);
     gl.attachShader(prog, fs);
     gl.linkProgram(prog);
-    gl.deleteShader(vs);
-    gl.deleteShader(fs);
-    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog) || 'link failed');
     const cache = new Map();
     const loc = name => {
       if (!cache.has(name)) cache.set(name, gl.getUniformLocation(prog, name));
       return cache.get(name);
     };
-    return { prog, loc };
+    const P = { prog, loc, ok: null, error: '' };
+    P.done = () => {
+      if (P.ok != null) return true;
+      if (later && this.parallel && !gl.getProgramParameter(prog, this.parallel.COMPLETION_STATUS_KHR)) return false;
+      P.ok = gl.getProgramParameter(prog, gl.LINK_STATUS);
+      if (!P.ok) P.error = (!gl.getShaderParameter(fs, gl.COMPILE_STATUS) && gl.getShaderInfoLog(fs)) || gl.getProgramInfoLog(prog) || 'shader failed to compile';
+      gl.deleteShader(vs);
+      gl.deleteShader(fs);
+      return true;
+    };
+    if (!later) { P.done(); if (!P.ok) throw new Error(P.error); }
+    return P;
   }
+
+  // draw with a shader that has these figures in it (ids). The first time, it's compiled in the
+  // background and the one before carries on meanwhile; says whether the switch has happened.
+  useFigures(ids) {
+    const key = [...new Set(ids)].sort().join(',');
+    if (key === this.worldKey) return true;
+    let P = this.worldProgs.get(key);
+    // the one drawing can already show all of these: only move to the leaner one if it's already built
+    if (key && ids.every(id => this.hasFigure(id)) && !(P && P.ok && P.done())) return true;
+    if (!P) {
+      P = this.program(worldFrag(key ? key.split(',') : []), true);
+      this.worldProgs.set(key, P);
+      if (this.worldProgs.size > 8) {                         // forget the oldest (never the one drawing)
+        const [old, Q] = [...this.worldProgs].find(([k]) => k !== this.worldKey && k !== '' && k !== key) || [];
+        if (Q) { this.gl.deleteProgram(Q.prog); this.worldProgs.delete(old); }
+      }
+    }
+    if (!P.done()) return false;
+    if (!P.ok) { if (!P.logged) { console.error(P.error); P.logged = true; } return false; }
+    this.worldProgs.delete(key); this.worldProgs.set(key, P);   // most recently used last
+    this.worldProg = P; this.worldKey = key;
+    return true;
+  }
+
+  // can what's drawing now show this figure?
+  hasFigure(id) { return this.worldKey.split(',').includes(id); }
 
   makeTexture(w, h, float, mip = false) {
     const gl = this.gl;

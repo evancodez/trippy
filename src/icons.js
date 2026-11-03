@@ -32,6 +32,7 @@ const P = {
   orbit: '<ellipse cx="12" cy="12" rx="9" ry="4"/><path d="M12 3v18"/><path d="m19 9.5 2 2.5-3 .5"/>',
   pin: '<path d="M9 4h6l-1 5 3 3v2H7v-2l3-3z"/><path d="M12 14v6"/>',
   ball: '<circle cx="12" cy="12" r="5.5"/><path d="M2.5 9c3 0 4 1.5 4.5 3M2.5 15c3 0 4-1.5 4.5-3M21.5 9c-3 0-4 1.5-4.5 3M21.5 15c-3 0-4-1.5-4.5-3"/><path d="M10 10.2a2.5 2.5 0 0 1 2-1"/>',
+  figure: '<path d="M12 3.5 21 19H3z"/><path d="M7.6 14.2c2.4-2.4 6.4-2.4 8.8 0-2.4 2.4-6.4 2.4-8.8 0z"/><circle cx="12" cy="14.2" r="1.1" fill="currentColor"/>',
   face: '<ellipse cx="12" cy="12" rx="7" ry="9"/><path d="M9 10.5h.01M15 10.5h.01M9.5 15.5c1.5 1 3.5 1 5 0"/>',
   orbs: '<circle cx="6.5" cy="15" r="3.5"/><circle cx="17.5" cy="15" r="3.5"/><circle cx="12" cy="8" r="3.5"/>',
   star: '<path d="m12 3 2.7 5.6 6.1.8-4.5 4.2 1.1 6.1L12 16.8l-5.4 2.9 1.1-6.1-4.5-4.2 6.1-.8z"/>',

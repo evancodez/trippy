@@ -1,12 +1,15 @@
 // Things you can add to any look. None is on by default; any of them can be pinned to the toolbar.
-//   you (the camera) · a pair of hands · the ghost face · the ball · orbs · a picture or words
+//   you (the camera) · a pair of hands · figures rising under the sheet · the ghost face · the ball · orbs · a picture or words
 // The camera and the picture go through media.js / tracking.js; the rest are written straight into the
 // world's values every frame (after the look and the music), so they ride along with whatever look is on.
+
+import { FIGURES, FIGURE_INDEX } from './engine/figures.js';
 
 export const ADDS = [
   { id: 'camera', name: 'You', icon: 'camera', blurb: 'your camera, inside the lines' },
   { id: 'hands', name: 'Hands', icon: 'hand', blurb: 'a pair of hands pressing through' },
-  { id: 'face', name: 'Face', icon: 'face', blurb: 'a ghost face in the lines' },
+  { id: 'figures', name: 'Figures', icon: 'figure', blurb: 'a face, a skull, a mandala, an ouroboros… rising through the lines' },
+  { id: 'face', name: 'Ghost face', icon: 'face', blurb: 'a face in the lines — or yours, from the camera' },
   { id: 'ball', name: 'Ball', icon: 'ball', blurb: 'a chrome ball the lines flow around' },
   { id: 'orbs', name: 'Orbs', icon: 'orbs', blurb: 'spheres rising through the sheet' },
   { id: 'picture', name: 'Picture', icon: 'image', blurb: 'an image, a video or words' },
@@ -15,6 +18,7 @@ export const ADDS = [
 export const defaultAdds = () => ({
   camera: { on: false, pinned: false },
   hands: { on: false, pinned: false, size: 1, push: 0.35, open: 0.55, apart: 0.55, copy: false },
+  figures: { on: false, pinned: false, pick: 'face', size: 1, depth: 1, spin: 0, cycle: false, every: 4, repeat: false, follow: false },
   face: { on: false, pinned: false, size: 1, depth: 1, copy: false },
   ball: { on: false, pinned: false, size: 0.13, speed: 0.45, wake: 0.7, flow: 1, follow: false },
   orbs: { on: false, pinned: false, amount: 1, grid: 5 },
@@ -119,4 +123,85 @@ export function applyOrbs(v, cfg, pres, music, sound) {
   v.orbs = Math.max(v.orbs, cfg.amount * pres * (1 + music.bass * sound.orbsBass));
   v.orbN = cfg.grid;
   v.light = Math.max(v.light, 0.5 * pres);
+}
+
+// ---------------------------------------------------------------- figures rising under the sheet
+// One figure at a time, and picking another doesn't cut: the old one re-forms into the new one.
+// With "change with the music" it moves on by itself every few bars. Eyes follow your pointer;
+// mouths, jaws and wings move with the sound.
+export class Figures {
+  constructor() {
+    this.a = 0; this.b = 0; this.mix = 0;     // showing a, turning into b
+    this.t = 0;                               // its own clock (serpents slither, the ouroboros turns)
+    this.rot = 0;
+    this.look = [0, 0];
+    this.sing = 0;
+    this.x = 0; this.y = 0; this.placed = false;
+    this.nextBar = null; this.nextTime = 0;
+  }
+
+  get current() { return FIGURES[this.mix > 0.5 ? this.b : this.a].id; }
+
+  pick(id) {
+    const i = FIGURE_INDEX[id] ?? 0;
+    if (this.mix > 0) { this.a = this.mix > 0.5 ? this.b : this.a; this.mix = 0; }
+    if (i === this.a) return;
+    this.b = i;
+    this.mix = 0.0001;
+  }
+
+  // the next one when changing with the music: somewhere else in the library, never the same twice
+  nextId(cur) {
+    let i;
+    do i = Math.floor(Math.random() * FIGURES.length); while (FIGURES[i].id === cur);
+    return FIGURES[i].id;
+  }
+
+  // cfg: the add's settings; m: the music; pointer: where your pointer is on the sheet (or null); center: the view's middle
+  // Returns the id it moved on to, if it changed by itself this frame.
+  step(dt, cfg, m, pointer, center) {
+    let changed = null;
+    if (this.mix > 0) {
+      this.mix = Math.min(1, this.mix + dt / 1.6);
+      if (this.mix >= 1) { this.a = this.b; this.mix = 0; }
+    }
+    if (cfg.on && cfg.cycle) {
+      if (m.on) {
+        if (this.nextBar == null || this.nextBar > m.bar + cfg.every * 2) this.nextBar = Math.floor(m.bar) + cfg.every;
+        if (m.bar >= this.nextBar) { this.nextBar = Math.floor(m.bar) + cfg.every; changed = this.nextId(this.current); }
+      } else {
+        this.nextTime -= dt;
+        if (this.nextTime <= 0) { this.nextTime = cfg.every * 1.8; changed = this.nextId(this.current); }
+      }
+      if (changed) { cfg.pick = changed; this.pick(changed); }
+    } else this.nextBar = null;
+    this.t += dt * (0.6 + (m.on ? m.loud : 0.4));
+    this.rot += dt * cfg.spin * 0.6;
+    // where it is: the middle of the view, or drifting after your pointer
+    const target = cfg.follow && pointer ? pointer : center;
+    if (!this.placed) { this.x = target[0]; this.y = target[1]; this.placed = true; }
+    const k = 1 - Math.exp(-dt * (cfg.follow ? 2.5 : 4));
+    this.x += (target[0] - this.x) * k; this.y += (target[1] - this.y) * k;
+    // eyes: on your pointer, or wandering
+    let lx = Math.sin(this.t * 0.7) * 0.6, ly = Math.sin(this.t * 0.53 + 1) * 0.4;
+    if (pointer) { lx = clamp((pointer[0] - this.x) * 2.2, -1, 1); ly = clamp((pointer[1] - this.y) * 2.2, -1, 1); }
+    this.look[0] += (lx - this.look[0]) * (1 - Math.exp(-dt * 6));
+    this.look[1] += (ly - this.look[1]) * (1 - Math.exp(-dt * 6));
+    const sing = m.on ? clamp(m.mid * 1.2 + m.bass * 0.4 - 0.15, 0, 1) : 0.15 + 0.15 * Math.sin(this.t * 1.3);
+    this.sing += (sing - this.sing) * (1 - Math.exp(-dt * 14));
+    return changed;
+  }
+
+  apply(v, cfg, pres) {
+    if (pres < 0.01) return;
+    Object.assign(v, {
+      fig: pres, figA: this.a, figB: this.b, figMix: this.mix * this.mix * (3 - 2 * this.mix),
+      figS: cfg.size * 0.5 * v.frame / 0.6, figX: this.x, figY: this.y, figD: cfg.depth,
+      figRot: this.rot, figT: this.t, figLX: this.look[0], figLY: this.look[1], figSing: this.sing, figRep: cfg.repeat ? 1 : 0,
+    });
+    // so the shape reads: the lines bend over it and light thins the ink on its slopes
+    v.refract = Math.max(v.refract, 0.7 * pres);
+    v.engrave = Math.max(v.engrave, 0.6 * pres);
+    v.light = Math.max(v.light, 0.35 * pres);
+  }
 }

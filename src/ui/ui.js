@@ -10,6 +10,7 @@ import { LOOKS, GROUPS, PALETTES, look } from '../engine/looks.js';
 import { PARAMS, PARAM_BY_NAME, rgbToHex } from '../engine/params.js';
 import { KNOBS, feelMoved } from '../engine/feel.js';
 import { ADDS } from '../adds.js';
+import { FIGURES, FIGURE_GROUPS } from '../engine/figures.js';
 import { FONTS } from '../media.js';
 
 export const TOOLS = [
@@ -433,6 +434,23 @@ export function createUI(app) {
         addSlider('hands', 'size', 'Size', 0.4, 2.5), addSlider('hands', 'push', 'Push through', 0, 1), addSlider('hands', 'open', 'Fist ↔ open', 0, 1), addSlider('hands', 'apart', 'How far apart', 0.15, 1),
         toggle('Copy my hands (camera), finger by finger', () => A.hands.copy, x => { app.setAddOption('hands', 'copy', x); renderBody(); }),
       ],
+      figures: () => {
+        const F = A.figures, cur = FIGURES.find(f => f.id === F.pick) || FIGURES[0];
+        return [
+          h('p', { class: 'fig-now' }, h('b', {}, cur.name), h('span', {}, ` — ${cur.blurb}`)),
+          FIGURE_GROUPS.map(g => [
+            h('div', { class: 'sub-label' }, g),
+            chips(FIGURES.filter(f => f.group === g).map(f => [f.id, f.name, f.blurb]), id => F.pick === id, id => { app.pickFigure(id); }, 'small'),
+          ]),
+          h('div', { class: 'run-actions' }, h('button', { class: 'btn', html: `${icon('dice')}<span>Another</span>`, onclick: () => app.pickFigure(app.figures.nextId(F.pick)) })),
+          addSlider('figures', 'size', 'Size', 0.3, 2.5), addSlider('figures', 'depth', 'How far it rises', 0.2, 2.5),
+          addSlider('figures', 'spin', 'Turning', -1, 1),
+          toggle('Change with the music', () => F.cycle, x => { app.setAddOption('figures', 'cycle', x); renderBody(); }, 'a new figure every few bars, each re-forming out of the last'),
+          F.cycle ? addSlider('figures', 'every', 'Every', 1, 16, { step: 1, fmt: x => `${x} bar${x > 1 ? 's' : ''}` }) : null,
+          toggle('Repeat across the sheet', () => F.repeat, x => app.setAddOption('figures', 'repeat', x)),
+          toggle('Follow my mouse', () => F.follow, x => app.setAddOption('figures', 'follow', x), 'its eyes follow you either way'),
+        ];
+      },
       face: () => [
         addSlider('face', 'size', 'Size', 0.4, 2.5), addSlider('face', 'depth', 'How deep it presses', 0.2, 1.5),
         toggle('Copy my face (camera): mouth, blinks, head turn', () => A.face.copy, x => { app.setAddOption('face', 'copy', x); renderBody(); }),

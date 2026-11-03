@@ -9,6 +9,7 @@
 //     triangles + moiré + contours, all weighted, so one look re-forms into the next
 // Lighting can thin the ink where it's bright (engraving), so 3D form is drawn with lines alone.
 import { shaderDefines, SHADER_COUNT, SHADER_SLOTS } from './params.js';
+import { FIGURES_GLSL } from './figures.js';
 
 const HAND_BASE = SHADER_SLOTS.findIndex(s => s.name === 'h0on');
 
@@ -119,6 +120,8 @@ float mediaMaskSoft(vec2 q, float lod) {
   return mix(1.0, textureLod(uMedia, uv, lod).a, MEDIAMASK) * mediaEdge(uv, 0.08);
 }
 
+${FIGURES_GLSL}
+
 // ---------------------------------------------------------------- the membrane's height
 float heightField(vec2 q) {
   float h = 0.0;
@@ -157,6 +160,7 @@ float heightField(vec2 q) {
     float age = 0.45 - u.y * 0.5, f = abs(u.x) * 0.7;
     h += calm * SLAND * 0.11 * FRAME * (soundSpec(f, age) + soundSpec(f, age + 0.03));
   }
+  if (FIG > 0.001) h += figureH(q);
   return h * HEIGHT;
 }
 
@@ -509,6 +513,12 @@ void main() {
   vec3 target = vec3(TX, TY, 0.0);
   vec3 ro = target + back * dist - back * FLY;
   vec3 rd = normalize(r2 * uv.x + u2 * uv.y - back * FOCAL);
+  // never under the sheet: in a low shot a loud crest (or a figure) can rise past the camera, and from
+  // inside the fabric the whole screen would flash one solid color. Spaces you fly through are exempt.
+  if (GYRO + SPONGE + KIFS + HALL < 0.5) {
+    float floorZ = heightField(ro.xy) + 0.05 + 0.18 * FRAME;
+    ro.z = max(ro.z, floorZ);
+  }
   if (BALL > 0.001) gBallH = heightField(vec2(BALLX, BALLY));
 
   float t = 0.0, d = 1.0;

@@ -1,4 +1,4 @@
-# trippy
+# trippi
 
 A world of black-and-white op-art lines you can warp, ripple, twist and play music into. It can be flat or 3D.
 
@@ -29,7 +29,11 @@ The side panel has four tabs.
 - **Add**: things you can put into any look. None is on until you add it, and you can pin any of them to the toolbar.
   - **You (camera)**, with quick setups: Just me, Playing guitar, Hands & guitar, Lines over me, My face, Movement. Everything is worked out in the browser; no picture leaves your computer.
   - **Hands**: a mirrored pair pressing through, or a copy of yours, finger by finger.
-  - **Face**: a ghost face, or a copy of yours.
+  - **Figures**: shapes that rise up under the sheet, so the lines drape over them. Their tallest parts break through first; picking another makes the old one re-form into the new one. "Change with the music" moves on every few bars by itself. They can also turn, follow your mouse, or repeat across the sheet like wallpaper.
+    - *Presences*: a face peering through (its eyes follow you, its mouth moves with the music), twins, a skull, the Shadow, Rubin's two faces, the Persona's mask, praying hands, a moth.
+    - *Symbols*: the eye in the triangle, a hamsa, the ouroboros, a serpent, the union of opposites, a lotus, Sol and Luna, the Star, a triskele, an hourglass, a keyhole, the threshold.
+    - *Sacred geometry*: a mandala (Jung's Self), the Flower of Life, Metatron's Cube, the Sri Yantra, the vesica piscis, the Tree of Life, a labyrinth, the Seal of Solomon.
+  - **Ghost face**: a face in the lines, or a copy of yours.
   - **Ball**: a chrome ball the lines part around, with a turbulent wake (after Tame Impala's *Currents*). With music it hops on the beat and ripples where it lands.
   - **Orbs** rising through the sheet.
   - **Picture**: an image, a video or words.
@@ -105,7 +109,8 @@ Import the GitHub repo in Vercel and keep the defaults: Framework Preset **Other
 | `src/engine/looks.js` | The looks (grouped, with their key sliders) and the color palettes |
 | `src/engine/world.js` | Gliding between looks, speeds, the music applied every frame |
 | `src/engine/feel.js` | The three feel knobs and breeding (Explore) |
-| `src/adds.js` | Add-ons: the ball's motion, the pair of hands, the face, orbs |
+| `src/adds.js` | Add-ons: the ball's motion, the pair of hands, figures, the face, orbs |
+| `src/engine/figures.js` | The figure library: each one a relief in GLSL |
 | `src/director.js` | The cinematic camera: shots, glides on the bar, drift |
 | `src/media.js`, `src/tracking.js` | The camera, pictures, video and words; face / hand / body / motion tracking (MediaPipe) |
 | `src/audio.js`, `src/analysis.js`, `src/songs.js` | Live audio (levels, beat, waveform, spectrum); tempo from a song; your song library |

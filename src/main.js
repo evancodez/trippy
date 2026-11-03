@@ -1,4 +1,4 @@
-// trippy — the app: state, the frame loop, the tools, songs, the camera, recording and links.
+// trippi — the app: state, the frame loop, the tools, songs, the camera, recording and links.
 //
 // One world (src/engine) renders every look, flat or 3D. You pick a look, tweak it (tweaks are kept per
 // look for this session, and Reset puts the look back), add things to it, and choose how the sound moves it.
@@ -7,7 +7,7 @@ import { World, defaultValues, cloneValues, stepFactor, mulberry32 } from './eng
 import { LOOKS, GROUPS, NEUTRAL, look, PALETTES, COLOR_KEYS } from './engine/looks.js';
 import { PARAM_BY_NAME, hexToRgb, rgbToHex, isColorParam, DEFAULTS } from './engine/params.js';
 import { applyFeel, defaultFeel, breed } from './engine/feel.js';
-import { ADDS, defaultAdds, Ball, applyHands, applyFace, applyOrbs } from './adds.js';
+import { ADDS, defaultAdds, Ball, Figures, applyHands, applyFace, applyOrbs } from './adds.js';
 import { Director } from './director.js';
 import { AudioEngine } from './audio.js';
 import { analyzeAudio } from './analysis.js';
@@ -395,7 +395,15 @@ navigator.mediaDevices?.addEventListener?.('devicechange', () => app.refreshDevi
 app.stopAudio = () => app.audio.stop();
 
 // ------------------------------------------------------------------ add-ons
-const pres = { hands: 0, face: 0, orbs: 0 };
+const pres = { hands: 0, face: 0, orbs: 0, figures: 0 };
+app.figures = new Figures();
+// pick a figure (it re-forms out of whichever one is showing), switching the add on if it isn't
+app.pickFigure = id => {
+  app.adds.figures.pick = id;
+  app.figures.pick(id);
+  if (!app.adds.figures.on) app.setAdd('figures', true);
+  else ui.addsChanged();
+};
 app.setAdd = async (id, on) => {
   const A = app.adds[id];
   A.on = on;
@@ -603,12 +611,17 @@ function applyAdds(v, m, dt) {
   v.pitch = clamp(v.pitch + V.pitch, -0.35, 1.42);
   // tilted back, a long lens would push the camera miles away: widen it as it tilts
   if (v.focal > 2.2) v.focal += (2.0 - v.focal) * clamp((v.pitch - 0.12) / 0.7, 0, 1);
-  for (const k of ['hands', 'face', 'orbs']) pres[k] = ease(pres[k], A[k].on ? 1 : 0, 3, dt);
+  for (const k of ['hands', 'face', 'orbs', 'figures']) pres[k] = ease(pres[k], A[k].on ? 1 : 0, k === 'figures' ? 1.2 : 3, dt);
   const copying = A.hands.copy && tracker.on && tracker.hands.length;
   if (!copying) { rt.handMirror[0] = 1; rt.handMirror[1] = -1; rt.fingers.fill(0); }
   applyHands(v, A.hands, copying ? 0 : pres.hands, m, app.sound);
   applyFace(v, A.face, A.face.copy && tracker.face ? 0 : pres.face);
   applyOrbs(v, A.orbs, pres.orbs, m, app.sound);
+  if (A.figures.on || pres.figures > 0.01) {
+    const at = pointer.inside ? [v.tx + pointer.x * 2 * v.frame, v.ty + pointer.y * 2 * v.frame] : null;
+    if (app.figures.step(dt, A.figures, m, at, [v.tx, v.ty])) ui.addsChanged();
+    app.figures.apply(v, A.figures, pres.figures);
+  }
   app.ball.apply(v, A.ball);
   // your cursor as a hand, pressing through from behind
   if (handTool.on > 0.001) {
@@ -619,6 +632,10 @@ function applyAdds(v, m, dt) {
     v.handSoft = Math.min(v.handSoft, 0.2);
   }
   applyInputs(v, m);
+  // never a screen of one solid color, whatever the music, the ties or the cinematic camera do:
+  // keep at least a few lines in view however far it zooms in, and never let the ink flood the frame
+  v.frame = Math.max(v.frame, 2.6 / Math.max(v.freq, 1));
+  v.thick = clamp(v.thick, -0.72, 0.72);
 }
 
 // ------------------------------------------------------------------ pictures, clips, links, saves
@@ -632,7 +649,7 @@ function download(blob, name) {
 }
 let afterRender = [];   // things that need the canvas right after a frame is drawn
 app.snapshot = () => {
-  afterRender.push(() => canvas.toBlob(b => { download(b, `trippy-${stamp()}.png`); ui.toast('Picture saved'); }, 'image/png'));
+  afterRender.push(() => canvas.toBlob(b => { download(b, `trippi-${stamp()}.png`); ui.toast('Picture saved'); }, 'image/png'));
 };
 app.toggleRecord = () => {
   if (app.recording) { app.recording.stop(); return; }
@@ -649,7 +666,7 @@ app.toggleRecord = () => {
   rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
   rec.onstop = () => {
     const type = rec.mimeType || mimeType || 'video/webm';
-    download(new Blob(chunks, { type }), `trippy-${stamp()}.${type.includes('mp4') ? 'mp4' : 'webm'}`);
+    download(new Blob(chunks, { type }), `trippi-${stamp()}.${type.includes('mp4') ? 'mp4' : 'webm'}`);
     app.recording = null;
     ui.refreshTop();
     ui.toast('Clip saved');

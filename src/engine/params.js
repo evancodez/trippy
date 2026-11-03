@@ -110,6 +110,10 @@ export const PARAMS = [
   P('face', 0, 0, 1.5), P('faceS', 0.6, 0.2, 2.5), P('faceX', 0, -1.5, 1.5), P('faceY', 0, -1.5, 1.5),
   P('faceRoll', 0, -1.5, 1.5), P('faceTurn', 0, -1.5, 1.5), P('mouth', 0, 0, 1), P('eyes', 1, 0, 1),
   P('handSoft', 0.15, 0.01, 0.45),
+  // figures rising under the sheet (set by the app): which one, morphing into which, where, how it looks about
+  P('fig', 0, 0, 1), P('figA', 0, 0, 64), P('figB', 0, 0, 64), P('figMix', 0, 0, 1), P('figS', 0.5, 0.05, 3),
+  P('figX', 0, -3, 3), P('figY', 0, -3, 3), P('figD', 1, 0, 3), P('figRot', 0, -7, 7), P('figT', 0, 0, 0),
+  P('figLX', 0, -1, 1), P('figLY', 0, -1, 1), P('figSing', 0, 0, 1), P('figRep', 0, 0, 1),
   ...HANDS,
   P('ball', 0, 0, 1), P('ballX', 0, -4, 4), P('ballY', 0, -4, 4), P('ballZ', 0, -1, 2), P('ballR', 0.12, 0.02, 1),
   P('ballVX', 1, -1, 1), P('ballVY', 0, -1, 1), P('ballWake', 0.5, 0, 2), P('ballFlow', 1, 0, 2),

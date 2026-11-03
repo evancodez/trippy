@@ -59,11 +59,16 @@ button:disabled { opacity: 0.3; cursor: default; }
 .top-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .brand { display: flex; align-items: center; gap: 9px; height: 40px; padding: 0 14px 0 10px; border-radius: 999px; white-space: nowrap; min-width: 0; }
 .brand b { font-size: 15px; letter-spacing: -0.01em; }
-.logo {
-  width: 20px; height: 20px; border-radius: 50%; flex: none;
-  background: repeating-radial-gradient(circle, #f2f0ea 0 2px, #0b0b0b 2px 4px);
-  animation: spin 6s linear infinite;
+/* the wordmark: heavy letters filled with lines */
+.brand .wordmark {
+  font: 800 18px/1 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  letter-spacing: -0.03em; padding-left: 4px;
+  background: repeating-linear-gradient(0deg, var(--text) 0 2px, transparent 2px 4px);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  -webkit-text-stroke: 0.5px var(--text);
 }
+.fig-now { margin: 2px 0 4px; font-size: 13px; }
+.fig-now span { color: var(--muted); }
 .preset-name { color: var(--muted); overflow: hidden; text-overflow: ellipsis; padding-left: 9px; border-left: 1px solid var(--line-2); }
 .preset-name.dirty::after { content: ' · tweaked'; color: var(--faint); }
 .now-pill { display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 4px 0 14px; border-radius: 999px; }

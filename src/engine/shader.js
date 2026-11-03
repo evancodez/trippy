@@ -120,8 +120,6 @@ float mediaMaskSoft(vec2 q, float lod) {
   return mix(1.0, textureLod(uMedia, uv, lod).a, MEDIAMASK) * mediaEdge(uv, 0.08);
 }
 
-${FIGURES_GLSL}
-
 // ---------------------------------------------------------------- the membrane's height
 float heightField(vec2 q) {
   float h = 0.0;
@@ -160,7 +158,6 @@ float heightField(vec2 q) {
     float age = 0.45 - u.y * 0.5, f = abs(u.x) * 0.7;
     h += calm * SLAND * 0.11 * FRAME * (soundSpec(f, age) + soundSpec(f, age + 0.03));
   }
-  if (FIG > 0.001) h += figureH(q);
   return h * HEIGHT;
 }
 
@@ -214,6 +211,8 @@ float hands(vec3 p) {
   }
   return d;
 }
+
+${FIGURES_GLSL}
 
 // ---------------------------------------------------------------- orbs, columns
 float orbsSDF(vec3 p) {
@@ -388,6 +387,7 @@ float map(vec3 p) {
   if (COLUMNS > 0.001) d = smin(d, columnsSDF(p), 0.03);
   d = smin(d, objects(p), OBJSOFT);
   if (BALL > 0.001) d = smin(d, ballSDF(p), 0.02);
+  if (FIG > 0.001 || FTON > 0.001) d = smin(d, figuresSDF(p), FIGSOFT);   // figures, draped in the sheet like the hands
   return smin(d, hands(p), HANDSOFT);
 }
 

@@ -323,6 +323,14 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.15); }
 .tool.cine { width: 64px; margin-left: 2px; }
 .tool.cine.on { background: var(--pink-bg); color: var(--pink); box-shadow: inset 0 0 0 1px rgba(255, 79, 134, 0.5); }
 .tool.add-more { color: var(--faint); }
+.fig-tools { display: flex; gap: 2px; padding-left: 6px; border-left: 1px solid var(--line-2); align-items: center; }
+.fig-tools .tool { width: 50px; }
+.fig-tools .tool span { max-width: 46px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fig-tools.empty { padding: 0 10px; }
+.fig-drop-hint { font-size: 10.5px; color: var(--faint); white-space: nowrap; border: 1px dashed var(--line-2); border-radius: 10px; padding: 9px 10px; }
+.dock.drop-ok { box-shadow: 0 0 0 2px var(--pink), 0 10px 40px rgba(0, 0, 0, 0.35); }
+.fig-chip { cursor: grab; }
+.fig-chip.tooled::after { content: ' ·'; color: var(--pink); }
 .tool-opts { display: flex; align-items: center; gap: 10px; padding: 0 4px 0 10px; border-left: 1px solid var(--line-2); }
 .slider.mini { width: 84px; padding: 0; }
 .slider.mini .slider-top { font-size: 10.5px; margin: 0; }
@@ -334,7 +342,7 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.15); }
   opacity: 0; transition: opacity 0.2s, width 0.15s, height 0.15s;
 }
 .brush.show { opacity: 0.8; }
-.brush.down { opacity: 1; border-width: 2.5px; }
+.brush.show.down { opacity: 1; border-width: 2.5px; }
 
 /* ------------------------------------------------ explore, view menu, hint, toast, drop */
 .explore {

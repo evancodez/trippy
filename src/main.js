@@ -7,7 +7,8 @@ import { World, defaultValues, cloneValues, stepFactor, mulberry32 } from './eng
 import { LOOKS, GROUPS, NEUTRAL, look, PALETTES, COLOR_KEYS } from './engine/looks.js';
 import { PARAM_BY_NAME, hexToRgb, rgbToHex, isColorParam, DEFAULTS } from './engine/params.js';
 import { applyFeel, defaultFeel, breed } from './engine/feel.js';
-import { ADDS, defaultAdds, Ball, Figures, applyHands, applyFace, applyOrbs } from './adds.js';
+import { ADDS, defaultAdds, Ball, Figures, figureLight, applyHands, applyFace, applyOrbs } from './adds.js';
+import { FIGURES, FIGURE_INDEX } from './engine/figures.js';
 import { Director } from './director.js';
 import { AudioEngine } from './audio.js';
 import { analyzeAudio } from './analysis.js';
@@ -601,6 +602,8 @@ function applyInputs(v, m) {
 
 // add-ons and the view, after the look and the music
 const handTool = { on: 0, x: 0, y: 0, press: 0 };
+// a figure as your cursor (one you put on the toolbar): it follows you under the sheet, hold to push it through
+const figTool = { on: 0, x: 0, y: 0, press: 0, id: 0 };
 function applyAdds(v, m, dt) {
   const A = app.adds;
   const V = app.view;
@@ -617,10 +620,17 @@ function applyAdds(v, m, dt) {
   applyHands(v, A.hands, copying ? 0 : pres.hands, m, app.sound);
   applyFace(v, A.face, A.face.copy && tracker.face ? 0 : pres.face);
   applyOrbs(v, A.orbs, pres.orbs, m, app.sound);
-  if (A.figures.on || pres.figures > 0.01) {
+  if (A.figures.on || pres.figures > 0.01 || figTool.on > 0.001) {
     const at = pointer.inside ? [v.tx + pointer.x * 2 * v.frame, v.ty + pointer.y * 2 * v.frame] : null;
     if (app.figures.step(dt, A.figures, m, at, [v.tx, v.ty])) ui.addsChanged();
     app.figures.apply(v, A.figures, pres.figures);
+    if (figTool.on > 0.001) {
+      const F = app.figures, S = 1.05 * v.frame / 0.6;
+      Object.assign(v, { ftOn: figTool.on, ftId: figTool.id, ftX: figTool.x, ftY: figTool.y, ftZ: (-0.1 + FIGURES[figTool.id].lift + figTool.press * 0.28) * S, ftS: S,
+        figT: F.t, figLX: F.look[0], figLY: F.look[1], figSing: F.sing });
+      if (pres.figures < 0.01) v.figSoft = 0.06 * S;
+      figureLight(v, figTool.on);
+    }
   }
   app.ball.apply(v, A.ball);
   // your cursor as a hand, pressing through from behind
@@ -737,8 +747,10 @@ const dropEl = document.getElementById('drop');
 let dragDepth = 0;
 addEventListener('dragenter', e => { if ([...e.dataTransfer.types].includes('Files')) { dragDepth++; dropEl.classList.add('show'); } });
 addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; dropEl.classList.remove('show'); } });
-addEventListener('dragover', e => e.preventDefault());
+// only files drop on the page (a figure dragged anywhere but the toolbar is just let go)
+addEventListener('dragover', e => { if ([...e.dataTransfer.types].includes('Files')) e.preventDefault(); });
 addEventListener('drop', e => {
+  if (![...e.dataTransfer.types].includes('Files')) return;
   e.preventDefault();
   dragDepth = 0;
   dropEl.classList.remove('show');
@@ -763,7 +775,7 @@ function toUV(e) {
 }
 function updateRing(e) {
   if (e) { ring.style.left = `${e.clientX}px`; ring.style.top = `${e.clientY}px`; }
-  const show = !['camera', 'hand'].includes(app.tool) && !matchMedia('(pointer: coarse)').matches;
+  const show = !['camera', 'hand'].includes(app.tool) && !app.tool.startsWith('fig:') && !matchMedia('(pointer: coarse)').matches;
   ring.classList.toggle('show', show && pointer.inside && !pointer.move);
   const d = app.brush.size * 2 * canvas.getBoundingClientRect().height * (app.tool === 'ripple' ? 0.6 : 1);
   ring.style.width = ring.style.height = `${d}px`;
@@ -857,6 +869,15 @@ function updateTools(dt, v) {
     rt.twists.set([t.x, t.y, t.angle, t.r], i * 4);
   });
   // the hand tool: your cursor is a hand under the sheet
+  // a figure tool: the same, with whichever figure it is (it sinks away before another one comes up)
+  const ft = app.tool.startsWith('fig:') ? FIGURE_INDEX[app.tool.slice(4)] ?? -1 : -1;
+  if (ft >= 0 && ft !== figTool.id && figTool.on < 0.05) figTool.id = ft;
+  figTool.on = ease(figTool.on, ft >= 0 && ft === figTool.id && pointer.inside ? 1 : 0, 4, dt);
+  figTool.press = ease(figTool.press, pointer.down && ft >= 0 && !pointer.move ? 1 : 0, 5, dt);
+  if (v) {
+    figTool.x = ease(figTool.x, v.tx + pointer.x * 2 * v.frame, 10, dt);
+    figTool.y = ease(figTool.y, v.ty + pointer.y * 2 * v.frame, 10, dt);
+  }
   const want = app.tool === 'hand' && pointer.inside ? 1 : 0;
   handTool.on = ease(handTool.on, want, 4, dt);
   handTool.press = ease(handTool.press, pointer.down && app.tool === 'hand' && !pointer.move ? 1 : 0, 6, dt);
@@ -889,6 +910,27 @@ addEventListener('keydown', e => {
   if (n >= 1 && n <= TOOLS.length) app.setTool(TOOLS[n - 1].id);
 });
 app.setTool = id => { app.tool = id; updateRing(); ui.renderDock(); };
+
+// figures you put on the toolbar (drag them there from Add → Figures); remembered between visits
+const FIG_TOOLS_KEY = 'trippy.figtools.v1';
+app.figTools = (() => { try { const a = JSON.parse(localStorage.getItem(FIG_TOOLS_KEY)); if (Array.isArray(a)) return a.filter(id => id in FIGURE_INDEX); } catch {} return ['face', 'skull']; })();
+const saveFigTools = () => { try { localStorage.setItem(FIG_TOOLS_KEY, JSON.stringify(app.figTools)); } catch {} };
+app.addFigTool = (id, at = app.figTools.length) => {
+  if (!(id in FIGURE_INDEX)) return;
+  const was = app.figTools.indexOf(id);
+  if (was >= 0) app.figTools.splice(was, 1);
+  app.figTools.splice(Math.min(at, app.figTools.length), 0, id);
+  if (app.figTools.length > 8) app.figTools.length = 8;
+  saveFigTools();
+  app.setTool(`fig:${id}`);
+  if (was < 0) ui.toast(`${FIGURES[FIGURE_INDEX[id]].name} is on the toolbar — hold on the sheet to push it through`);
+};
+app.removeFigTool = id => {
+  app.figTools = app.figTools.filter(x => x !== id);
+  saveFigTools();
+  if (app.tool === `fig:${id}`) app.setTool('ripple');
+  else ui.renderDock();
+};
 
 // ------------------------------------------------------------------ the frame loop
 let scale = 1;

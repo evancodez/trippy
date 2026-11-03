@@ -8,7 +8,7 @@ import { FIGURES, FIGURE_INDEX } from './engine/figures.js';
 export const ADDS = [
   { id: 'camera', name: 'You', icon: 'camera', blurb: 'your camera, inside the lines' },
   { id: 'hands', name: 'Hands', icon: 'hand', blurb: 'a pair of hands pressing through' },
-  { id: 'figures', name: 'Figures', icon: 'figure', blurb: 'a face, a skull, a mandala, an ouroboros… rising through the lines' },
+  { id: 'figures', name: 'Figures', icon: 'figure', blurb: 'a face, a skull, someone trapped behind the sheet… pressing through' },
   { id: 'face', name: 'Ghost face', icon: 'face', blurb: 'a face in the lines — or yours, from the camera' },
   { id: 'ball', name: 'Ball', icon: 'ball', blurb: 'a chrome ball the lines flow around' },
   { id: 'orbs', name: 'Orbs', icon: 'orbs', blurb: 'spheres rising through the sheet' },
@@ -18,7 +18,7 @@ export const ADDS = [
 export const defaultAdds = () => ({
   camera: { on: false, pinned: false },
   hands: { on: false, pinned: false, size: 1, push: 0.35, open: 0.55, apart: 0.55, copy: false },
-  figures: { on: false, pinned: false, pick: 'face', size: 1, depth: 1, spin: 0, cycle: false, every: 4, repeat: false, follow: false },
+  figures: { on: false, pinned: false, pick: 'face', size: 1, depth: 1, fabric: 0.45, spin: 0, cycle: false, every: 4, repeat: false, follow: false },
   face: { on: false, pinned: false, size: 1, depth: 1, copy: false },
   ball: { on: false, pinned: false, size: 0.13, speed: 0.45, wake: 0.7, flow: 1, follow: false },
   orbs: { on: false, pinned: false, amount: 1, grid: 5 },
@@ -125,10 +125,18 @@ export function applyOrbs(v, cfg, pres, music, sound) {
   v.light = Math.max(v.light, 0.5 * pres);
 }
 
-// ---------------------------------------------------------------- figures rising under the sheet
+// so a figure reads in any look (like the ghost face): light thins the ink on its slopes and the
+// lines bend over it
+export function figureLight(v, k) {
+  v.engrave = Math.max(v.engrave, 0.75 * k);
+  v.light = Math.max(v.light, 0.45 * k);
+  v.refract = Math.max(v.refract, 0.6 * k);
+}
+
+// ---------------------------------------------------------------- figures pressing through the sheet
 // One figure at a time, and picking another doesn't cut: the old one re-forms into the new one.
 // With "change with the music" it moves on by itself every few bars. Eyes follow your pointer;
-// mouths, jaws and wings move with the sound.
+// jaws and wings move with the sound.
 export class Figures {
   constructor() {
     this.a = 0; this.b = 0; this.mix = 0;     // showing a, turning into b
@@ -194,14 +202,13 @@ export class Figures {
 
   apply(v, cfg, pres) {
     if (pres < 0.01) return;
+    const S = cfg.size * 0.95 * v.frame / 0.6;
     Object.assign(v, {
       fig: pres, figA: this.a, figB: this.b, figMix: this.mix * this.mix * (3 - 2 * this.mix),
-      figS: cfg.size * 0.5 * v.frame / 0.6, figX: this.x, figY: this.y, figD: cfg.depth,
+      figS: S, figX: this.x, figY: this.y, figZ: ((cfg.depth - 1) * 0.12 + FIGURES[this.a].lift + (FIGURES[this.b].lift - FIGURES[this.a].lift) * this.mix) * S, figSoft: (0.015 + 0.09 * cfg.fabric) * S,
       figRot: this.rot, figT: this.t, figLX: this.look[0], figLY: this.look[1], figSing: this.sing, figRep: cfg.repeat ? 1 : 0,
     });
     // so the shape reads: the lines bend over it and light thins the ink on its slopes
-    v.refract = Math.max(v.refract, 0.7 * pres);
-    v.engrave = Math.max(v.engrave, 0.6 * pres);
-    v.light = Math.max(v.light, 0.35 * pres);
+    figureLight(v, pres);
   }
 }

@@ -10,7 +10,7 @@ import { LOOKS, GROUPS, PALETTES, look } from '../engine/looks.js';
 import { PARAMS, PARAM_BY_NAME, rgbToHex } from '../engine/params.js';
 import { KNOBS, feelMoved } from '../engine/feel.js';
 import { ADDS } from '../adds.js';
-import { FIGURES, FIGURE_GROUPS } from '../engine/figures.js';
+import { FIGURES, FIGURE_GROUPS, FIGURE_INDEX } from '../engine/figures.js';
 import { FONTS } from '../media.js';
 
 export const TOOLS = [
@@ -41,6 +41,17 @@ export function createUI(app) {
   const tabsEl = document.getElementById('tabs');
   const actionsEl = document.getElementById('actions');
   const dock = document.getElementById('dock');
+  // drop a figure on the toolbar to make it a tool (or drag one along it to move it)
+  const isFig = e => [...e.dataTransfer.types].includes('text/x-figure');
+  dock.addEventListener('dragover', e => { if (!isFig(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; dock.classList.add('drop-ok'); });
+  dock.addEventListener('dragleave', e => { if (!dock.contains(e.relatedTarget)) dock.classList.remove('drop-ok'); });
+  dock.addEventListener('drop', e => {
+    dock.classList.remove('drop-ok');
+    if (!isFig(e)) return;
+    e.preventDefault();
+    const over = e.target.closest('.fig-tool');
+    app.addFigTool(e.dataTransfer.getData('text/x-figure'), over ? [...over.parentNode.children].indexOf(over) : app.figTools.length);
+  });
   const toastEl = document.getElementById('toast');
   const nameEl = document.getElementById('presetName');
   const hintEl = document.getElementById('hint');
@@ -193,8 +204,24 @@ export function createUI(app) {
       return s;
     };
     const pinned = ADDS.filter(a => app.adds[a.id].pinned);
+    // figures you dragged onto the toolbar: each one is a tool like the hand
+    const figTools = h('div', { class: `fig-tools${app.figTools.length ? '' : ' empty'}` },
+      app.figTools.map(id => {
+        const f = FIGURES[FIGURE_INDEX[id]];
+        return h('button', {
+          class: `tool fig-tool${app.tool === `fig:${id}` ? ' on' : ''}`, draggable: 'true',
+          'data-tip': `${f.name}: hold on the sheet to push it through (right-click, or drag it off, to take it away)`, 'aria-label': f.name,
+          onclick: () => app.setTool(`fig:${id}`),
+          oncontextmenu: e => { e.preventDefault(); app.removeFigTool(id); },
+          ondragstart: e => { e.dataTransfer.setData('text/x-figure', id); e.dataTransfer.effectAllowed = 'copyMove'; },
+          ondragend: e => { if (e.dataTransfer.dropEffect === 'none') app.removeFigTool(id); },
+          html: `${icon(f.group === 'Presences' ? 'face' : 'figure')}<span>${f.name.replace(/^The /, '').split(' ')[0]}</span>`,
+        });
+      }),
+      app.figTools.length ? null : h('span', { class: 'fig-drop-hint' }, 'drag figures here'));
     dock.replaceChildren(
       tools,
+      figTools,
       h('button', {
         class: `tool cine${app.cine.on ? ' on' : ''}`, 'data-tip': 'Cinematic camera: it drifts from shot to shot on its own (C)',
         onclick: () => app.setCinema(!app.cine.on), html: `${icon('film')}<span>Cinematic</span>`,
@@ -438,12 +465,19 @@ export function createUI(app) {
         const F = A.figures, cur = FIGURES.find(f => f.id === F.pick) || FIGURES[0];
         return [
           h('p', { class: 'fig-now' }, h('b', {}, cur.name), h('span', {}, ` — ${cur.blurb}`)),
+          h('p', { class: 'muted small' }, 'Drag any of them onto the toolbar and it becomes a tool like the hand: it follows your cursor under the sheet, and pushes through while you hold.'),
           FIGURE_GROUPS.map(g => [
             h('div', { class: 'sub-label' }, g),
-            chips(FIGURES.filter(f => f.group === g).map(f => [f.id, f.name, f.blurb]), id => F.pick === id, id => { app.pickFigure(id); }, 'small'),
+            h('div', { class: 'chips small' }, FIGURES.filter(f => f.group === g).map(f => h('button', {
+              class: `chip fig-chip${F.pick === f.id ? ' on' : ''}${app.figTools.includes(f.id) ? ' tooled' : ''}`, title: f.blurb, draggable: 'true',
+              onclick: () => app.pickFigure(f.id),
+              ondragstart: e => { e.dataTransfer.setData('text/x-figure', f.id); e.dataTransfer.effectAllowed = 'copy'; },
+            }, f.name))),
           ]),
-          h('div', { class: 'run-actions' }, h('button', { class: 'btn', html: `${icon('dice')}<span>Another</span>`, onclick: () => app.pickFigure(app.figures.nextId(F.pick)) })),
-          addSlider('figures', 'size', 'Size', 0.3, 2.5), addSlider('figures', 'depth', 'How far it rises', 0.2, 2.5),
+          h('div', { class: 'run-actions' },
+            h('button', { class: 'btn', html: `${icon('dice')}<span>Another</span>`, onclick: () => app.pickFigure(app.figures.nextId(F.pick)) }),
+            h('button', { class: 'btn', html: `${icon('pin')}<span>${app.figTools.includes(F.pick) ? 'On the toolbar' : 'Put on the toolbar'}</span>`, disabled: app.figTools.includes(F.pick), onclick: () => { app.addFigTool(F.pick); renderBody(); } })),
+          addSlider('figures', 'size', 'Size', 0.3, 2.5), addSlider('figures', 'depth', 'How far it pushes through', 0.2, 2), addSlider('figures', 'fabric', 'Fabric over it: tight ↔ loose', 0, 1),
           addSlider('figures', 'spin', 'Turning', -1, 1),
           toggle('Change with the music', () => F.cycle, x => { app.setAddOption('figures', 'cycle', x); renderBody(); }, 'a new figure every few bars, each re-forming out of the last'),
           F.cycle ? addSlider('figures', 'every', 'Every', 1, 16, { step: 1, fmt: x => `${x} bar${x > 1 ? 's' : ''}` }) : null,

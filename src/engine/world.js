@@ -98,7 +98,7 @@ export function settle(rate, a, speed, dBars, space = {}) {
   } else if (rate === 'flyRate') {
     const period = space.gyro > 0.999 ? TAU / space.gyroS
       : space.sponge > 0.999 ? 2 / space.spaceS
-        : space.kifs > 0.999 ? 4 / space.spaceS : 0;
+        : 0;
     if (period) a -= period * Math.round(a / period);
     if (Math.abs(speed) < 1e-4) a *= Math.exp(-dBars / 1.2);
   }
@@ -114,20 +114,19 @@ function blink(bar, barLen) {
 
 // The music, every frame: the bar drives the sway, loudness the intensity (never the speed), bass the thump.
 export function applyMusic(v, m) {
-  const sway = Math.sin(m.bar * TAU);
+  const sway = m.known ? m.sway * 0.8 : Math.sin(m.bar * TAU);
   const down = Math.exp(-frac(m.bar) * 6);
   v.roll += v.sway * 0.07 * sway;
   v.tx += v.swayX * 0.05 * Math.sin(m.bar * Math.PI) * v.frame;
-  v.frame *= 1 - v.pulse * 0.08 * m.bass * m.bass * down;
+  v.frame *= 1 - v.pulse * 0.04 * (m.kick ?? 0) * down;
   const I = clamp(1 + (m.loud - 0.5) * v.react, 0.3, 1.9);
   for (const k of ['folds', 'wave', 'twist', 'bulge', 'warpN', 'orbs', 'ripple', 'vortex', 'swell']) v[k] *= I;
   v.height *= 1 + v.breathe * 0.25 * sway;
   const close = 0.5 - 0.5 * Math.cos(m.bar * TAU);
   for (let i = 0; i < 2; i++) v[`h${i}curl`] += v.grab * 0.75 * close + 0.05 * Math.sin(m.time * 1.7 + i * 2.1);
-  v.mouth = clamp(m.mid * 1.25 - 0.2, 0, 1);
+  v.mouth = clamp((m.voice ?? m.mid) * 1.25 - 0.2, 0, 1);
   v.eyes = blink(m.bar, m.barLen || 2);
   v.exposure += v.hitFlash * m.hit * 0.55;
-  v.kifsA += 0.14 * Math.sin(m.bar * TAU / 16);               // the crystals keep refolding, slowly
   v.time = m.time;
   return v;
 }
@@ -135,7 +134,7 @@ export function applyMusic(v, m) {
 // How steep can the sheet get? (a safe step for the ray marcher; gentle sheets march faster)
 export function stepFactor(v) {
   const slope = v.folds * 0.09 * v.foldF * v.height + v.face * 0.9 * v.height + v.ripple * 0.9
-    + v.media * 1.3 * v.height + v.sland * 1.6 * v.height + v.swell * 0.2 * v.swellF * v.height + 0.15;
+    + v.media * 1.3 * v.height + v.sland * 1.6 * v.height + v.swell * 0.2 * v.swellF * v.height + (v.ori + v.stud) * 0.6 * v.height + v.mland * 0.5 * v.height + 0.15;
   return Math.min(0.92, Math.max(0.4, 0.92 / Math.sqrt(1 + slope * slope)));
 }
 

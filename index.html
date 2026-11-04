@@ -4,10 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>trippi</title>
-  <meta name="description" content="A world of black-and-white op-art lines you can warp, ripple, twist and play music into — flat or 3D.">
+  <meta name="description" content="Op-art patterns you can warp, drown figures in, and play music into. Give it a song and it directs the song.">
   <meta name="theme-color" content="#000000">
   <meta property="og:title" content="trippi">
-  <meta property="og:description" content="Warp, ripple and twist a world of op-art lines in real time.">
+  <meta property="og:description" content="Op-art patterns you can warp, drown figures in, and play music into.">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -15,28 +15,26 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <canvas id="stage" aria-label="The world — drag on it to ripple, right-drag to move"></canvas>
+  <canvas id="stage" aria-label="The picture: drag on it"></canvas>
   <div id="brush" class="brush"></div>
 
-  <header id="topbar" class="chrome">
-    <div class="top-left">
-      <div class="brand glass">
-        <b class="wordmark">trippi</b>
-        <span id="presetName" class="preset-name"></span>
-      </div>
-      <div id="nowPlaying" class="now-pill glass" hidden></div>
-    </div>
-    <div id="actions" class="actions glass"></div>
+  <header id="mark" class="chrome glass">
+    <b class="wordmark">trippi</b>
+    <span id="lookName" class="look-name"></span>
   </header>
+  <div id="corner" class="chrome"></div>
 
-  <aside id="panel" class="glass chrome">
-    <nav id="tabs" class="tabs"></nav>
+  <aside id="panel" class="glass chrome" hidden>
+    <div id="panelHead" class="panel-head"></div>
     <div id="panelBody" class="panel-body"></div>
   </aside>
 
-  <nav id="dock" class="dock glass chrome"></nav>
+  <div id="bottom" class="chrome">
+    <div id="transport" class="transport glass" hidden></div>
+    <nav id="dock" class="dock glass"></nav>
+  </div>
 
-  <div id="hint" class="hint glass chrome" hidden></div>
+  <div id="hint" class="hint" hidden></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <div id="drop" class="drop"><div>Drop a song, a picture or a video</div></div>
   <button id="unhide" class="unhide" aria-label="Show the menu"></button>

@@ -23,7 +23,8 @@ uniform sampler2D uPrev;
 uniform sampler2D uDisp;
 uniform sampler2D uMedia;      // relief source, blurred: rgb = picture, a = mask (body / face / hands / a box)
 uniform sampler2D uMediaSharp; // the same picture unblurred at full size: the photo and the engraving
-uniform sampler2D uSound;      // row 0: the live waveform (0.5 = silence); rows 1–64: the spectrum's past; 65–128: the waveform's past
+uniform sampler2D uSound;      // row 0: the live waveform (0.5 = silence); rows 1–64: the spectrum's past; 65–128: the waveform's past; 129–130: the melody's past
+uniform sampler2D uLiving;     // the reaction-diffusion field (the living labyrinth)
 uniform float uMediaAspect;
 uniform vec4 uRipples[16];
 uniform float uRipplesOn;      // skip the mouse-ripple loop when nothing was dropped recently
@@ -43,6 +44,9 @@ float gCalm = 1.0;             // 0 inside you when "keep it still inside" is on
 float gAura = 0.0;             // how far the lines are pushed around you
 float gBand = 0.0;             // 0 / 1: which ink this line gets (every other line in the second ink)
 float gBallH = 0.0;            // the sheet's height under the ball (once per pixel)
+bool gFigNear = true;          // does this ray come anywhere near the figure? (once per pixel)
+float gConf = 0.0;             // the conformal warp: on or off (between looks, the two patterns crossfade: a partial warp would show its seam)
+bool gFigFar = false;          // it did, but it landed out of the figure's reach: the normal needn't ask
 
 mat2 rot(float a) { float c = cos(a), s = sin(a); return mat2(c, s, -s, c); }
 float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
@@ -55,9 +59,12 @@ float gnoise(vec2 p) {
 float fbm(vec2 p) { float s = 0.0, a = 0.5; for (int i = 0; i < 4; i++) { s += a * gnoise(p); p = rot(0.5) * p * 2.03 + 17.1; a *= 0.5; } return s; }
 // the sound: x 0..1 along the waveform → −1..1, now or some time ago (0 now .. 1 ≈ 2 s); the spectrum at
 // f 0..1 (bass → treble), age 0 (now) .. 1 (2.7 s ago); and how loud it was, age ago
-float soundWave(float x) { return (texture(uSound, vec2(x, 0.5 / 129.0)).r - 0.5) * 2.0; }
-float soundWaveAt(float x, float age) { return (texture(uSound, vec2(x, (65.5 + clamp(age, 0.0, 1.0) * 63.0) / 129.0)).r - 0.5) * 2.0; }
-float soundSpec(float f, float age) { return texture(uSound, vec2(f, (1.5 + clamp(age, 0.0, 1.0) * 63.0) / 129.0)).r; }
+float soundWave(float x) { return (texture(uSound, vec2(x, 0.5 / 131.0)).r - 0.5) * 2.0; }
+float soundWaveAt(float x, float age) { return (texture(uSound, vec2(x, (65.5 + clamp(age, 0.0, 1.0) * 63.0) / 131.0)).r - 0.5) * 2.0; }
+float soundSpec(float f, float age) { return texture(uSound, vec2(f, (1.5 + clamp(age, 0.0, 1.0) * 63.0) / 131.0)).r; }
+// the melody's curve: how high the tune was, age ago (0 now .. 1 ≈ 5 s), -1..1, fading out where nothing sings
+float melodyAt(float age) { return (texture(uSound, vec2(clamp(age, 0.0, 1.0), 129.5 / 131.0)).r - 0.5) * 2.0; }
+float swellAt(float age) { return (texture(uSound, vec2(clamp(age, 0.0, 1.0), 130.5 / 131.0)).r - 0.5) * 2.0; }
 float soundLevel(float age) { return (soundSpec(0.08, age) + soundSpec(0.3, age) + soundSpec(0.55, age)) * 0.5; }
 
 float smin(float a, float b, float k) { float h = max(k - abs(a - b), 0.0) / max(k, 1e-5); return min(a, b) - h * h * k * 0.25; }
@@ -121,9 +128,20 @@ float mediaMaskSoft(vec2 q, float lod) {
   return mix(1.0, textureLod(uMedia, uv, lod).a, MEDIAMASK) * mediaEdge(uv, 0.08);
 }
 
+// the sheet dips into a trough round a figure's waterline and sends a slow swell out of it. (Only close
+// by, and only on rays that go near it: this runs at every step.)
+float figSea(vec2 q) {
+  if (FIG < 0.001 || FIGREP > 0.5 || !gFigNear) return 0.0;
+  vec2 o = (q - vec2(FIGX, FIGY)) / FIGS;
+  float r2 = dot(o, o) / (FIGBR * FIGBR * 1.7);
+  if (r2 >= 1.0) return 0.0;
+  float fall = (1.0 - r2) * (1.0 - r2);
+  return FIG * FIGS * fall * (-FIGDIP * exp(-r2 * 7.0) + 0.012 * FIGRING * sin(sqrt(r2) * 18.0 - FIGT * 1.5));
+}
+
 // ---------------------------------------------------------------- the membrane's height
 float heightField(vec2 q) {
-  float h = 0.0;
+  float h = figSea(q);
   float calm = MEDIACALM > 0.0 ? 1.0 - MEDIACALM * mediaMaskSoft(q, 1.5) : 1.0;
   if (SWELL > 0.0) {                         // long waves rolling across the sheet
     float env = 1.0 + 2.2 * soundSpec(0.15, clamp(dot(q - vec2(TX, TY), vec2(0.8, 0.6)) / (FRAME * 2.4) + 0.5, 0.0, 1.0));   // louder → bigger
@@ -158,6 +176,19 @@ float heightField(vec2 q) {
     vec2 u = (q - vec2(TX, TY)) / (2.0 * FRAME);
     float age = 0.45 - u.y * 0.5, f = abs(u.x) * 0.7;
     h += calm * SLAND * 0.11 * FRAME * (soundSpec(f, age) + soundSpec(f, age + 0.03));
+  }
+  if (ORI > 0.0) {                           // Miura pleats: a zigzag fold, folded again
+    vec2 g = q * ORIF;
+    float zig = abs(fract(g.y) - 0.5) * 2.0;
+    h += ORI * 0.14 / ORIF * abs(fract(g.x + zig * 0.6) - 0.5) * 2.0;
+  }
+  if (STUD > 0.0) {                          // a grid of hard little pyramids
+    vec2 g = abs(fract(q * ORIF) - 0.5);
+    h += STUD * 0.18 / ORIF * (0.5 - max(g.x, g.y)) * 2.0;
+  }
+  if (MLAND > 0.0) {                         // the melody rolling out across the sheet, like a swell
+    float rm = length(q - vec2(TX, TY)) / (FRAME * 2.2);
+    h += calm * MLAND * 0.1 * FRAME * swellAt(rm);
   }
   return h * HEIGHT;
 }
@@ -256,36 +287,12 @@ float sponge(vec3 p) {
   }
   return d / SPACES;
 }
-// a field of twisting Sierpinski tetrahedra (a folding fractal), one per cell; the axes between them are clear
-float crystal(vec3 p) {
-  vec3 z = mod(p * SPACES, 4.0) - 2.0;
-  z.xy = rot(KIFSA * 0.5) * z.xy;
-  for (int n = 0; n < 7; n++) {
-    if (z.x + z.y < 0.0) z.xy = -z.yx;
-    if (z.x + z.z < 0.0) z.xz = -z.zx;
-    if (z.y + z.z < 0.0) z.zy = -z.yz;
-    z.xz = rot(KIFSA * 0.12) * z.xz;
-    z = z * 2.0 - vec3(1.0);
-  }
-  return (length(z) - 1.6) * pow(2.0, -7.0) / SPACES;
-}
-
 // ---------------------------------------------------------------- objects pushing through the membrane
-float sdTorus(vec3 p, float R, float r) { return length(vec2(length(p.xz) - R, p.y)) - r; }
-
 float mobius(vec3 p) {
   float a = atan(p.y, p.x);
   vec2 c = rot(a * 0.5) * vec2(length(p.xy) - 0.55, p.z);
   vec2 d = abs(c) - vec2(0.2, 0.022);
   return (length(max(d, 0.0)) + min(max(d.x, d.y), 0.0)) * 0.6;
-}
-
-float rings(vec3 p) {
-  float t = OBJROT;
-  vec3 a = p; a.yz = rot(t + 1.57) * a.yz;
-  vec3 b = p; b.xy = rot(t * 2.0 + 1.0) * b.xy; b.yz = rot(1.2) * b.yz;
-  vec3 c = p; c.xz = rot(t * 3.0) * c.xz; c.xy = rot(0.7) * c.xy;
-  return min(sdTorus(a, 0.7, 0.07), min(sdTorus(b, 0.53, 0.07), sdTorus(c, 0.36, 0.07)));
 }
 
 // Penrose's impossible triangle: three beams that only close up seen from the "magic" direction.
@@ -319,7 +326,7 @@ float blobSDF(vec3 s) {
   return d * 0.72;
 }
 
-float objWeights() { return PENROSE + MOBIUS + RINGS + BLOB; }
+float objWeights() { return PENROSE + MOBIUS + BLOB; }
 
 // object space: centred, scaled, and (for the strip and the blob) turned and tilted
 vec3 objPos() { return vec3(OBJX, OBJY, mix(-1.3 * OBJS, OBJZ, min(objWeights(), 1.0))); }
@@ -335,7 +342,6 @@ float objects(vec3 p) {
   if (PENROSE > 0.001) d += PENROSE * penrose(q);
   vec3 s = objSpin(q);
   if (MOBIUS > 0.001) d += MOBIUS * mobius(s);
-  if (RINGS > 0.001) d += RINGS * rings(q);
   if (BLOB > 0.001) d += BLOB * blobSDF(s);
   return d / wsum * OBJS;
 }
@@ -373,15 +379,15 @@ vec2 ballFlow(vec2 q) {
   return c + rel;
 }
 
-float gFD = 1e3;               // the figures' distance the last time map() looked (the march's last look is at the hit)
+float gFD = 1e3;               // the figure's distance the last time map() looked (the march's last look is at the hit)
+float gFMin = 1e3;             // how close the ray came to the figure on the way (the outline)
 float map(vec3 p) {
   float d = (p.z - heightField(p.xy) + DROP * DROP * 40.0) * uStepK;
-  float sw = GYRO + SPONGE + KIFS + HALL;
+  float sw = GYRO + SPONGE + HALL;
   if (sw > 0.001) {
     float ds = 0.0;
     if (GYRO > 0.001) ds += GYRO * gyroid(p);
     if (SPONGE > 0.001) ds += SPONGE * sponge(p);
-    if (KIFS > 0.001) ds += KIFS * crystal(p);
     if (HALL > 0.001) ds += HALL * hallSDF(p);
     d = mix(d, ds / sw, min(sw, 1.0));
   }
@@ -389,11 +395,13 @@ float map(vec3 p) {
   if (COLUMNS > 0.001) d = smin(d, columnsSDF(p), 0.03);
   d = smin(d, objects(p), OBJSOFT);
   if (BALL > 0.001) d = smin(d, ballSDF(p), 0.02);
-  if ((FIG > 0.001 || FTON > 0.001) && gFigNear) {
-    // figures, joined to the sheet like the hands; their hollows go through both
+  if (FIG > 0.001 && gFigNear && !gFigFar) {
+    // the figure, joined to the sheet like the hands: the fabric melts into it at the waterline and lets go
+    // higher up, so it comes out of the sheet rather than sitting on it. Its hollows go through both.
     float fd = figuresSDF(p);
     gFD = fd;
-    d = smin(d, fd, FIGSOFT);
+    gFMin = min(gFMin, fd);
+    d = smin(d, fd, FIGSOFT * mix(FIGMELT, 1.0, smoothstep(0.0, 0.3 * FIGS, p.z)));
     if (gFHole < 0.3 * gFS) d = smaxF(d, -gFHole, 0.01 * gFS);
   }
   return smin(d, hands(p), HANDSOFT);
@@ -411,6 +419,114 @@ vec3 calcNormal(vec3 p, float t) {
   return normalize(n);
 }
 
+// ---------------------------------------------------------------- patterns that aren't lines
+// Each gives a value that crosses zero at its edges, so the same sharp threshold draws them all.
+
+// Escher's Circle Limit: a tiling of the hyperbolic plane by triangles, in the Poincaré disk. The disk is
+// folded by reflection into one triangle, and the parity of the folds is the color. It flies forward by a
+// Möbius translation along the axis, looping exactly on the tiling's own period.
+float hyperField(vec2 z) {
+  float p = floor(HYPERP + 0.5), m = floor(HYPERQ + 0.5);
+  float sp = sin(PI / p), cp = cos(PI / p), cq = cos(PI / m);
+  float rc2 = 1.0 / max(cq * cq / (sp * sp) - 1.0, 1e-3), rc = sqrt(rc2), c = rc * cq / sp;
+  if (dot(z, z) >= 0.9995) return 1.0;
+  float L = 4.0 * atanh(clamp(c - rc, 0.0, 0.999));
+  float a = tanh(mod(PHASE * 0.12, L) * 0.5);
+  vec2 num = vec2(z.x + a, z.y), den = vec2(1.0 + a * z.x, a * z.y);
+  z = vec2(dot(num, den), num.y * den.x - num.x * den.y) / dot(den, den);
+  vec2 n = vec2(-sp, cp), C = vec2(c, 0.0);
+  float par = 1.0;
+  for (int i = 0; i < 32; i++) {
+    bool done = true;
+    if (z.y < 0.0) { z.y = -z.y; par = -par; done = false; }
+    float dn = dot(z, n);
+    if (dn > 0.0) { z -= 2.0 * dn * n; par = -par; done = false; }
+    vec2 dc = z - C;
+    float l2 = dot(dc, dc);
+    if (l2 < rc2) { z = C + dc * rc2 / l2; par = -par; done = false; }
+    if (done) break;
+  }
+  return par * min(min(z.y, -dot(z, n)), length(z - C) - rc) * 6.0;
+}
+
+// tumbling blocks: a hexagon cut into three rhombi reads as a cube: one face paper, one ink, one hatched.
+// Sliding the point where they meet makes each cube push out and sink back in.
+float cubeField(vec2 q) {
+  vec2 s = vec2(1.0, 1.7320508), p = q * FREQ * 0.32;
+  vec4 hc = floor(vec4(p, p - vec2(0.5, 1.0)) / s.xyxy) + 0.5;
+  vec4 rz = vec4(p - hc.xy * s, p - (hc.zw + 0.5) * s);
+  bool first = dot(rz.xy, rz.xy) < dot(rz.zw, rz.zw);
+  vec2 g = first ? rz.xy : rz.zw, id = first ? hc.xy : hc.zw + 0.5;
+  float hexd = 0.5 - max(abs(g.x), dot(abs(g), vec2(0.5, 0.8660254)));
+  vec2 o = vec2(0.0, 0.2 * CUBESHIFT * sin(PHASE * 0.6 + hash12(id * 7.3) * TAU) * smoothstep(0.0, 0.42, hexd + 0.2));
+  vec2 c = g - o * smoothstep(0.0, 0.3, hexd);
+  float a = mod(atan(c.y, c.x) + PI * 0.5, TAU);
+  float sect = floor(a / (TAU / 3.0));
+  float da = abs(mod(a, TAU / 3.0) - TAU / 6.0);                                             // from this face's middle
+  float edge = min(hexd, length(c) * sin(max(TAU / 6.0 - da, 0.0)));
+  float val = sect < 0.5 ? 1.0 : sect < 1.5 ? -1.0 : sin((c.x + c.y * 0.577) * 44.0) * 1.2;
+  return val * min(edge * 9.0, 1.0);
+}
+
+// Truchet tiles: quarter circles round opposite corners, flipped at random, make a maze with no ends. Two
+// colors work out exactly, by the parity of the corner each circle is round. Tiles flip as the music goes.
+float truchetAt(vec2 id, vec2 f, float seed) {
+  float flip = step(0.5, hash12(id + seed * 13.7));
+  vec2 g = f; if (flip > 0.5) g.x = -g.x;
+  float d = min(length(g - 0.5) - 0.5, length(g + 0.5) - 0.5);
+  float par = mod(id.x + id.y + flip, 2.0) * 2.0 - 1.0;
+  return mix(par * d, 0.12 - abs(d), TRUCHETLINE);
+}
+float truchetField(vec2 q) {
+  vec2 g = q * FREQ * 0.32, id = floor(g), f = g - id - 0.5;
+  float T = TRUCHETT + hash12(id * 3.1) * 2.0, s0 = floor(T);
+  return mix(truchetAt(id, f, s0), truchetAt(id, f, s0 + 1.0), smoothstep(0.72, 1.0, T - s0)) * 3.0;
+}
+
+// a Chladni plate: sand gathers on the lines that stay still when the plate sings. Square or round; the
+// modes come from the melody, and when a note slides, the figure slides with it.
+float cymField(vec2 q, float r, float ang) {
+  vec2 c = q * 1.15;
+  float n = CYMN, m = CYMM;
+  float a = cos(n * PI * c.x) * cos(m * PI * c.y) - cos(m * PI * c.x) * cos(n * PI * c.y);
+  float rr = r * 1.15;
+  float b = sin(floor(n + 0.5) * ang + PHASE * 0.2) * sin(m * PI * rr * 1.1) / (0.45 + rr);
+  float f = mix(a, b, CYMROUND);
+  return mix(f * 6.0, (0.075 - abs(f)) * 12.0, CYMSAND);
+}
+
+// a Julia set: how fast each point escapes, as bands. The constant walks round as the tune moves.
+float juliaField(vec2 q) {
+  vec2 z = q * 2.35, c = JULIAR * vec2(cos(JULIAA), sin(JULIAA));
+  float i = 0.0;
+  for (int n = 0; n < 56; n++) {
+    z = vec2(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y) + c;
+    if (dot(z, z) > 256.0) break;
+    i += 1.0;
+  }
+  if (i > 55.5) return sin(length(z) * 8.0 - PHASE * 0.3) * 0.6;
+  float mu = i - log2(log2(dot(z, z))) + 4.0;
+  return sin(mu * FREQ * 0.035 * PI - PHASE * 0.4);
+}
+
+// agate: noise folded into itself, read as contour lines
+float agateField(vec2 q) {
+  vec2 p = q * 1.3;
+  float a = fbm(p + vec2(1.7, 9.2) + PHASE * 0.025), b = fbm(p + vec2(8.3, 2.8) - PHASE * 0.02);
+  return sin(fbm(p + 1.5 * vec2(a, b)) * FREQ * PI * 1.25 - PHASE * 0.3);
+}
+
+// a ripple tank: rings from a few sources, adding up; the sources wander with the music
+float wellField(vec2 q) {
+  float s = 0.0;
+  int n = int(WELLN + 0.5);
+  for (int k = 0; k < n; k++) {
+    float a = float(k) * TAU / float(n) + WELLT;
+    s += sin(length(q - WELLR * vec2(cos(a), sin(a))) * FREQ * PI - PHASE);
+  }
+  return s;
+}
+
 // ---------------------------------------------------------------- the line equation
 // qw returns the warped coordinates, so a picture can be bent by the same warps as the lines
 float lines(vec2 q, float z, out float rr, out vec2 qw) {
@@ -418,6 +534,21 @@ float lines(vec2 q, float z, out float rr, out vec2 qw) {
   q = rot(FROT) * q;
   float r = length(q);
   float c = gCalm;
+  if (PLANES > 0.0) {                                        // a floor and a ceiling, meeting on the horizon
+    float yy = max(abs(q.y), 0.012);
+    q = mix(q, vec2(q.x / yy, 1.0 / yy) * 0.16, PLANES);
+    r = length(q);
+  }
+  if (gConf > 0.0) {                                         // the tiles wound into a spiral with their shapes kept (conformal): they just get smaller, for ever
+    float b = floor(SPOKES + 0.5), a = floor(CONFA + 0.5), u, w;
+    if (CONFP != 0.0) {                                      // with a second pole: one source and one sink, or two whirlpools
+      vec2 z1 = q - vec2(CONFX, 0.0), z2 = q + vec2(CONFX, 0.0);
+      u = log(max(length(z1), 1e-4)) + CONFP * log(max(length(z2), 1e-4));
+      w = atan(z1.y, z1.x) + CONFP * atan(z2.y, z2.x);
+    } else { u = log(max(r, 1e-4)); w = atan(q.y, q.x); }
+    q = mix(q, vec2(b * u + a * w, b * w - a * u) / (PI * FREQ), gConf);
+    r = length(q);
+  }
   if (SWELL > 0.0) {                                         // waves running along the lines, bigger when it's loud
     vec2 d = vec2(cos(LINA), sin(LINA));
     float env = 1.0 + 2.2 * soundSpec(0.15, clamp(dot(qv, vec2(0.8, 0.6)) / (FRAME * 2.4) + 0.5, 0.0, 1.0));
@@ -455,6 +586,18 @@ float lines(vec2 q, float z, out float rr, out vec2 qw) {
       q *= 1.0 - c * SSPEC * 0.28 * soundSpec(a, rq * 0.7) * rad;
     }
   }
+  if (MWAVE > 0.0) {
+    // the melody bends the pattern. The tune's curve flows out from the middle, so a line carries what you
+    // heard a moment ago, further out what you heard before that: a slide draws itself across the picture.
+    vec2 d = vec2(cos(LINA), sin(LINA));
+    float along = dot(qv, vec2(-d.y, d.x));
+    float rq = length(qv) / (FRAME * 2.0);
+    float lin = WLIN + CONTOUR * 0.5 + CHECK * 0.5, rad = WRAD + WANG * 0.5;
+    float m0 = melodyAt(abs(along) / (FRAME * 2.6)), m1 = melodyAt(rq);
+    q += d * c * MWAVE * 0.13 * FRAME * m0 * lin;
+    q *= 1.0 - c * MWAVE * 0.1 * m1 * rad;
+    if (lin + rad < 0.1) q += normalize(qv + 1e-4) * c * MWAVE * 0.09 * FRAME * m1;       // patterns with neither: it just breathes outward
+  }
   qw = rot(-FROT) * q;
   r = length(q);
   rr = r;
@@ -462,6 +605,7 @@ float lines(vec2 q, float z, out float rr, out vec2 qw) {
   float L = dot(q, vec2(cos(LINA), sin(LINA)));
   vec2 aq = abs(q);
   float rs = mix(r, SQUARE > 0.0 ? max(aq.x, aq.y) : (aq.x + aq.y) * 0.7071, abs(SQUARE));   // rings → squares or diamonds
+  if (BLAZE > 0.0) rs += BLAZE * 0.8 / FREQ * asin(sin(ang * floor(BLAZEN + 0.5) + rs * FREQ * PI * 0.5)) * 0.6366;   // Riley's Blaze: rings that zigzag, each a little out of step
   float R = mix(rs, -log(max(rs, 1e-4)) * 0.3, RADLOG);
   R = mix(R, 0.09 / max(rs, 2e-3), RADINV);
   float base = (WLIN * L + WRAD * R + CONTOUR * z * 2.5) * FREQ - PHASE + gAura;
@@ -479,6 +623,23 @@ float lines(vec2 q, float z, out float rr, out vec2 qw) {
     vec2 o = MOIREOFF * 0.5 * vec2(cos(PHASE * 0.15), sin(PHASE * 0.15));
     v *= mix(1.0, sin(length(q - o) * FREQ * PI), MOIRE);
   }
+  if (HYPER > 0.0) v = mix(v, hyperField(q / HYPERS), HYPER);
+  if (CUBE > 0.0) v = mix(v, cubeField(q), CUBE);
+  if (TRUCHET > 0.0) v = mix(v, truchetField(q), TRUCHET);
+  if (CYM > 0.0) v = mix(v, cymField(q, r, ang), CYM);
+  if (JULIA > 0.0) v = mix(v, juliaField(q), JULIA);
+  if (AGATE > 0.0) v = mix(v, agateField(q), AGATE);
+  if (WELLS > 0.0) v = mix(v, wellField(q), WELLS);
+  if (QUASI > 0.0) {                                         // a quasicrystal: plane waves that never quite repeat
+    float s = 0.0;
+    int n = int(QUASIN + 0.5);
+    for (int k = 0; k < n; k++) {
+      float a = float(k) * PI / float(n);
+      s += cos(dot(q, vec2(cos(a), sin(a))) * FREQ * PI + (mod(float(k), 2.0) * 2.0 - 1.0) * PHASE * 0.5);
+    }
+    v = mix(v, s, QUASI);
+  }
+  if (LIVING > 0.0) v = mix(v, (texture(uLiving, q * 0.45 + 0.5).g - 0.2) * 8.0, LIVING);
   return v;
 }
 
@@ -522,12 +683,12 @@ void main() {
   vec3 rd = normalize(gRight * uv.x + gUp * uv.y - gBack * FOCAL);
   // never under the sheet: in a low shot a loud crest (or a figure) can rise past the camera, and from
   // inside the fabric the whole screen would flash one solid color. Spaces you fly through are exempt.
-  if (GYRO + SPONGE + KIFS + HALL < 0.5) {
+  if (GYRO + SPONGE + HALL < 0.5) {
     float floorZ = heightField(ro.xy) + 0.05 + 0.18 * FRAME;
     ro.z = max(ro.z, floorZ);
   }
   if (BALL > 0.001) gBallH = heightField(vec2(BALLX, BALLY));
-  if (FIG > 0.001 || FTON > 0.001) gFigNear = figNear(ro, rd);
+  if (FIG > 0.001) gFigNear = figNear(ro, rd);
 
   float t = 0.0, d = 1.0;
   float far = dist * 3.0 + 14.0;
@@ -549,26 +710,23 @@ void main() {
     vec3 p = ro + rd * t;
     // the figures at the hit, as the march's last step saw them (the normal's own looks would overwrite
     // them); beyond their reach, neither the normal nor the shading needs to ask about them again
-    float fdH = gFD, hH = gFHole, sH = gFS;
-    vec3 qH = gFQ, cH = gFC;
-    if (gFigNear) {
-      if (!exact) { fdH = figuresSDF(p); hH = gFHole; sH = gFS; qH = gFQ; cH = gFC; }
-      if (fdH > 1.4 * FIGSOFT + 0.06 * sH + 0.01) gFigNear = false;
+    float fdH = gFD, hH = gFHole, sH = gFS, fMin = gFMin;
+    if (gFigNear && FIG > 0.001) {
+      if (!exact) { fdH = figuresSDF(p); hH = gFHole; sH = gFS; }
+      if (fdH > 1.4 * FIGMELT * FIGSOFT + 0.06 * sH + 0.01) gFigFar = true;
     }
     vec3 n = calcNormal(p, t);
     bool onBall = BALL > 0.001 && ballSDF(p) < 0.004 + 0.001 * t;
     if (MEDIACALM > 0.0) gCalm = 1.0 - MEDIACALM * mediaMaskSoft(p.xy, 1.5);
     if (AURA > 0.0) gAura = AURA * 2.0 * mediaMaskSoft(p.xy, log2(float(textureSize(uMedia, 0).y) / 22.0));
-    // near a figure? It's drawn by the sheet's own lines, like the hands; it's lit from over your shoulder
-    // (so the side facing you is never lost in shadow), and its hollows dim as they go in
-    // (figM: on it and the fabric clinging to it; figL: on it, give or take)
-    float figM = 0.0, figL = 0.0, deep = 0.0;
-    if ((FIG > 0.001 || FTON > 0.001) && gFigNear) {
-      float fd = fdH, s = sH, on = max(FIG, FTON);
-      figM = on * (1.0 - smoothstep(0.0, FIGSOFT + 0.04 * s, max(min(fd, abs(hH)), 0.0)));
-      figL = on * (1.0 - smoothstep(0.0, 0.05 * s, max(fd, 0.0)));   // (within its bounding ball's margin, so no seam)
-      deep = (1.0 - smoothstep(0.0, 0.012 * s, abs(hH))) * smoothstep(0.05, -0.35, qH.z);
+    // the figure is drawn by the sheet's own pattern, poured over it like the hands: nothing is lit. Its
+    // hollows are solid dark. figL: on it; figO: the gap just outside its outline
+    float figL = 0.0, deep = 0.0, figO = 0.0;
+    if (FIG > 0.001 && gFigNear) {
+      figL = FIG * (1.0 - smoothstep(0.008 * sH, 0.016 * sH, fdH));
+      deep = FIG * (1.0 - smoothstep(0.006 * sH, 0.012 * sH, hH));
     }
+    if (FIG > 0.001 && FIGHALO > 0.0) figO = FIG * (1.0 - smoothstep(FIGHALO * 0.7 * gFS, FIGHALO * gFS, fMin)) * (1.0 - figL);
     float rr = 1.0;
     vec2 qw = p.xy;
     float v = 0.0;
@@ -579,19 +737,18 @@ void main() {
       v = lines(ballFlow(p.xy + rf.xy * BALLR * 3.0 / (0.35 + abs(rf.z))), 0.0, rr, qw);
       rr = 1.0;
     } else {
-      // on a figure, the sheet's lines are laid flat toward you (at the figure) and bent over its form: seen
-      // from above that's just the sheet, as with the hands; standing up to a low camera, its face is drawn
-      // by the same lines face-on instead of having them stretched up it
-      vec2 sq0 = p.xy, nn = n.xy;
-      if (figM > 0.001) {
-        vec2 Rh = normalize(gRight.xy + vec2(1e-5, 0.0)), Uh = vec2(-Rh.y, Rh.x);
-        vec3 d = p - cH;
-        sq0 = mix(sq0, cH.xy + Rh * dot(d, gRight) + Uh * dot(d, gUp), figM);
-        nn = mix(nn, Rh * dot(n, gRight) + Uh * dot(n, gUp), figM);
+      vec2 sq0 = p.xy, nn = n.xy * (REFRACT + figL * FIGLENS);
+      sq0 = ballFlow(sq0 + nn * 0.12);
+      if (FIG > 0.001) sq0 = figFlow(sq0);
+      if (WRAP < 0.999) {                                // lines bend over the relief
+        bool fade = CONF > 0.001 && CONF < 0.999;
+        int passes = (fade ? 2 : 1) + int(min(uStepK, 0.0));
+        for (int i = 0; i < passes; i++) {
+          gConf = fade ? float(i) : step(0.5, CONF);
+          float vi = lines(sq0, p.z, rr, qw);
+          v = i == 0 ? vi : mix(v, vi, CONF);
+        }
       }
-      sq0 = ballFlow(sq0 + nn * REFRACT * 0.12);
-      if (FIG > 0.001 || FTON > 0.001) sq0 = figFlow(sq0);
-      if (WRAP < 0.999) v = lines(sq0, p.z, rr, qw);   // lines bend over the relief
       if (WRAP > 0.001) {
         vec2 sq = surfaceUV(p, n);
         if (length(n.xy) < 0.7) sq = ballFlow(sq);
@@ -615,12 +772,17 @@ void main() {
       v += (0.55 - photo.a) * photoA * MEDIAINK * 2.2;         // drawn by line thickness (engraving)
     }
     vec3 L = normalize(vec3(-0.45, 0.55, 0.75));
-    // a figure is lit from over your shoulder, so the side facing you is never in its own shadow
-    if (figL > 0.001) L = normalize(mix(L, normalize(-0.45 * gRight + 0.55 * gUp + 0.75 * gBack), figL));
     float diff = max(dot(n, L), 0.0);
     float amb = 0.5 + 0.5 * n.z;
     if (!onBall) v -= (diff - 0.6) * ENGRAVE * 1.4;          // light thins the ink: form drawn with lines
     v -= THICK;
+    if (figL > 0.0) {
+      if (FIGCONT > 0.0) v = mix(v, sin(p.z / sH * FIGCONT * PI - FIGT * 0.7) + (diff - 0.55) * 0.9, figL);   // drawn in its own contour lines, like a sounding chart
+      if (FIGINK > 0.0) v = mix(v, 1.0, FIGINK * figL);                                  // a solid silhouette
+      v += FIGEDGE * figL * smoothstep(0.42, 0.05, dot(n, -rd));                         // a line round it, where it turns away from you
+      if (deep > 0.0) v = mix(v, FIGINK > 0.5 ? -1.0 : 1.0, deep);                       // hollows: the other color, in a silhouette; ink otherwise
+    }
+    if (figO > 0.0) v = mix(v, -1.0, figO);                                              // and a gap of paper just outside it
     float w = fwidth(v) * 0.8 + 1e-3;
     float k = smoothstep(-w, w, v);
     k = mix(k, 1.0 - k, INVERT);
@@ -631,7 +793,7 @@ void main() {
       col = col * (0.55 + 0.45 * diff) * (1.0 - 0.55 * fres) + pow(max(dot(reflect(-L, n), -rd), 0.0), 60.0) * 0.9;
     } else {
       col = mix(col, col * (0.25 + 0.55 * amb + 0.55 * diff) + spec * 0.3, LIGHT);
-      col *= 1.0 - 0.45 * deep;
+      if (FIGINK < 0.5) { vec3 dark = dot(paper, vec3(1.0)) < dot(ink1, vec3(1.0)) ? paper : ink1; col = mix(col, dark, deep); }
     }
     if (MEDIAPHOTO > 0.0) {                                    // shown as a photo: a duotone in the palette, or true color
       bool pd = dot(paper, vec3(1.0)) < dot(ink1, vec3(1.0));
@@ -639,7 +801,7 @@ void main() {
       col = mix(col, mix(duo, photo.rgb, PHOTOCOLOR), MEDIAPHOTO * photoA);
     }
     if (DROP > 0.0) col = mix(col, fog, DROP * smoothstep(-0.3, -4.0, p.z));   // the floor falling away into the dark
-    col = mix(fog, col, exp(-max(t - dist * 0.8, 0.0) * FOGD));
+    col = mix(fog, col, exp(-max(t - dist * 1.02, 0.0) * FOGD));
     col = mix(fog, col, mix(1.0, smoothstep(0.0, 0.5, rr), CFOG));
   }
 

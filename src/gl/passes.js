@@ -98,3 +98,32 @@ void main() {
   outColor = vec4(col, 1.0);
 }
 `;
+
+// the living labyrinth: a reaction-diffusion field (Gray-Scott). Two chemicals feed on each other, and the
+// pattern that comes out by itself is the same one on a zebra or in a fingerprint. r = A, g = B.
+export const LIVING_FRAG = `#version 300 es
+precision highp float;
+out vec4 outColor;
+uniform sampler2D uPrev;
+uniform vec2 uRes;
+uniform vec2 uFK;           // feed, kill
+uniform vec4 uSpot;         // x, y (0..1), radius, on: a drop of B
+uniform float uClear;
+void main() {
+  vec2 st = gl_FragCoord.xy / uRes, px = 1.0 / uRes;
+  if (uClear > 0.5) {
+    // start from a scatter of drops
+    vec2 g = floor(st * 14.0);
+    float h = fract(sin(dot(g, vec2(12.9898, 78.233))) * 43758.5453);
+    float d = length(fract(st * 14.0) - 0.5);
+    outColor = vec4(1.0, h > 0.6 && d < 0.3 ? 1.0 : 0.0, 0.0, 1.0);
+    return;
+  }
+  vec2 c = texture(uPrev, st).rg;
+  vec2 l = (texture(uPrev, st + vec2(px.x, 0.0)).rg + texture(uPrev, st - vec2(px.x, 0.0)).rg + texture(uPrev, st + vec2(0.0, px.y)).rg + texture(uPrev, st - vec2(0.0, px.y)).rg) * 0.2
+         + (texture(uPrev, st + px).rg + texture(uPrev, st - px).rg + texture(uPrev, st + vec2(px.x, -px.y)).rg + texture(uPrev, st + vec2(-px.x, px.y)).rg) * 0.05 - c;
+  float r = c.r * c.g * c.g;
+  vec2 n = c + vec2(1.0 * l.r - r + uFK.x * (1.0 - c.r), 0.5 * l.g + r - (uFK.y + uFK.x) * c.g);
+  if (uSpot.w > 0.5 && distance(st, uSpot.xy) < uSpot.z) n.g = 1.0;
+  outColor = vec4(clamp(n, 0.0, 1.0), 0.0, 1.0);
+}`;

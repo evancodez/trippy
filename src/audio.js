@@ -186,6 +186,34 @@ export class AudioEngine {
     }
   }
 
+  // a live pitch, for a guitar or a voice: YIN on the newest 2048 samples at half rate, every other frame
+  readPitch() {
+    if ((this.pitchTick = (this.pitchTick || 0) + 1) % 2) return;
+    const fl = this.fl ||= new Float32Array(this.analyser.fftSize);
+    this.analyser.getFloatTimeDomainData(fl);
+    const x = this.pdown ||= new Float32Array(1024), n = 1024;
+    for (let i = 0; i < n; i++) x[i] = fl[i * 2];
+    const sr = this.ctx.sampleRate / 2, W = 512, tauMax = Math.min(W - 1, Math.floor(sr / 80)), tauMin = Math.floor(sr / 1500);
+    const d = this.pd ||= new Float32Array(W);
+    let run = 0, best = -1, bestV = 1;
+    d[0] = 1;
+    for (let tau = 1; tau <= tauMax; tau++) {
+      let s = 0;
+      for (let i = 0; i < W; i++) { const e = x[i] - x[i + tau]; s += e * e; }
+      run += s;
+      d[tau] = run > 0 ? (s * tau) / run : 1;
+    }
+    for (let tau = tauMin; tau < tauMax; tau++) {
+      if (d[tau] < 0.2 && d[tau] <= d[tau + 1]) { best = tau; bestV = d[tau]; break; }
+      if (d[tau] < bestV) { bestV = d[tau]; best = tau; }
+    }
+    if (best > 1 && best < tauMax) {
+      const a = d[best - 1], b = d[best], c = d[best + 1], t = best + 0.5 * (a - c) / (a - 2 * b + c || 1);
+      this.pitchMidi = 69 + 12 * Math.log2(sr / t / 440);
+      this.pitchConf = Math.max(0, 1 - bestV * 1.5);
+    } else this.pitchConf = 0;
+  }
+
   // history: a spectrum row 24 times a second (≈ 2.7 s), a waveform row 30 times a second (≈ 2.1 s)
   pushHistory(dt) {
     if ((this.histT += dt) >= 1 / 24) {
@@ -220,6 +248,7 @@ export class AudioEngine {
     this.analyser.getByteFrequencyData(this.data);
     this.readShape(dt);
     this.pushHistory(dt);
+    if (this.wantPitch) this.readPitch();
     const raw = { bass: this.band(30, 140), mid: this.band(400, 2000), high: this.band(4000, 12000) };
     // auto-gain: scale each band between its recent average and its slowly-decaying peak,
     // so quiet songs still move things and loud songs don't just sit at 1.0

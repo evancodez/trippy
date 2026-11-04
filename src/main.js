@@ -4,15 +4,17 @@
 // look for this session, and Reset puts the look back), add things to it, and choose how the sound moves it.
 import { Renderer, MAX_RIPPLES } from './gl/renderer.js';
 import { World, defaultValues, cloneValues, stepFactor, mulberry32 } from './engine/world.js';
-import { LOOKS, GROUPS, NEUTRAL, look, PALETTES, COLOR_KEYS } from './engine/looks.js';
+import { LOOKS, GROUPS, NEUTRAL, look, PALETTES, COLOR_KEYS, camKind } from './engine/looks.js';
 import { PARAM_BY_NAME, hexToRgb, rgbToHex, isColorParam, DEFAULTS } from './engine/params.js';
 import { applyFeel, defaultFeel, breed } from './engine/feel.js';
-import { ADDS, defaultAdds, Ball, Figures, figureLight, figureSoft, applyHands, applyFace, applyOrbs } from './adds.js';
+import { ADDS, defaultAdds, Ball, Figures, applyHands, applyFace, applyOrbs } from './adds.js';
 import { FIGURES, FIGURE_INDEX, figureBank } from './engine/figures.js';
+import { rayOnSheet } from './engine/camera.js';
 import { Director } from './director.js';
 import { AudioEngine } from './audio.js';
-import { analyzeAudio } from './analysis.js';
-import { SongLibrary, isSong } from './songs.js';
+import { SongLibrary, isSong, loadListened, saveListened } from './songs.js';
+import { Music } from './music.js';
+import { buildScore, defaultOptions, paletteSet, sceneAt } from './score.js';
 import { Media } from './media.js';
 import { Tracker } from './tracking.js';
 import { createUI, TOOLS } from './ui/ui.js';
@@ -32,25 +34,19 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const ease = (cur, target, rate, dt) => cur + (target - cur) * (1 - Math.exp(-dt * rate));
 const SAVE_KEY = 'trippy.saves.v2';
 
-// how hard the music hits. Each level sets the sound's own shapes and a few ties of its own (marked, so
-// switching level swaps only those — ties you made stay)
-const LEVELS = {
-  off: { name: 'Off', blurb: 'the music changes nothing',
-    sound: { amount: 0, wave: 0, spectrum: 0, land: 0, ballBounce: 0, handsGrab: 0, orbsBass: 0 }, ties: {} },
-  subtle: { name: 'Subtle', blurb: 'it sways and breathes with the music',
-    sound: { amount: 0.8, wave: 0, spectrum: 0, land: 0, ballBounce: 0.3, handsGrab: 0.3, orbsBass: 0.3 }, ties: {} },
-  lively: { name: 'Lively', blurb: 'the lines carry the sound wave; the beat punches in; the ball hops',
-    sound: { amount: 1.4, wave: 0.6, spectrum: 0.3, land: 0, ballBounce: 0.7, handsGrab: 0.6, orbsBass: 0.8 },
-    ties: { frame: ['beat', -0.05], bulge: ['bass', 0.3] } },
-  wild: { name: 'Wild', blurb: 'everything follows the song — waves, spikes, a landscape of sound',
-    sound: { amount: 2, wave: 1.3, spectrum: 0.8, land: 0.8, ballBounce: 1, handsGrab: 1, orbsBass: 1.5 },
-    ties: { frame: ['beat', -0.09], freq: ['beat', 0.1], twist: ['loud', 0.3], warpN: ['mid', 0.45], bulge: ['bass', 0.5] } },
+// what the picture follows. Melody: how much it rides the tune (sway, slides, the melody's curve through
+// the pattern); drums: how much a hit moves it; scope: the raw waveform and spectrum in the lines
+const MOODS = {
+  flow: { name: 'Flow', blurb: 'it rides the tune: slides, swells, sway. The drums barely touch it', melody: 1, drums: 0.12, scope: 0, decay: 5 },
+  even: { name: 'Even', blurb: 'the tune and the beat together', melody: 0.75, drums: 0.45, scope: 0.12, decay: 6 },
+  hit: { name: 'Hit', blurb: 'the drums lead, and the lines carry the waveform', melody: 0.45, drums: 1, scope: 0.6, decay: 8 },
+  off: { name: 'Off', blurb: 'the music changes nothing', melody: 0, drums: 0, scope: 0, decay: 7 },
 };
 
 const app = {
   renderer, canvas,
   world: new World(),
-  lookId: 'stripes',
+  lookId: 'trivortex',
   tweaks: {},               // per look, this session: { trivortex: { vortex: 3, … } }. Reset clears a look's.
   keepColors: false,        // carry your colors from look to look
   colors: null,             //   …the colors being carried
@@ -60,15 +56,16 @@ const app = {
   cam: { subject: 'body', feather: 6, box: { x: 0.5, y: 0.55, w: 0.6, h: 0.7 }, look: false, motion: false, setup: 'me' },
   show: { photo: 0.9, relief: 0.4, engrave: 0, photoColor: 0, detail: 0.85, soft: 2.4, calm: 1, aura: 0.7, size: 1, x: 0, y: 0, invert: 0, warp: 0 },
   // the sound
-  LEVELS,
-  sound: { level: 'lively', ...LEVELS.lively.sound },
+  MOODS,
+  music: new Music(),
+  sound: { ballBounce: 0.5, handsGrab: 0.5, orbsBass: 0.8, amount: 1, spectrum: 0, land: 0 },
+  // the song, directed: scenes picked from what it was heard to do
+  film: { ...defaultOptions(), score: null, listening: 0, scene: -1, held: -1, status: '' },
   devices: { inputs: [], outputs: [] },    // audio inputs and outputs, once the browser lets us name them
   ties: {},                 // a value → a music source: { bulge: { src: 'bass', amt: 0.3 } }
-  auto: { when: 'off', every: 8, groups: GROUPS.map(g => g[0]) },
   tempo: { bpm: 70, beatsPerBar: 2, fromSong: false },
-  songAnalysis: null,
   // the cinematic camera: glides from shot to shot on the bar; can change the look as it goes
-  cine: { on: false, speed: 0.6, looks: true, every: 2, groups: ['lines', 'rings', 'tiles', 'sheets'], waves: 0.6 },
+  cine: { on: false, speed: 0.6, looks: true, every: 2, groups: GROUPS.map(g => g[0]), waves: 0.6 },
   director: new Director(),
   // tools, and your own camera moves (on top of the look's, or the director's)
   tool: 'ripple',
@@ -96,6 +93,7 @@ const rt = {
   fingers: new Float32Array(15),
   handMirror: new Float32Array([1, -1, 1]),
   brush: { x: 0, y: 0, vx: 0, vy: 0, size: 0.16, strength: 0.7, mode: 0, relax: 0.97 },
+  snareT: 0, livingEnergy: 0, livingSpot: null, livingSteps: 8,
 };
 let rippleIdx = 0;
 function spawnRipple(x, y, strength) {
@@ -115,6 +113,7 @@ function lookValues(id) {
 app.pickLook = (id, seconds = app.glide) => {
   if (!LOOKS[id]) return;
   app.lookId = id;
+  if (app.film?.score) app.film.held = app.film.scene;        // you chose: the film carries on from the next scene
   app.world.morphTo(lookValues(id), seconds);
   ui?.lookChanged();
 };
@@ -222,7 +221,7 @@ function still(set, w = 320, h = 200) {
   stillR.resize(w, h);
   const W = new World();
   W.morphTo(set, 0.05);
-  const stillRt = { realTime: 0, ripples: new Float32Array(MAX_RIPPLES * 4), twists: new Float32Array(16), fingers: new Float32Array(15), handMirror: rt.handMirror, stepK: 0.6 };
+  const stillRt = { realTime: 0, ripples: new Float32Array(MAX_RIPPLES * 4), twists: new Float32Array(16), fingers: new Float32Array(15), handMirror: rt.handMirror, stepK: 0.6, livingSteps: 900 };
   const { P, post } = W.frame(1, quietMusic);
   stillRt.stepK = stepFactor(W.current);
   stillR.clearEcho();
@@ -232,17 +231,13 @@ function still(set, w = 320, h = 200) {
 app.thumb = id => (app.thumbs[id] ||= still(look(id)));
 
 // ------------------------------------------------------------------ the music clock
-// With an analysed song playing, the bar count follows the song; otherwise it free-runs at the tempo.
-const clock = { bar: 0, hit: 0, tapTimes: [] };
-const barLen = () => (60 / app.tempo.bpm) * app.tempo.beatsPerBar;
-function liveMusic(dt) {
-  const a = app.audio, an = app.songAnalysis;
-  if (an && a.mode === 'file' && a.el && an._file === a.file) clock.bar = (a.el.currentTime - an.beatOffset) / barLen();
-  else if (!app.paused) clock.bar += dt / barLen();
-  clock.hit = a.beat ? 1 : clock.hit * Math.exp(-dt * 7);
-  const on = a.mode !== 'off' && a.playing;
-  return { on, beat: a.beat, bar: clock.bar, barLen: barLen(), loud: on ? a.level : 0.5, bass: on ? a.bass : 0, mid: on ? a.mid : 0, high: on ? a.high : 0, hit: clock.hit, time: rt.realTime };
-}
+const clock = { tapTimes: [] };
+const liveMusic = dt => {
+  const mood = MOODS[app.film.mood] || MOODS.flow;
+  const m = app.music.read(dt, rt.realTime, app.audio, app.tempo, app.paused, mood.decay);
+  m.M = mood.melody; m.D = mood.drums; m.S = mood.scope;
+  return m;
+};
 app.tapTempo = () => {
   const now = performance.now() / 1000, taps = clock.tapTimes;
   if (taps.length && now - taps[taps.length - 1] > 2) taps.length = 0;
@@ -252,52 +247,86 @@ app.tapTempo = () => {
     const gaps = taps.slice(1).map((t, i) => t - taps[i]);
     app.tempo.bpm = Math.round(60 / (gaps.reduce((x, y) => x + y, 0) / gaps.length));
     app.tempo.fromSong = false;
-    clock.bar = Math.round(clock.bar);
+    app.music.bar = Math.round(app.music.bar);
   }
   return app.tempo.bpm;
 };
 
 // ------------------------------------------------------------------ the sound → the picture
-app.SOURCES = { bass: 'Bass', mid: 'Mids', high: 'Highs', loud: 'Loudness', beat: 'Beat', bar: 'Bar sway', slow: 'Slow wave' };
+app.SOURCES = { melody: 'Melody', sway: 'Sway', slide: 'Slides', voice: 'Voice', sustain: 'Sustain', kick: 'Kick', snare: 'Snare', hat: 'Hats', loud: 'Loudness', bar: 'Bar', slow: 'Slow wave' };
 function sourceValue(src, m) {
   switch (src) {
-    case 'bass': return m.bass;
-    case 'mid': return m.mid;
-    case 'high': return m.high;
+    case 'melody': return m.height;
+    case 'sway': return m.sway;
+    case 'slide': return m.slide;
+    case 'voice': return m.voice;
+    case 'sustain': return m.harm;
+    case 'kick': return m.kick;
+    case 'snare': return m.snare;
+    case 'hat': return m.hat;
     case 'loud': return m.on ? m.loud : 0;      // silence shouldn't nudge anything
-    case 'beat': return m.hit;
     case 'bar': return 0.5 + 0.5 * Math.sin(m.bar * Math.PI * 2);
     case 'slow': return 0.5 + 0.5 * Math.sin(m.bar * Math.PI / 4);
     default: return 0;
   }
 }
-app.setLevel = id => {
-  const L = LEVELS[id];
-  if (!L) return;
-  Object.assign(app.sound, L.sound, { level: id });
-  for (const [k, t] of Object.entries(app.ties)) if (t.level) delete app.ties[k];
-  for (const [k, [src, amt]] of Object.entries(L.ties)) if (!app.ties[k]) app.ties[k] = { src, amt, level: true };
-};
 app.setTie = (key, src, amt) => {
   if (!src) delete app.ties[key];
   else app.ties[key] = { src, amt: amt ?? app.ties[key]?.amt ?? 0.4 };
 };
-// before speeds add up, so a speed tied to the bass really speeds up with it
+// before speeds add up, so a speed tied to the music really speeds up with it
 function applySound(v, m) {
-  const S = app.sound, k = S.amount, s = Math.min(1, k);
-  for (const key of ['sway', 'swayX', 'pulse', 'react', 'breathe', 'hitFlash']) v[key] *= k;
-  v.swave = S.wave * s; v.sspec = S.spectrum * s; v.sland = S.land * s;
+  const S = app.sound, k = S.amount * Math.max(m.M, m.D * 0.8), on = m.on ? 1 : 0;
+  // the look's own music settings: the bar's sway is the fallback for silence, the thump and the flash belong to the drums
+  v.pulse *= m.D; v.hitFlash *= m.D * m.D; v.react *= k;
+  v.breathe *= k; v.sway *= m.known ? 0.3 : k; v.swayX *= k;
+  const M = m.M * S.amount * on, D = m.D * S.amount * on;
+  // the tune: the world leans with it, the pattern slides as the note slides, its curve runs out through the lines
+  const ride = LOOKS[app.lookId].ride || RIDE;
+  for (const key in ride) {
+    const p = PARAM_BY_NAME[key];
+    if (p && typeof v[key] === 'number') v[key] = clamp(v[key] + ride[key] * m.sway * M, p.min, p.max);
+  }
+  v.flow += m.glide * 1.3 * M;
+  v.roll += m.sway * 0.05 * M;
+  v.tx += m.sway * 0.025 * M * v.frame;
+  v.mwave = M * (0.55 + 0.75 * m.voice);
+  v.mland = M * 0.7 * clamp((v.pitch - 0.25) * 1.2, 0, 1);
+  // looks that take their whole shape from the tune
+  const mel = LOOKS[app.lookId].melody;
+  if (mel === 'cym') {
+    const f = app.film.cym ||= { n: v.cymN, m: v.cymM };
+    if (m.on) { f.n = ease(f.n, 2 + 5 * (m.height * 0.5 + 0.5) * 1.3, 3.5, track.dt); f.m = ease(f.m, 2 + (m.chordRoot % 7) + 2.5 * m.sway, 1.5, track.dt); }
+    v.cymN = m.on ? f.n : v.cymN; v.cymM = m.on ? f.m : v.cymM;
+  } else if (mel === 'julia') {
+    v.juliaA += (m.sway * 1.4 + m.chordRoot * 0.52) * M; v.juliaR = clamp(v.juliaR + m.height * 0.035 * M, 0.3, 1);
+  } else if (mel === 'wells') {
+    v.wellT = (app.film.wellT = (app.film.wellT || 0) + track.dt * (0.1 + m.glide * 1.5 * M)); v.wellR = clamp(v.wellR + m.height * 0.1 * M, 0, 1.2);
+  }
+  v.truchetT = (app.film.tru = (app.film.tru || 0) + (m.note ? 0.12 * M : 0) + (m.beat ? 0.3 * D : 0) + track.dt * 0.03);
+  // the drums: a soft swell, a ripple, a shimmer on the thinnest lines. They never move the camera.
+  if (D > 0) {
+    v.bulge += m.kick * 0.1 * D;
+    v.height *= 1 + m.kick * 0.25 * D;
+    v.thick = clamp(v.thick - m.hat * 0.05 * D, -0.9, 0.9);
+    if (m.snare > 0.55 && rt.realTime - rt.snareT > 0.2) { rt.snareT = rt.realTime; spawnRipple((Math.random() - 0.5) * 1.2, (Math.random() - 0.5) * 0.7, 0.45 * D); }
+  }
+  rt.livingEnergy = clamp(m.harm * M + m.kick * D, 0, 1);
+  rt.livingSpot = m.beat && m.on ? [Math.random(), Math.random(), 0.012] : null;
+  // the scope: the raw sound in the lines, if you want it
+  v.swave = m.S * S.amount * on; v.sspec = (S.spectrum + m.S * 0.4) * S.amount * on; v.sland = S.land * S.amount * on;
   for (const [key, { src, amt }] of Object.entries(app.ties)) {
     const p = PARAM_BY_NAME[key];
     if (!p || typeof v[key] !== 'number') continue;
-    v[key] = clamp(v[key] + sourceValue(src, m) * amt * k * (p.max - p.min) * 0.6, p.min, p.max);
+    v[key] = clamp(v[key] + sourceValue(src, m) * amt * (p.max - p.min) * 0.6, p.min, p.max);
   }
 }
+const RIDE = { twist: 0.4, bulge: 0.14, frot: 0.12 };
+app.setMood = id => { if (MOODS[id]) app.film.mood = id; };
 
 // the cinematic camera, before speeds and music (so the bar's sway and the bass thump still ride on top)
 app.setCinema = on => {
   app.cine.on = on;
-  if (on) ui.toast('Cinematic camera — it drifts from shot to shot on the bar (C to stop)');
   ui.cinemaChanged();
 };
 function applyCinema(v, m, dt) {
@@ -306,43 +335,121 @@ function applyCinema(v, m, dt) {
     const ids = Object.keys(LOOKS).filter(k => k !== app.lookId && C.groups.includes(LOOKS[k].group));
     if (ids.length) app.pickLook(ids[Math.floor(Math.random() * ids.length)], Math.max(2, Math.round(12 - 10 * C.speed)) * m.barLen * 0.75);
   }
-  D.update(dt, v, LOOKS[app.lookId].group, m, C);
+  D.update(dt, v, camKind(app.lookId), m, C);
   D.apply(v);
   v.swell = Math.max(v.swell, C.waves * D.mix);
 }
 
-// auto-change the look (off unless you ask for it)
-const autoState = { last: 0 };
-app.autoActive = () => app.auto.when === 'always' || (app.auto.when === 'song' && app.audio.mode !== 'off' && app.audio.playing);
-function autoMorph(m) {
-  if (!app.autoActive()) { autoState.last = Math.floor(m.bar); return; }
-  if (m.bar - autoState.last < app.auto.every && m.bar >= autoState.last) return;
-  autoState.last = Math.floor(m.bar);
-  const ids = Object.keys(LOOKS).filter(k => k !== app.lookId && app.auto.groups.includes(LOOKS[k].group));
-  if (ids.length) app.pickLook(ids[Math.floor(Math.random() * ids.length)], m.barLen * 3);
+// the film: as the song plays, move to the scene the score has for this moment. A scene lands on its beat:
+// the glide starts a little before it. Pick a look yourself and it stays until the next section.
+const GLIDE_BARS = 2.2;
+function applyFilm(m) {
+  const F = app.film;
+  if (!F.auto || !F.score || !m.known || !app.audio.el) return;
+  const barLen = m.barLen, t = app.audio.el.currentTime, glide = Math.min(5, Math.max(1.4, barLen * GLIDE_BARS));
+  const i = sceneAt(F.score, t + glide * 0.55);
+  if (i === F.scene) return;
+  F.scene = i;
+  if (i <= F.held) return;
+  F.held = -1;
+  const S = F.score.scenes[i];
+  app.tweaks[S.look] = { ...paletteSet(S.palette) };
+  app.lookId = S.look;
+  app.world.morphTo(lookValues(S.look), glide);
+  app.cine.on = S.cine;
+  app.cine.looks = false;
+  app.cine.speed = S.cineSpeed;
+  const A = app.adds.figures;
+  if (S.figure) {
+    A.style = S.style;
+    A.size = S.figure === 'monolith' ? 1 : 1.15;
+    A.repeat = !!S.crowd;
+    app.figures.home = S.home;
+    app.figures.parked = false;
+    A.follow = false;
+    app.pickFigure(S.figure, { drive: false });
+  } else if (A.on) {
+    A.on = false;
+  }
+  ui?.lookChanged();
+  ui?.renderDock();
 }
+app.rebuildScore = () => {
+  const F = app.film, an = app.music.an;
+  F.score = an ? buildScore(app.audio.file ? `${app.audio.file.name}|${app.audio.file.size}` : 'song', an, F) : null;
+  F.scene = -1; F.held = -1;
+  ui?.soundChanged();
+};
+app.setFilmOption = (key, value) => {
+  app.film[key] = value;
+  if (['color', 'figures', 'worlds', 'pace', 'seed'].includes(key)) app.rebuildScore();
+  ui?.soundChanged();
+};
+app.seek = frac => { const el = app.audio.el; if (el && isFinite(el.duration)) el.currentTime = frac * el.duration; };
 
 // ------------------------------------------------------------------ songs (kept in this browser) and the mic
 app.audio.onchange = () => ui?.soundChanged();
 app.songs.onchange = () => ui?.soundChanged();
-async function analyseSong(file) {
+// listen to the whole song, off the main thread; what's heard is kept, so it's instant next time
+let worker = null, listenJob = 0;
+async function decodeMono(file) {
+  const buf = await file.arrayBuffer();
+  const tmp = new OfflineAudioContext(1, 1, 44100);
+  const dec = await tmp.decodeAudioData(buf);
+  const off = new OfflineAudioContext(1, Math.ceil(dec.duration * 22050), 22050);
+  const src = off.createBufferSource();
+  src.buffer = dec;
+  src.connect(off.destination);
+  src.start();
+  return (await off.startRendering()).getChannelData(0);
+}
+function runListen(samples, onProgress) {
+  return new Promise((ok, fail) => {
+    worker?.terminate();
+    worker = new Worker(new URL('./listen.worker.js', import.meta.url), { type: 'module' });
+    worker.onmessage = e => {
+      if (e.data.progress != null) onProgress(e.data.progress);
+      else if (e.data.result) ok(e.data.result);
+      else fail(new Error(e.data.error));
+    };
+    worker.onerror = e => fail(new Error(e.message));
+    worker.postMessage(samples, [samples.buffer]);
+  });
+}
+const LISTEN_VERSION = 3;
+async function listenTo(file) {
+  const job = ++listenJob, F = app.film, id = `${file.name}|${file.size}`;
+  app.music.setAnalysis(null);
+  F.score = null; F.listening = 0.001; F.scene = -1; F.held = -1;
+  ui?.soundChanged();
   try {
-    const an = await analyzeAudio(await file.arrayBuffer());
-    an._file = file;
-    let bpm = an.bpm;
-    while (bpm < 55) bpm *= 2;
-    while (bpm > 150) bpm /= 2;
-    app.tempo = { bpm: Math.round(bpm * 10) / 10, beatsPerBar: bpm < 85 ? 2 : an.meter || 4, fromSong: true };
-    app.songAnalysis = an;
+    let an = await loadListened(id);
+    if (!an || an.version !== LISTEN_VERSION) {
+      const samples = await decodeMono(file);
+      if (job !== listenJob) return;
+      an = await runListen(samples, p => {
+        if (job !== listenJob) return;
+        F.listening = Math.max(0.001, p);
+        ui?.listenProgress();
+      });
+      saveListened(id, an);
+    }
+    if (job !== listenJob) return;
+    F.listening = 0;
+    app.tempo = { bpm: Math.round(an.bpm * 10) / 10, beatsPerBar: an.meter, fromSong: true };
+    app.music.setAnalysis(an);
+    app.rebuildScore();
+  } catch (e) {
+    console.warn('listening failed', e);
+    F.listening = 0;
     ui?.soundChanged();
-  } catch (e) { console.warn('analysis failed', e); }
+  }
 }
 app.loadSong = async (file, { keep = true } = {}) => {
   try {
     if (keep) app.songs.add(file);
     await app.audio.loadFile(file);
-    ui.toast(`Playing “${app.audio.name}”`);
-    analyseSong(file);
+    listenTo(file);
   } catch (e) {
     console.warn(e);
     ui.toast('Could not play that file');
@@ -383,6 +490,7 @@ app.useInput = async (deviceId = app.audio.input.deviceId) => {
   }
 };
 app.useMic = () => app.useInput();
+app.audio.wantPitch = true;
 app.setMonitor = on => {
   app.audio.setMonitor(on);
   if (on) ui.toast('You’ll hear the input through the speakers. With a mic near speakers, use headphones — it’ll howl.');
@@ -398,13 +506,15 @@ app.stopAudio = () => app.audio.stop();
 // ------------------------------------------------------------------ add-ons
 const pres = { hands: 0, face: 0, orbs: 0, figures: 0 };
 app.figures = new Figures();
-// pick a figure (it re-forms out of whichever one is showing), switching the add on if it isn't
-app.pickFigure = id => {
+// pick a figure: the one showing goes under, then this one comes up, and your mouse has it
+app.pickFigure = (id, { drive = true } = {}) => {
   app.adds.figures.pick = id;
-  app.figures.pick(id);
-  if (pres.figures < 0.01) { app.figures.a = app.figures.b = FIGURE_INDEX[id] ?? 0; app.figures.mix = 0; app.figures.swap = null; }   // nothing showing yet: no need to re-form
-  if (!app.adds.figures.on) app.setAdd('figures', true);
-  else ui.addsChanged();
+  if (id !== 'hand') app.figures.pick(id);
+  if (pres.figures < 0.01 && id !== 'hand') { app.figures.a = FIGURE_INDEX[id] ?? 0; app.figures.swap = null; app.figures.placed = false; }   // nothing showing yet: straight up
+  app.adds.figures.on = true;
+  if (drive) { app.tool = 'figure'; app.adds.figures.follow = true; app.adds.figures.size = 1; app.figures.home = null; app.figures.parked = false; updateRing(); }
+  ui?.renderDock();
+  ui?.addsChanged();
 };
 app.setAdd = async (id, on) => {
   const A = app.adds[id];
@@ -603,8 +713,6 @@ function applyInputs(v, m) {
 
 // add-ons and the view, after the look and the music
 const handTool = { on: 0, x: 0, y: 0, press: 0 };
-// a figure as your cursor (one you put on the toolbar): it follows you under the sheet, hold to push it through
-const figTool = { on: 0, x: 0, y: 0, press: 0, id: 0 };
 function applyAdds(v, m, dt) {
   const A = app.adds;
   const V = app.view;
@@ -615,44 +723,46 @@ function applyAdds(v, m, dt) {
   v.pitch = clamp(v.pitch + V.pitch, -0.35, 1.42);
   // tilted back, a long lens would push the camera miles away: widen it as it tilts
   if (v.focal > 2.2) v.focal += (2.0 - v.focal) * clamp((v.pitch - 0.12) / 0.7, 0, 1);
-  // the figures on screen: the world's shader is rebuilt with just their groups (in the background, the
-  // first time), and each one comes up once it's in
-  const F = app.figures, toolFig = app.tool.startsWith('fig:') ? app.tool.slice(4) : null;
-  const showing = [];
-  if (A.figures.on || pres.figures > 0.01) showing.push(FIGURES[F.a].id, ...(F.mix > 0 ? [FIGURES[F.b].id] : []));
-  if (toolFig) showing.push(toolFig);
-  if (figTool.on > 0.001) showing.push(FIGURES[figTool.id].id);
-  renderer.useFigures(figureBank(showing));
-  F.canMorph = renderer.hasFigure(FIGURES[F.b].id);
-  if (F.swap != null && pres.figures < 0.02) { F.a = F.b = F.swap; F.swap = null; F.mix = 0; }   // the old one has gone: the next one comes up
+  // the figure on screen: the world's shader is rebuilt with just it (in the background, the first time),
+  // and it comes up once that's in. The hand is its own thing, always in the shader.
+  const F = app.figures, pickHand = A.figures.pick === 'hand';
+  const drawn = FIGURES[F.a].id;
+  renderer.useFigures(figureBank(A.figures.on || pres.figures > 0.01 ? [F.swap != null && pres.figures < 0.02 ? FIGURES[F.swap].id : drawn] : []));
+  if (F.swap != null && pres.figures < 0.02 && renderer.hasFigure(FIGURES[F.swap].id)) { F.a = F.swap; F.swap = null; }   // the old one has gone: the next one comes up
   for (const k of ['hands', 'face', 'orbs', 'figures']) {
-    const on = A[k].on && (k !== 'figures' || (F.swap == null && renderer.hasFigure(FIGURES[F.a].id)));
-    pres[k] = ease(pres[k], on ? 1 : 0, k === 'figures' ? (F.swap != null ? 3 : 1.2) : 3, dt);
+    const on = A[k].on && (k !== 'figures' || (!pickHand && F.swap == null && renderer.hasFigure(FIGURES[F.a].id)));
+    pres[k] = ease(pres[k], on ? 1 : 0, k === 'figures' ? (on ? 1.5 : 2.6) : 3, dt);
   }
   const copying = A.hands.copy && tracker.on && tracker.hands.length;
   if (!copying) { rt.handMirror[0] = 1; rt.handMirror[1] = -1; rt.fingers.fill(0); }
   applyHands(v, A.hands, copying ? 0 : pres.hands, m, app.sound);
   applyFace(v, A.face, A.face.copy && tracker.face ? 0 : pres.face);
   applyOrbs(v, A.orbs, pres.orbs, m, app.sound);
-  if (A.figures.on || pres.figures > 0.01 || figTool.on > 0.001) {
-    const at = pointer.inside ? [v.tx + pointer.x * 2 * v.frame, v.ty + pointer.y * 2 * v.frame] : null;
-    F.turn(v, dt);
-    if (F.step(dt, A.figures, m, at, [v.tx, v.ty])) ui.addsChanged();
+  const driving = app.tool === 'figure' && pointer.inside && A.figures.follow;
+  if (A.figures.on || pres.figures > 0.01) {
+    F.pointer = pointer.inside ? [...rayOnSheet(v, pointer.x, pointer.y, 0)] : null;
+    const aim = driving ? z => rayOnSheet(v, pointer.x, pointer.y, z) : null;
+    if (driving) F.parked = true;
+    const home = F.parked ? [F.x, F.y] : F.home ? rayOnSheet(v, F.home[0], F.home[1], 0) : rayOnSheet(v, 0, -0.2 * Math.sin(Math.max(v.pitch, 0)), 0);
+    if (F.step(dt, A.figures, m, aim, home, pointer.down && app.tool === 'figure', v)) ui.addsChanged();
     F.apply(v, A.figures, pres.figures);
-    if (figTool.on > 0.001) {
-      // hovering, it's a shape just under the sheet; held, it comes all the way up
-      const S = 1.05 * v.frame / 0.6, T = FIGURES[figTool.id];
-      Object.assign(v, { ftOn: figTool.on, ftId: figTool.id, ftX: figTool.x, ftY: figTool.y, ftZ: (T.lift - 0.16 + figTool.press * 0.26 + 0.1 * Math.sin(Math.max(F.cp, 0)) * (1 - T.stand)) * S, ftS: S, ftSt: T.stand,
-        figT: F.t, figLX: F.look[0], figLY: F.look[1], figSing: F.sing });
-      if (pres.figures < 0.01) v.figSoft = figureSoft(A.figures, T.veil, S);
-      figureLight(v, figTool.on);
-    }
+    rt.figFrame = F.frame;
   }
   app.ball.apply(v, A.ball);
-  // your cursor as a hand, pressing through from behind
+  // the hand: your cursor pressing through from behind, wherever the camera is
+  const handSize = 1.25 * v.frame / 0.6 * (A.figures.size || 1);
+  const wantHand = A.figures.on && pickHand;
+  if (wantHand && (app.tool === 'figure' && pointer.inside && A.figures.follow)) {
+    const zh = 0.04 + handTool.press * 0.32 + 0.12 * handSize;
+    const on = rayOnSheet(v, pointer.x, pointer.y, zh);
+    handTool.x = ease(handTool.x, on[0], 26, dt);
+    handTool.y = ease(handTool.y, on[1] - 0.1 * handSize, 26, dt);
+  } else if (handTool.on < 0.01) { handTool.x = v.tx; handTool.y = v.ty - 0.1 * handSize; }
+  handTool.on = ease(handTool.on, wantHand ? 1 : 0, 4, dt);
+  handTool.press = ease(handTool.press, pointer.down && pickHand && app.tool === 'figure' ? 1 : 0, 6, dt);
   if (handTool.on > 0.001) {
     Object.assign(v, {
-      h2on: handTool.on, h2x: handTool.x, h2y: handTool.y, h2z: 0.04 + handTool.press * 0.32, h2s: 1.25 * v.frame / 0.6, h2a: 0.15,
+      h2on: handTool.on, h2x: handTool.x, h2y: handTool.y, h2z: 0.04 + handTool.press * 0.32, h2s: handSize, h2a: 0.15,
       h2curl: 0.15 + handTool.press * 0.9, h2spread: 0.6 - handTool.press * 0.3,
     });
     v.handSoft = Math.min(v.handSoft, 0.2);
@@ -744,7 +854,7 @@ app.deleteSave = id => { app.saves = app.saves.filter(x => x.id !== id); persist
 app.togglePause = () => { app.paused = !app.paused; ui.refreshTop(); };
 app.toggleUI = () => {
   const hidden = document.body.classList.toggle('ui-hidden');
-  if (hidden) ui.toast('Press H (or tap the corner) to bring the menu back');
+  if (hidden) ui.toast('H brings it back');
 };
 app.toggleFullscreen = () => {
   if (document.fullscreenElement) document.exitFullscreen?.();
@@ -791,7 +901,7 @@ function toUV(e) {
 }
 function updateRing(e) {
   if (e) { ring.style.left = `${e.clientX}px`; ring.style.top = `${e.clientY}px`; }
-  const show = !['camera', 'hand'].includes(app.tool) && !app.tool.startsWith('fig:') && !matchMedia('(pointer: coarse)').matches;
+  const show = !['camera', 'figure'].includes(app.tool) && !matchMedia('(pointer: coarse)').matches;
   ring.classList.toggle('show', show && pointer.inside && !pointer.move);
   const d = app.brush.size * 2 * canvas.getBoundingClientRect().height * (app.tool === 'ripple' ? 0.6 : 1);
   ring.style.width = ring.style.height = `${d}px`;
@@ -863,9 +973,9 @@ canvas.addEventListener('wheel', e => {
   app.view.zoom = clamp(app.view.zoom * Math.exp(e.deltaY * 0.0015), 0.15, 5);
   ui.viewChanged();
 }, { passive: false });
-document.getElementById('unhide').addEventListener('click', () => (document.body.classList.contains('ui-hidden') ? app.toggleUI() : ui.setView('topbar', true)));
+document.getElementById('unhide').addEventListener('click', () => { if (document.body.classList.contains('ui-hidden')) app.toggleUI(); });
 
-function updateTools(dt, v) {
+function updateTools(dt) {
   const b = rt.brush, br = app.brush;
   const brushing = pointer.down && !pointer.move;
   b.mode = brushing ? { smear: 1, bulge: 2, pinch: 3 }[app.tool] || 0 : 0;
@@ -884,23 +994,6 @@ function updateTools(dt, v) {
     if (Math.abs(t.angle) < 1e-3 && !t.held) t.angle = 0;
     rt.twists.set([t.x, t.y, t.angle, t.r], i * 4);
   });
-  // the hand tool: your cursor is a hand under the sheet
-  // a figure tool: the same, with whichever figure it is (it sinks away before another one comes up)
-  const ft = app.tool.startsWith('fig:') ? FIGURE_INDEX[app.tool.slice(4)] ?? -1 : -1;
-  if (ft >= 0 && ft !== figTool.id && figTool.on < 0.05) figTool.id = ft;
-  figTool.on = ease(figTool.on, ft >= 0 && ft === figTool.id && pointer.inside && renderer.hasFigure(FIGURES[ft].id) ? 1 : 0, 4, dt);
-  figTool.press = ease(figTool.press, pointer.down && ft >= 0 && !pointer.move ? 1 : 0, 5, dt);
-  if (v) {
-    figTool.x = ease(figTool.x, v.tx + pointer.x * 2 * v.frame, 10, dt);
-    figTool.y = ease(figTool.y, v.ty + pointer.y * 2 * v.frame, 10, dt);
-  }
-  const want = app.tool === 'hand' && pointer.inside ? 1 : 0;
-  handTool.on = ease(handTool.on, want, 4, dt);
-  handTool.press = ease(handTool.press, pointer.down && app.tool === 'hand' && !pointer.move ? 1 : 0, 6, dt);
-  if (v) {
-    handTool.x = ease(handTool.x, v.tx + pointer.x * 2 * v.frame, 10, dt);
-    handTool.y = ease(handTool.y, v.ty + pointer.y * 2 * v.frame - 0.12, 10, dt);
-  }
 }
 
 // ------------------------------------------------------------------ keyboard
@@ -910,10 +1003,11 @@ addEventListener('keydown', e => {
   const act = {
     ' ': app.togglePause, h: app.toggleUI, f: app.toggleFullscreen, e: app.exploreOpen, d: app.surprise, s: app.snapshot,
     c: () => app.setCinema(!app.cine.on),
+    p: () => ui.openTab('patterns'), g: () => ui.openTab('figures'), m: () => ui.openTab('sound'), t: () => ui.openTab('tweak'),
     arrowright: () => app.stepLook(1), arrowleft: () => app.stepLook(-1),
     '[': () => { app.brush.size = Math.max(0.04, app.brush.size * 0.85); ui.renderDock(); updateRing(); },
     ']': () => { app.brush.size = Math.min(0.5, app.brush.size * 1.18); ui.renderDock(); updateRing(); },
-    escape: () => app.explore.open && app.exploreClose(),
+    escape: () => (app.explore.open ? app.exploreClose() : ui.tab && ui.openTab(ui.tab)),
   }[k];
   if (act) {
     if (e.target.matches('input[type="range"]') && k.startsWith('arrow')) return;
@@ -925,27 +1019,14 @@ addEventListener('keydown', e => {
   if (app.explore.open && n >= 1 && n <= 8) return app.explorePick(n - 1);
   if (n >= 1 && n <= TOOLS.length) app.setTool(TOOLS[n - 1].id);
 });
-app.setTool = id => { app.tool = id; updateRing(); ui.renderDock(); };
-
-// figures you put on the toolbar (drag them there from Add → Figures); remembered between visits
-const FIG_TOOLS_KEY = 'trippy.figtools.v1';
-app.figTools = (() => { try { const a = JSON.parse(localStorage.getItem(FIG_TOOLS_KEY)); if (Array.isArray(a)) return a.filter(id => id in FIGURE_INDEX); } catch {} return ['skull', 'serpent', 'face']; })();
-const saveFigTools = () => { try { localStorage.setItem(FIG_TOOLS_KEY, JSON.stringify(app.figTools)); } catch {} };
-app.addFigTool = (id, at = app.figTools.length) => {
-  if (!(id in FIGURE_INDEX)) return;
-  const was = app.figTools.indexOf(id);
-  if (was >= 0) app.figTools.splice(was, 1);
-  app.figTools.splice(Math.min(at, app.figTools.length), 0, id);
-  if (app.figTools.length > 8) app.figTools.length = 8;
-  saveFigTools();
-  app.setTool(`fig:${id}`);
-  if (was < 0) ui.toast(`${FIGURES[FIGURE_INDEX[id]].name} is on the toolbar — hold on the sheet to push it through`);
-};
-app.removeFigTool = id => {
-  app.figTools = app.figTools.filter(x => x !== id);
-  saveFigTools();
-  if (app.tool === `fig:${id}`) app.setTool('ripple');
-  else ui.renderDock();
+// the figure tool with nothing up brings the hand; leaving it, the hand goes, and anything else stays where you left it
+app.setTool = id => {
+  const A = app.adds.figures;
+  if (id === 'figure' && !A.on) return app.pickFigure('hand');
+  if (app.tool === 'figure' && id !== 'figure' && A.pick === 'hand' && A.on) { A.on = false; ui.addsChanged(); }
+  app.tool = id;
+  updateRing();
+  ui.renderDock();
 };
 
 // ------------------------------------------------------------------ the frame loop
@@ -994,16 +1075,16 @@ function frame(now) {
   rt.realTime = (now - t0) / 1000;
   const a = app.audio;
   a.update(dt, rt.realTime);
-  renderer.setSound(a.wave, a.hist, a.waveHist);
   updateInputs(dt);
   const m = liveMusic(dt);
-  autoMorph(m);
+  renderer.setSound(a.wave, a.hist, a.waveHist, app.music.row);
+  applyFilm(m);
   const w = app.world, cur = w.current || w.values();
-  updateTools(dt, cur);
+  updateTools(dt);
   // the ball: wander (or follow the mouse), hop on the beat, ripple when it lands
   const B = app.adds.ball;
   const target = B.follow && pointer.inside ? [cur.tx + pointer.x * 2 * cur.frame, cur.ty + pointer.y * 2 * cur.frame] : null;
-  const cut = document.body.classList.contains('panel-closed') || innerWidth <= 760 ? 0 : 372 / innerWidth;   // keep it out from under the panel
+  const cut = document.body.classList.contains('panel-closed') || innerWidth <= 760 ? 0 : 356 / innerWidth;   // keep it out from under the panel
   if (app.ball.step(app.paused ? 0 : dt, B, { tx: cur.tx, ty: cur.ty, frame: cur.frame, aspect: canvas.width / canvas.height, cut }, m, app.sound, target)) {
     spawnRipple((app.ball.x - cur.tx) / (2 * cur.frame), (app.ball.y - cur.ty) / (2 * cur.frame), 0.9 * app.sound.ballBounce);
   }
@@ -1032,7 +1113,6 @@ function boot() {
     app.tweaks[shared.l] = shared.t || {};
     app.feel = { ...defaultFeel(), ...shared.f };
   }
-  app.setLevel('lively');
   app.world.morphTo(lookValues(app.lookId), 0.05);
   ui = createUI(app);
   app.songs.load();

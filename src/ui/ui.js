@@ -1,29 +1,25 @@
-// The interface: a top bar, a side panel with four tabs, and the tool dock.
-//   Looks  – every look, grouped; click one and everything glides there
-//   Tweak  – this look's best sliders, color, the feel knobs, and everything else folded away; one Reset
-//   Add    – you (the camera), hands, a face, the ball, orbs, a picture — none on until you add it
-//   Sound  – your songs, how hard the music hits, the sound's own shapes, ties, changing look by itself
-// Sliders write straight into the app; anything that changes structure re-renders the open tab.
+// The interface: as little as possible on top of the picture. A wordmark; a bar at the bottom with the four
+// things you do (Patterns, Figures, Sound, Tweak), the tools and the transport; one panel at a time. It all
+// fades away when you stop moving the mouse.
 import { h, slider, toggle, chips, iconBtn, section, fold, knob, fmt2, BLANK } from './kit.js';
 import { icon } from '../icons.js';
 import { LOOKS, GROUPS, PALETTES, look } from '../engine/looks.js';
-import { PARAMS, PARAM_BY_NAME, rgbToHex } from '../engine/params.js';
+import { PARAMS, PARAM_BY_NAME } from '../engine/params.js';
 import { KNOBS, feelMoved } from '../engine/feel.js';
 import { ADDS } from '../adds.js';
-import { FIGURES, FIGURE_GROUPS, FIGURE_INDEX } from '../engine/figures.js';
+import { FIGURES, FIGURE_GROUPS } from '../engine/figures.js';
 import { FONTS } from '../media.js';
 
 export const TOOLS = [
-  { id: 'ripple', icon: 'ripple', name: 'Ripple', tip: 'Click or drag to drop ripples' },
-  { id: 'twist', icon: 'twist', name: 'Twist', tip: 'Hold to keep twisting, round and round (Alt/Option: the other way)' },
-  { id: 'bulge', icon: 'bulge', name: 'Bulge', tip: 'Hold to puff it up' },
-  { id: 'pinch', icon: 'pinch', name: 'Pinch', tip: 'Hold to suck it in' },
-  { id: 'smear', icon: 'smear', name: 'Smear', tip: 'Drag to push it like wet paint' },
-  { id: 'hand', icon: 'hand', name: 'Hand', tip: 'Your cursor is a hand pressing through from behind — hold to push' },
-  { id: 'camera', icon: 'orbit', name: 'Camera', tip: 'Drag to turn and tilt the view (or right-drag with any tool) · Shift-drag slides it · scroll zooms' },
+  { id: 'ripple', icon: 'ripple', name: 'Ripple', tip: 'Ripple: click or drag' },
+  { id: 'twist', icon: 'twist', name: 'Twist', tip: 'Twist: hold and it keeps winding (Alt: the other way)' },
+  { id: 'bulge', icon: 'bulge', name: 'Bulge', tip: 'Bulge: hold to puff it up' },
+  { id: 'pinch', icon: 'pinch', name: 'Pinch', tip: 'Pinch: hold to suck it in' },
+  { id: 'smear', icon: 'smear', name: 'Smear', tip: 'Smear: drag like wet paint' },
+  { id: 'figure', icon: 'hand', name: 'Figure', tip: 'Your cursor has the figure: hold to bring it further out' },
+  { id: 'camera', icon: 'orbit', name: 'Camera', tip: 'Camera: drag to turn and tilt, scroll to zoom (right-drag works with any tool)' },
 ];
 
-// friendlier names for the sliders people reach for most
 const LABELS = {
   freq: 'Line count', thick: 'Line weight', frot: 'Turn', spinRate: 'Spin', flow: 'Flow', linA: 'Line angle',
   frame: 'Zoom out', pitch: 'Tilt back', focal: 'Lens: wide ↔ flat', tx: 'Off-centre',
@@ -34,31 +30,21 @@ const LABELS = {
 };
 const flipped = new Set(['thick']);               // shown so that right = more ink
 const labelOf = key => LABELS[key] || PARAM_BY_NAME[key]?.label || key;
-const SOURCES = { bass: 'Bass', mid: 'Mids', high: 'Highs', loud: 'Loudness', beat: 'Beat', bar: 'Bar sway', slow: 'Slow wave' };
+const fmtTime = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+const KEYS = ['C', 'C♯', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'A♭', 'A', 'B♭', 'B'];
 
 export function createUI(app) {
   const body = document.getElementById('panelBody');
-  const tabsEl = document.getElementById('tabs');
-  const actionsEl = document.getElementById('actions');
+  const panel = document.getElementById('panel');
+  const panelHead = document.getElementById('panelHead');
+  const corner = document.getElementById('corner');
   const dock = document.getElementById('dock');
-  // drop a figure on the toolbar to make it a tool (or drag one along it to move it)
-  const isFig = e => [...e.dataTransfer.types].includes('text/x-figure');
-  dock.addEventListener('dragover', e => { if (!isFig(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; dock.classList.add('drop-ok'); });
-  dock.addEventListener('dragleave', e => { if (!dock.contains(e.relatedTarget)) dock.classList.remove('drop-ok'); });
-  dock.addEventListener('drop', e => {
-    dock.classList.remove('drop-ok');
-    if (!isFig(e)) return;
-    e.preventDefault();
-    const over = e.target.closest('.fig-tool');
-    app.addFigTool(e.dataTransfer.getData('text/x-figure'), over ? [...over.parentNode.children].indexOf(over) : app.figTools.length);
-  });
+  const transport = document.getElementById('transport');
   const toastEl = document.getElementById('toast');
-  const nameEl = document.getElementById('presetName');
+  const nameEl = document.getElementById('lookName');
   const hintEl = document.getElementById('hint');
-  const nowEl = document.getElementById('nowPlaying');
-  let tab = 'looks';
-  let meters = null;
-  let toastTimer = 0;
+  let tab = null;
+  let toastTimer = 0, nameTimer = 0;
 
   function toast(msg) {
     toastEl.textContent = msg;
@@ -67,11 +53,32 @@ export function createUI(app) {
     toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2600);
   }
 
+  // ---------------------------------------------------------------- the chrome fades when you stop moving
+  let idleT = 0;
+  const wake = () => { idleT = 0; document.body.classList.remove('idle'); };
+  addEventListener('pointermove', wake, { passive: true });
+  addEventListener('pointerdown', wake, { passive: true });
+  addEventListener('keydown', wake);
+
+  // the name of what's on screen: it shows for a moment when it changes, even with everything else away
+  function renderName() {
+    const L = LOOKS[app.lookId]?.name || '', F = app.adds.figures;
+    const fig = F.on ? FIGURES.find(f => f.id === F.pick)?.name : '';
+    const text = fig ? `${L} · ${fig}` : L;
+    if (text !== nameEl.textContent) {
+      nameEl.textContent = text;
+      nameEl.classList.add('flash');
+      clearTimeout(nameTimer);
+      nameTimer = setTimeout(() => nameEl.classList.remove('flash'), 2800);
+    }
+  }
+
   // ---------------------------------------------------------------- ∿: tie any value to the music
+  const SOURCES = app.SOURCES;
   function tieButton(row, key) {
     const btn = h('button', { class: 'mod-btn', 'aria-label': 'Follow the music', 'data-tip': 'Follow the music', html: '∿' });
     row.top.insertBefore(btn, row.top.lastChild);
-    let open = false, panel = null;
+    let open = false, pn = null;
     const paint = () => {
       const t = app.ties[key];
       row.classList.toggle('tied', !!t);
@@ -79,18 +86,17 @@ export function createUI(app) {
     };
     const build = () => {
       const t = app.ties[key];
-      panel = h('div', { class: 'modrow' },
+      pn = h('div', { class: 'modrow' },
         chips([['', 'Off'], ...Object.entries(SOURCES)], id => (id ? t?.src === id : !t), id => { app.setTie(key, id || null); rebuild(); }, 'small'),
         t ? slider('How much (− flips it)', { min: -1, max: 1, get: () => app.ties[key]?.amt ?? 0.4, set: v => { if (app.ties[key]) app.ties[key].amt = v; } }) : null);
-      row.append(panel);
+      row.append(pn);
     };
-    const rebuild = () => { panel?.remove(); panel = null; if (open) build(); paint(); };
+    const rebuild = () => { pn?.remove(); pn = null; if (open) build(); paint(); };
     btn.addEventListener('click', e => { e.stopPropagation(); open = !open; rebuild(); });
     paint();
     return row;
   }
 
-  // a slider for one of the look's values: remembered for this look, double-click puts it back, ∿ ties it to the music
   function lookSlider(key, opts = {}) {
     const p = PARAM_BY_NAME[key];
     if (!p) return null;
@@ -115,158 +121,181 @@ export function createUI(app) {
     return h('label', { class: 'color' }, inp, h('span', {}, labelOf(key)));
   }
 
-  // ---------------------------------------------------------------- top bar
-  const ACTIONS = [
-    { id: 'surprise', icon: 'dice', tip: 'A random look (D)', run: () => app.surprise(), text: 'Surprise' },
-    { id: 'explore', icon: 'grid', tip: 'Breed this look: 8 variations, pick one, repeat (E)', run: () => app.exploreOpen(), text: 'Explore' },
-    'sep',
-    { id: 'pause', icon: () => (app.paused ? 'play' : 'pause'), tip: 'Pause / play (Space)', run: () => app.togglePause() },
-    { id: 'snap', icon: 'camera', tip: 'Save a picture (S)', run: () => app.snapshot() },
-    { id: 'rec', icon: 'record', tip: 'Record a clip', run: () => app.toggleRecord() },
-    { id: 'share', icon: 'link', tip: 'Copy a link to this look', run: () => app.share() },
-    { id: 'full', icon: 'expand', tip: 'Fullscreen (F)', run: () => app.toggleFullscreen() },
-    { id: 'panel', icon: 'panel', tip: 'Show / hide the menu', run: () => setView('panel', !view.panel) },
-    { id: 'view', icon: 'eye', tip: 'What’s on screen (H hides everything)', run: e => toggleViewMenu(e.currentTarget) },
-  ];
-  function renderTop() {
-    actionsEl.replaceChildren(...ACTIONS.map(a => {
-      if (a === 'sep') return h('span', { class: 'sep' });
-      const ic = typeof a.icon === 'function' ? a.icon() : a.icon;
-      return h('button', {
-        class: `act act-${a.id}${a.text ? ' has-text' : ''}${a.id === 'rec' && app.recording ? ' live' : ''}`,
-        'data-tip': a.tip, 'aria-label': a.tip, onclick: a.run,
-        html: icon(ic) + (a.text ? `<span>${a.text}</span>` : '') + (a.id === 'rec' && app.recording ? '<span class="rec-time">0:00</span>' : ''),
-      });
-    }));
-    renderName();
+  // ---------------------------------------------------------------- the corner: surprise, and everything else behind one button
+  const moreMenu = h('div', { class: 'more-menu glass', hidden: true });
+  document.body.append(moreMenu);
+  function renderCorner() {
+    corner.replaceChildren(
+      h('button', { class: 'round glass', 'data-tip': 'Surprise me (D)', 'aria-label': 'Surprise me', html: icon('dice'), onclick: () => app.surprise() }),
+      h('button', { class: `round glass more-btn${app.recording ? ' live' : ''}`, 'data-tip': 'More', 'aria-label': 'More', html: icon(app.recording ? 'record' : 'dots'), onclick: toggleMore }));
   }
-  function renderName() {
-    nameEl.textContent = LOOKS[app.lookId]?.name || '';
-    nameEl.classList.toggle('dirty', app.isEdited(app.lookId));
+  function toggleMore(e) {
+    if (!moreMenu.hidden) { moreMenu.hidden = true; return; }
+    const row = (ic, label, run, key) => h('button', { class: 'menu-row', onclick: () => { moreMenu.hidden = true; run(); }, html: `${icon(ic)}<span>${label}</span>${key ? `<kbd>${key}</kbd>` : ''}` });
+    moreMenu.replaceChildren(
+      row('grid', 'Breed this look', () => app.exploreOpen(), 'E'),
+      row(app.paused ? 'play' : 'pause', app.paused ? 'Play' : 'Pause', () => app.togglePause(), 'Space'),
+      row('camera', 'Save a picture', () => app.snapshot(), 'S'),
+      row('record', app.recording ? 'Stop recording' : 'Record a clip', () => app.toggleRecord()),
+      row('link', 'Copy a link to this look', () => app.share()),
+      row('expand', 'Fullscreen', () => app.toggleFullscreen(), 'F'),
+      row('eye', 'Hide everything', () => app.toggleUI(), 'H'),
+      h('div', { class: 'menu-gap' }),
+      toggle('60 frames a second', () => app.perf.cap60, v => app.setCap60(v), 'easier on the computer'));
+    const r = e.currentTarget.getBoundingClientRect();
+    moreMenu.style.top = `${r.bottom + 8}px`;
+    moreMenu.style.right = `${Math.max(8, innerWidth - r.right)}px`;
+    moreMenu.hidden = false;
+  }
+  addEventListener('pointerdown', e => {
+    if (!moreMenu.hidden && !moreMenu.contains(e.target) && !e.target.closest?.('.more-btn')) moreMenu.hidden = true;
+    if (toolPop.parentNode && !toolPop.contains(e.target) && !e.target.closest?.('.tool')) toolPop.remove();
+  });
+
+  // ---------------------------------------------------------------- the dock
+  const TABS = [
+    { id: 'patterns', name: 'Patterns', icon: 'grid' },
+    { id: 'figures', name: 'Figures', icon: 'hand' },
+    { id: 'sound', name: 'Sound', icon: 'music' },
+    { id: 'tweak', name: 'Tweak', icon: 'sliders' },
+  ];
+  const toolPop = h('div', { class: 'tool-pop glass' });
+  function toggleToolPop(anchor) {
+    if (toolPop.parentNode) { toolPop.remove(); return; }
+    const b = app.brush;
+    const mini = (label, key, min, max) => slider(label, { min, max, get: () => b[key], set: v => { b[key] = v; app.updateRing(); } });
+    toolPop.replaceChildren(
+      mini('Size', 'size', 0.04, 0.5), mini('Strength', 'strength', 0.05, 1.5),
+      ['twist', 'bulge', 'pinch', 'smear'].includes(app.tool) ? mini('Springs back', 'spring', 0, 1) : null,
+      h('button', { class: 'link-btn', onclick: () => { app.resetView(); toolPop.remove(); } }, 'Put everything back'));
+    toolPop.querySelectorAll('.slider').forEach(s => s.sync?.());
+    document.body.append(toolPop);
+    const r = anchor.getBoundingClientRect();
+    toolPop.style.left = `${Math.max(8, Math.min(innerWidth - 228, r.left + r.width / 2 - 110))}px`;
+    toolPop.style.bottom = `${innerHeight - r.top + 10}px`;
+  }
+  function renderDock() {
+    dock.replaceChildren(
+      h('div', { class: 'tabs' }, TABS.map(t => h('button', {
+        class: `tab${tab === t.id ? ' on' : ''}`, onclick: () => openTab(t.id), html: `${icon(t.icon)}<span>${t.name}</span>`,
+      }))),
+      h('span', { class: 'sep' }),
+      h('div', { class: 'tools' }, TOOLS.map((t, i) => h('button', {
+        class: `tool${app.tool === t.id ? ' on' : ''}`, 'data-tip': `${t.tip} (${i + 1})`, 'aria-label': t.name,
+        onclick: e => { if (app.tool === t.id && t.id !== 'figure' && t.id !== 'camera') toggleToolPop(e.currentTarget); else { toolPop.remove(); app.setTool(t.id); } }, html: icon(t.icon),
+      }))),
+      h('span', { class: 'sep' }),
+      h('button', {
+        class: `tool cine${app.cine.on ? ' on' : ''}`, 'data-tip': 'Cinematic camera: it flies from shot to shot by itself (C)', 'aria-label': 'Cinematic camera',
+        onclick: () => app.setCinema(!app.cine.on), html: icon('film'),
+      }));
   }
 
-  // the now-playing pill
-  function renderNow() {
+  // ---------------------------------------------------------------- the transport, and the song's map
+  let map = null, mapFor = null, mapCanvas = null, mapCtx = null;
+  function renderTransport() {
     const a = app.audio;
-    nowEl.hidden = a.mode === 'off';
-    if (nowEl.hidden) return;
-    nowEl.replaceChildren(...[
-      h('span', { class: 'now-pill-name', title: a.name }, a.mode === 'mic' ? '🎙 Mic' : `♪ ${a.name}`),
-      a.mode === 'file' ? iconBtn(a.playing ? 'pause' : 'play', 'Play / pause', () => { a.togglePlay(); setTimeout(renderNow, 60); }) : null,
-      a.mode === 'file' && app.songs.list.length > 1 ? iconBtn('next', 'Next song', () => app.nextSong()) : null,
+    transport.hidden = a.mode === 'off';
+    if (transport.hidden) { mapCanvas = null; return; }
+    if (a.mode === 'mic') {
+      transport.replaceChildren(
+        h('span', { class: 'live-dot' }), h('span', { class: 'tr-name' }, a.name || 'Live'),
+        iconBtn('stop', 'Stop', () => app.stopAudio()));
+      mapCanvas = null;
+      return;
+    }
+    mapCanvas = h('canvas', { class: 'tr-map', title: 'Click to go there' });
+    mapCanvas.addEventListener('pointerdown', e => {
+      const r = mapCanvas.getBoundingClientRect();
+      app.seek(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)));
+    });
+    mapCtx = null;
+    transport.replaceChildren(...[
+      iconBtn(a.playing ? 'pause' : 'play', 'Play / pause', () => { a.togglePlay(); setTimeout(renderTransport, 60); }),
+      h('span', { class: 'tr-name', title: a.name }, a.name),
+      mapCanvas,
+      h('span', { class: 'tr-time' }, '0:00'),
+      app.songs.list.length > 1 ? iconBtn('next', 'Next song', () => app.nextSong()) : null,
       iconBtn('stop', 'Stop', () => app.stopAudio()),
     ].filter(Boolean));
   }
-
-  // what's on screen
-  const VIEW_KEY = 'trippy.view.v2';
-  const VIEW_ITEMS = [['topbar', 'Top bar'], ['panel', 'Side panel'], ['dock', 'Tool dock'], ['ring', 'Brush ring'], ['hint', 'Tips']];
-  const view = { topbar: true, panel: true, dock: true, ring: true, hint: true };
-  try { Object.assign(view, JSON.parse(localStorage.getItem(VIEW_KEY) || '{}')); } catch {}
-  function applyView() {
-    const b = document.body.classList;
-    b.toggle('no-topbar', !view.topbar);
-    b.toggle('panel-closed', !view.panel);
-    b.toggle('no-dock', !view.dock);
-    b.toggle('no-ring', !view.ring);
-    b.toggle('no-hint', !view.hint);
-    try { localStorage.setItem(VIEW_KEY, JSON.stringify(view)); } catch {}
+  // the whole song at a glance: how loud it is, and the tune's line running through it
+  function buildMap(W, H) {
+    const an = app.music.an;
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const g = c.getContext('2d');
+    if (!an) return c;
+    const n = an.frames;
+    g.fillStyle = 'rgba(255,255,255,0.22)';
+    for (let x = 0; x < W; x += 2) {
+      const i = Math.floor(x / W * n), j = Math.floor((x + 2) / W * n);
+      let s = 0; for (let f = i; f < j; f++) s += an.loud[f];
+      const v = s / Math.max(j - i, 1), hh = Math.max(1, v * H * 0.8);
+      g.fillRect(x, (H - hh) / 2, 1, hh);
+    }
+    const [lo, , hi] = an.range, span = Math.max(hi - lo, 4);
+    g.strokeStyle = 'rgba(255,255,255,0.85)';
+    g.lineWidth = Math.max(1, W / 500);
+    g.beginPath();
+    let pen = false;
+    for (let x = 0; x < W; x++) {
+      const f = Math.floor(x / W * n);
+      if (an.voiced[f] > 0.5) {
+        const y = H * 0.84 - Math.max(0, Math.min(1, (an.pitch[f] - lo) / span)) * H * 0.68;
+        if (pen) g.lineTo(x, y); else g.moveTo(x, y);
+        pen = true;
+      } else pen = false;
+    }
+    g.stroke();
+    g.fillStyle = 'rgba(0,0,0,0.75)';
+    for (const S of an.sections) g.fillRect(S.start / an.duration * W, 0, Math.max(1, W / 500), H);
+    return c;
   }
-  function setView(k, v) { view[k] = v; applyView(); }
-  const viewMenu = h('div', { class: 'view-menu glass chrome', hidden: true });
-  document.body.append(viewMenu);
-  function toggleViewMenu(anchor) {
-    if (!viewMenu.hidden) { viewMenu.hidden = true; return; }
-    viewMenu.replaceChildren(
-      h('b', {}, 'Show on screen'),
-      ...VIEW_ITEMS.map(([k, label]) => toggle(label, () => view[k], v => setView(k, v))),
-      h('b', { class: 'menu-gap' }, 'Easy on the computer'),
-      toggle('60 frames a second', () => app.perf.cap60, v => app.setCap60(v), 'on a 120 Hz screen, drawing every refresh works the GPU twice as hard for motion this slow. Off: every refresh.'),
-      h('button', { class: 'btn wide', onclick: () => { viewMenu.hidden = true; app.toggleUI(); } }, 'Hide everything (H)'));
-    const r = anchor.getBoundingClientRect();
-    viewMenu.style.top = `${r.bottom + 8}px`;
-    viewMenu.style.right = `${Math.max(8, innerWidth - r.right)}px`;
-    viewMenu.hidden = false;
-  }
-  addEventListener('pointerdown', e => {
-    if (!viewMenu.hidden && !viewMenu.contains(e.target) && !e.target.closest?.('.act-view')) viewMenu.hidden = true;
-  });
-
-  // ---------------------------------------------------------------- tool dock (+ add-ons you pinned)
-  function renderDock() {
-    const tools = h('div', { class: 'tools' }, TOOLS.map((t, i) =>
-      h('button', {
-        class: `tool${app.tool === t.id ? ' on' : ''}`, 'data-tip': `${t.tip} (${i + 1})`, 'aria-label': t.name,
-        onclick: () => app.setTool(t.id), html: `${icon(t.icon)}<span>${t.name}</span>`,
-      })));
-    const b = app.brush;
-    const mini = (label, key, min, max) => {
-      const s = slider(label, { min, max, get: () => b[key], set: v => { b[key] = v; app.updateRing(); } });
-      s.classList.add('mini');
-      return s;
-    };
-    const pinned = ADDS.filter(a => app.adds[a.id].pinned);
-    // figures you dragged onto the toolbar: each one is a tool like the hand
-    const figTools = h('div', { class: `fig-tools${app.figTools.length ? '' : ' empty'}` },
-      app.figTools.map(id => {
-        const f = FIGURES[FIGURE_INDEX[id]];
-        return h('button', {
-          class: `tool fig-tool${app.tool === `fig:${id}` ? ' on' : ''}`, draggable: 'true',
-          'data-tip': `${f.name}: hold on the sheet to push it through (right-click, or drag it off, to take it away)`, 'aria-label': f.name,
-          onclick: () => app.setTool(`fig:${id}`),
-          oncontextmenu: e => { e.preventDefault(); app.removeFigTool(id); },
-          ondragstart: e => { e.dataTransfer.setData('text/x-figure', id); e.dataTransfer.effectAllowed = 'copyMove'; },
-          ondragend: e => { if (e.dataTransfer.dropEffect === 'none') app.removeFigTool(id); },
-          html: `${icon(f.group === 'Presences' ? 'face' : 'figure')}<span>${f.name.replace(/^The /, '').split(' ')[0]}</span>`,
-        });
-      }),
-      app.figTools.length ? null : h('span', { class: 'fig-drop-hint' }, 'drag figures here'));
-    dock.replaceChildren(
-      tools,
-      figTools,
-      h('button', {
-        class: `tool cine${app.cine.on ? ' on' : ''}`, 'data-tip': 'Cinematic camera: it drifts from shot to shot on its own (C)',
-        onclick: () => app.setCinema(!app.cine.on), html: `${icon('film')}<span>Cinematic</span>`,
-      }),
-      h('div', { class: 'tool-opts' },
-        mini('Size', 'size', 0.04, 0.5), mini('Strength', 'strength', 0.05, 1.5),
-        ['twist', 'bulge', 'pinch', 'smear'].includes(app.tool) ? mini('Spring back', 'spring', 0, 1) : null,
-        iconBtn('wipe', 'Put the view back (double-click)', () => app.resetView())),
-      h('div', { class: `dock-adds${pinned.length ? '' : ' empty'}` },
-        pinned.map(a => h('button', {
-          class: `tool add${app.adds[a.id].on ? ' on' : ''}`, 'data-tip': `${app.adds[a.id].on ? 'Take away' : 'Add'}: ${a.name.toLowerCase()}`,
-          onclick: () => app.setAdd(a.id, !app.adds[a.id].on), html: `${icon(a.icon)}<span>${a.name}</span>`,
-        })),
-        h('button', { class: 'tool add-more', 'data-tip': 'Add things to the world', onclick: () => openTab('add'), html: `${icon('plus')}<span>Add</span>` })));
+  function paintMap() {
+    if (!mapCanvas || !mapCanvas.isConnected) return;
+    const dpr = Math.min(2, devicePixelRatio || 1), r = mapCanvas.getBoundingClientRect();
+    const W = Math.round(r.width * dpr), H = Math.round(r.height * dpr);
+    if (!W || !H) return;
+    if (mapCanvas.width !== W || mapCanvas.height !== H) { mapCanvas.width = W; mapCanvas.height = H; mapCtx = null; }
+    mapCtx ||= mapCanvas.getContext('2d');
+    if (mapFor !== app.music.an || !map || map.width !== W || map.height !== H) { map = buildMap(W, H); mapFor = app.music.an; }
+    const a = app.audio, d = a.el?.duration || 1, t = a.el?.currentTime || 0, x = (t / d) * W;
+    mapCtx.clearRect(0, 0, W, H);
+    mapCtx.globalAlpha = 0.45;
+    mapCtx.drawImage(map, 0, 0);
+    mapCtx.globalAlpha = 1;
+    mapCtx.drawImage(map, 0, 0, x, H, 0, 0, x, H);
+    if (app.film.listening > 0) {
+      mapCtx.fillStyle = 'rgba(255,255,255,0.14)';
+      mapCtx.fillRect(0, H - 2 * dpr, W * app.film.listening, 2 * dpr);
+    }
+    mapCtx.fillStyle = '#fff';
+    mapCtx.fillRect(x - dpr * 0.5, 0, dpr, H);
+    const te = transport.querySelector('.tr-time');
+    if (te) te.textContent = fmtTime(t);
   }
 
-  // ---------------------------------------------------------------- tabs
-  const TABS = [
-    { id: 'looks', name: 'Looks', icon: 'grid' },
-    { id: 'tweak', name: 'Tweak', icon: 'sliders' },
-    { id: 'add', name: 'Add', icon: 'plus' },
-    { id: 'sound', name: 'Sound', icon: 'music' },
-  ];
-  function renderTabs() {
-    tabsEl.replaceChildren(h('div', { class: 'tabbar' }, TABS.map(t =>
-      h('button', { class: `tab${tab === t.id ? ' on' : ''}`, onclick: () => openTab(t.id), html: `${icon(t.icon)}<span>${t.name}</span>` }))));
-  }
-  function openTab(id) {
-    tab = id;
-    if (!view.panel) setView('panel', true);
-    renderTabs();
-    renderBody();
-    body.scrollTop = 0;
+  // ---------------------------------------------------------------- panels
+  function openTab(id, force) {
+    const closing = tab === id && !force;
+    tab = closing ? null : id;
+    panel.hidden = closing;
+    document.body.classList.toggle('panel-closed', closing);
+    renderDock();
+    if (!closing) { renderBody(); body.scrollTop = 0; }
   }
   function renderBody() {
+    if (!tab) return;
     const keep = body.scrollTop;
-    meters = null;
-    const v = { looks: renderLooks, tweak: renderTweak, add: renderAdd, sound: renderSound }[tab]();
+    const meta = TABS.find(t => t.id === tab);
+    panelHead.replaceChildren(h('b', {}, meta.name), iconBtn('x', 'Close', () => openTab(tab)));
+    const v = { patterns: renderPatterns, figures: renderFigures, sound: renderSound, tweak: renderTweak }[tab]();
     body.replaceChildren(...[v].flat(4).filter(Boolean));
     body.scrollTop = keep;
   }
 
-  // ---------------------------------------------------------------- Looks
+  // ---------------------------------------------------------------- Patterns
   const thumbQueue = [];
   function thumb(id) {
     const img = h('img', { class: 'thumb', src: app.thumbs[id] || BLANK, alt: '' });
@@ -280,143 +309,67 @@ export function createUI(app) {
     const next = () => {
       const job = thumbQueue.shift();
       if (!job) { pumping = false; return; }
-      job[1].src = app.thumb(job[0]);
-      setTimeout(next, 16);
+      if (job[1].isConnected) job[1].src = app.thumb(job[0]);
+      else if (tab === 'patterns') app.thumb(job[0]);
+      setTimeout(next, 24);
     };
-    setTimeout(next, 16);
+    setTimeout(next, 24);
   }
 
-  function renderLooks() {
-    const card = id => h('button', { class: `card${app.lookId === id ? ' on' : ''}`, title: LOOKS[id].blurb, onclick: () => { app.pickLook(id); } },
+  let patternGroup = 'all';
+  function renderPatterns() {
+    const card = id => h('button', { class: `card${app.lookId === id ? ' on' : ''}`, 'data-look': id, title: LOOKS[id].blurb, onclick: () => app.pickLook(id) },
       thumb(id), h('span', {}, LOOKS[id].name, app.isEdited(id) ? h('i', { class: 'dot', title: 'You tweaked this one' }) : null));
-    const saves = app.saves.length ? h('div', { class: 'group' },
-      h('div', { class: 'group-head' }, h('b', {}, 'Saved'), h('small', {}, 'yours, kept in this browser')),
+    const saves = app.saves.length && patternGroup === 'all' ? h('div', { class: 'group' },
+      h('div', { class: 'group-head' }, h('b', {}, 'Saved')),
       h('div', { class: 'cards' }, app.saves.map(sv => h('div', { class: 'card save' },
         h('button', { class: 'card-hit', onclick: () => app.openSave(sv.id) }, h('img', { class: 'thumb', src: sv.thumb || BLANK, alt: '' }), h('span', {}, sv.name)),
         h('button', { class: 'card-x', 'aria-label': `Delete ${sv.name}`, html: icon('x'), onclick: () => app.deleteSave(sv.id) }))))) : null;
     return [
+      chips([['all', 'All'], ...GROUPS.map(([id, name]) => [id, name])], id => patternGroup === id, id => { patternGroup = id; renderBody(); body.scrollTop = 0; }, 'tabs-chips'),
       saves,
-      GROUPS.map(([g, name, blurb]) => h('div', { class: 'group' },
+      GROUPS.filter(([g]) => patternGroup === 'all' || patternGroup === g).map(([g, name, blurb]) => h('div', { class: 'group' },
         h('div', { class: 'group-head' }, h('b', {}, name), h('small', {}, blurb)),
         h('div', { class: 'cards' }, Object.keys(LOOKS).filter(id => LOOKS[id].group === g).map(card)))),
-      h('div', { class: 'foot' },
-        slider('Glide to a new look', { min: 0.2, max: 8, step: 0.1, fmt: v => `${v.toFixed(1)} s`, get: () => app.glide, set: v => { app.glide = v; } }),
-        h('p', { class: 'muted small' }, '← → step through the looks · D surprise · E explore')),
     ];
   }
 
-  // ---------------------------------------------------------------- Tweak
-  // most used first: color, this look's own sliders, lines & motion, the camera; then the feel knobs; the rest folded
-  let resetBtn = null, feelReset = null, viewRows = [];
-  function renderTweak() {
-    const L = LOOKS[app.lookId], v = look(app.lookId);
-    resetBtn = h('button', { class: 'btn', disabled: !app.isEdited(app.lookId), onclick: () => app.resetLook(), html: `${icon('reset')}<span>Reset</span>` });
-    const has = k => Math.abs(v[k] || 0) > 0.001;
-    const rate = has('flyRate') ? 'flyRate' : has('objSpin') ? 'objSpin' : has('orbitRate') ? 'orbitRate' : null;
-    const shown = new Set([...L.tweaks, 'freq', 'thick', 'spinRate', 'flow', 'swell', rate,
-      'paper', 'ink', 'ink2', 'fog', 'bands', 'hueRate', 'glow', 'glowColor']);
-    const MORE = [['lines', 'Lines'], ['bend', 'Bend'], ['shape', 'Relief'], ['space', 'Space'], ['objects', 'Objects'], ['camera', 'The look’s own camera'], ['motion', 'Speeds'], ['look', 'Light & finish'], ['music', 'Music reactions']];
-    const swatch = p => h('button', {
-      class: 'swatch', title: p.name, 'aria-label': p.name,
-      style: `--paper:${p.paper};--ink:${p.ink};--ink2:${p.ink2 || p.ink}`, onclick: () => { app.applyPalette(p); renderBody(); },
-    });
-    return [
-      h('div', { class: 'tweak-head' },
-        h('div', {}, h('b', {}, L.name), h('small', {}, L.blurb)),
-        h('div', { class: 'tweak-btns' },
-          resetBtn,
-          iconBtn('save', 'Save it (it shows up in Looks)', () => { const n = prompt('Name it', `${L.name} (mine)`); if (n?.trim()) app.saveLook(n.trim().slice(0, 40)); }))),
-      h('div', { class: 'swatches' }, PALETTES.map(swatch)),
-      section('This look', null, L.tweaks.map(k => lookSlider(k))),
-      section('Lines & motion', null,
-        lookSlider('freq'), lookSlider('thick'), lookSlider('spinRate'), lookSlider('flow', { min: -3, max: 3 }),
-        lookSlider('swell', { label: 'Waves rolling through' }),
-        rate ? lookSlider(rate) : null),
-      cameraSection(),
-      section('Feel', 'works on every look',
-        h('div', { class: 'knobs' },
-          KNOBS.map(k => knob(k, () => app.feel[k.id], x => { app.feel[k.id] = x; feelReset.disabled = !feelMoved(app.feel); }))),
-        h('div', { class: 'knobs-foot' },
-          (feelReset = h('button', { class: 'link-btn', disabled: !feelMoved(app.feel), onclick: () => { app.resetFeel(); renderBody(); } }, 'Center them')))),
-      h('div', { class: 'sub-label' }, 'More'),
-      fold('more-color', 'Color', 'your own',
-        h('div', { class: 'color-row' }, ['paper', 'ink', 'ink2', 'fog'].map(colorPick)),
-        lookSlider('bands', { label: 'Every other line in the second ink' }),
-        lookSlider('hueRate', { label: 'Color cycle' }),
-        lookSlider('glow'),
-        toggle('Keep these colors when I change look', () => app.keepColors, on => app.setKeepColors(on))),
-      MORE.map(([g, name]) => {
-        const ps = PARAMS.filter(p => p.group === g && p.label && !shown.has(p.name));
-        return ps.length ? fold(`more-${g}`, name, `${ps.length}`, ps.map(p => lookSlider(p.name))) : null;
-      }),
-      h('p', { class: 'muted small foot' }, 'Your tweaks stay with this look until you Reset it. Double-click a slider to put just that one back. A pink ∿ means it follows the music.'),
-    ];
+  // ---------------------------------------------------------------- Figures
+  const STYLES = [['contour', 'Contours'], ['silhouette', 'Silhouette'], ['draped', 'Draped'], ];
+  function figCard(f) {
+    const A = app.adds.figures, on = A.on && A.pick === f.id;
+    return h('button', {
+      class: `fig-card${on ? ' on' : ''}`, title: f.blurb, onclick: () => { if (on) app.setAdd('figures', false); else app.pickFigure(f.id); },
+    }, h('img', { src: `assets/figures/${f.id}.png`, alt: '' }), h('span', {}, f.name));
   }
-
-  // the camera is yours, across looks: turn, tilt and zoom it, or let the cinematic camera drive
-  function cameraSection() {
-    const C = app.cine, V = app.view;
-    const deg = x => `${Math.round(x * 57.3)}°`;
-    const wrap = a => a - Math.PI * 2 * Math.round(a / (Math.PI * 2));
-    viewRows = [
-      slider('Tilt toward the horizon', { min: -0.4, max: 1.4, get: () => V.pitch, set: x => { V.pitch = x; }, fmt: deg, reset: () => { V.pitch = 0; } }),
-      slider('Turn', { min: -3.14, max: 3.14, get: () => wrap(V.yaw), set: x => { V.yaw = x; }, fmt: deg, reset: () => { V.yaw = 0; } }),
-      slider('Zoom', { min: 0.25, max: 3, get: () => 1 / V.zoom, set: x => { V.zoom = 1 / x; }, fmt: x => `${x.toFixed(2)}×`, reset: () => { V.zoom = 1; } }),
-    ];
-    return section('Camera', 'right-drag turns it · scroll zooms',
-      toggle('Cinematic', () => C.on, on => app.setCinema(on), 'sweeps from shot to shot on its own: top down, out to the horizon, tilted'),
-      C.on ? h('div', { class: 'cine' },
-        slider('Speed', { min: 0, max: 1, get: () => C.speed, set: x => { C.speed = x; }, fmt: x => (x < 0.25 ? 'drifting' : x < 0.5 ? 'cruising' : x < 0.8 ? 'sweeping' : 'racing') }),
-        slider('Waves through the lines', { min: 0, max: 1.5, get: () => C.waves, set: x => { C.waves = x; } }),
-        toggle('Change the look as it goes', () => C.looks, x => { C.looks = x; renderBody(); }),
-        C.looks ? chips(GROUPS.map(([id, name]) => [id, name]), id => C.groups.includes(id), id => {
-          C.groups = C.groups.includes(id) ? (C.groups.length > 1 ? C.groups.filter(x => x !== id) : C.groups) : [...C.groups, id];
-          renderBody();
-        }, 'small') : null) : null,
-      viewRows,
-      h('button', { class: 'link-btn', onclick: () => { app.resetView(); renderBody(); } }, 'Put the camera back'));
-  }
-
-  // ---------------------------------------------------------------- Add
-  function addHead(a) {
-    const A = app.adds[a.id];
-    return h('div', { class: `add-head${A.on ? ' on' : ''}` },
-      h('span', { class: 'add-icon', html: icon(a.icon) }),
-      h('div', { class: 'add-title' }, h('b', {}, a.name), h('small', {}, a.blurb)),
-      h('button', { class: `pin${A.pinned ? ' on' : ''}`, 'data-tip': A.pinned ? 'Unpin from the toolbar' : 'Pin to the toolbar', 'aria-label': 'Pin to the toolbar', html: icon('pin'), onclick: () => app.pinAdd(a.id, !A.pinned) }),
-      toggle('', () => A.on, on => app.setAdd(a.id, on)));
-  }
-  function addSlider(id, key, label, min, max, opts = {}) {
-    return slider(label, { min, max, step: opts.step || 0.01, fmt: opts.fmt, get: () => app.adds[id][key], set: x => app.setAddOption(id, key, x) });
-  }
+  const addSlider = (id, key, label, min, max, opts = {}) =>
+    slider(label, { min, max, step: opts.step || 0.01, fmt: opts.fmt, get: () => app.adds[id][key], set: x => app.setAddOption(id, key, x) });
   const showSlider = (key, label, min, max, opts = {}) => slider(label, { min, max, step: 0.01, hint: opts.hint, fmt: opts.fmt, get: () => app.show[key], set: x => { app.show[key] = x; } });
 
   function showBlock(cam) {
     const S = app.show;
     return [
-      h('div', { class: 'sub-label' }, cam ? 'How you show' : 'How it shows'),
-      showSlider('photo', 'Photo — the picture itself', 0, 1),
-      S.photo > 0 ? toggle('True color (off: the look’s two colors)', () => S.photoColor > 0.5, x => { S.photoColor = x ? 1 : 0; }) : null,
-      showSlider('relief', 'Relief — pushes the lines up', 0, 3),
-      showSlider('engrave', 'Engraved — drawn in line thickness', 0, 2),
+      showSlider('photo', 'Photo: the picture itself', 0, 1),
+      S.photo > 0 ? toggle('True color', () => S.photoColor > 0.5, x => { S.photoColor = x ? 1 : 0; }) : null,
+      showSlider('relief', 'Relief: pushes the lines up', 0, 3),
+      showSlider('engrave', 'Engraved: drawn in line thickness', 0, 2),
       cam ? showSlider('detail', 'Detail', 0, 1, { fmt: x => `${Math.round(480 + x * 800)} px`, hint: 'How sharp the camera picture is' }) : null,
-      toggle(cam ? 'Keep me still — the warps stay outside' : 'Keep it still — the warps stay outside', () => S.calm > 0.5, x => { S.calm = x ? 1 : 0; }),
-      showSlider('aura', 'Aura — the lines ripple off it with the sound', 0, 3),
+      toggle(cam ? 'Keep me still: the warps stay outside' : 'Keep it still: the warps stay outside', () => S.calm > 0.5, x => { S.calm = x ? 1 : 0; }),
+      showSlider('aura', 'Aura: the lines ripple off it with the sound', 0, 3),
       fold(cam ? 'cam-place' : 'pic-place', 'Place it', null,
         showSlider('size', 'Size', 0.2, 3), showSlider('x', 'Move ↔', -1.5, 1.5), showSlider('y', 'Move ↕', -1.5, 1.5),
         showSlider('soft', 'Smooth the relief', 0, 6), showSlider('warp', 'Bend it with the look', 0, 1),
         toggle('Invert', () => S.invert > 0.5, x => { S.invert = x ? 1 : 0; })),
     ];
   }
-
-  const SUBJECTS = [['body', 'My body'], ['bodyhands', 'Body + what I hold'], ['hands', 'Hands & what they hold'], ['face', 'My face'], ['scene', 'Whole picture'], ['box', 'A frame I set'], ['motion', 'Movement']];
+  const SUBJECTS = [['body', 'My body'], ['bodyhands', 'Body + what I hold'], ['hands', 'Hands'], ['face', 'My face'], ['scene', 'Whole picture'], ['box', 'A frame'], ['motion', 'Movement']];
   function cameraBody() {
     const tr = app.tracker, c = app.cam;
     const label = { loading: 'loading…', on: 'on', error: 'didn’t load', off: '' };
     const status = ['face', 'hands', 'body'].filter(k => tr.want[k] && tr.status[k] !== 'off').map(k => `${{ face: 'Face', hands: 'Hands', body: 'Body outline' }[k]}: ${label[tr.status[k]]}`).join(' · ');
     const b = c.box;
     return [
-      h('p', { class: 'muted small' }, 'Worked out in this browser — no picture leaves your computer.'),
+      h('p', { class: 'muted small' }, 'Worked out in this browser: no picture leaves your computer.'),
       h('div', { class: 'setups' }, app.SETUPS.map(S => h('button', { class: `setup${c.setup === S.id && app.adds.camera.on ? ' on' : ''}`, onclick: () => app.quickSetup(S.id) }, h('b', {}, S.name), h('small', {}, S.blurb)))),
       app.adds.camera.on ? [
         h('div', { class: 'sub-label' }, 'What counts as you'),
@@ -427,13 +380,12 @@ export function createUI(app) {
         ] : null,
         ['body', 'face', 'hands', 'bodyhands', 'box'].includes(c.subject) ? slider('Edge softness', { min: 0, max: 24, step: 0.5, fmt: x => `${x} px`, get: () => c.feather, set: x => { c.feather = x; } }) : null,
         showBlock(true),
-        toggle('Look around — move your head and the view shifts', () => c.look, x => app.setCam('look', x)),
+        toggle('Look around: move your head and the view shifts', () => c.look, x => app.setCam('look', x)),
         toggle('Movement makes ripples', () => c.motion, x => app.setCam('motion', x)),
         status ? h('p', { class: 'muted small' }, status) : null,
       ] : null,
     ];
   }
-
   function pictureBody() {
     const md = app.media;
     const file = h('input', { type: 'file', accept: 'image/*,video/*', hidden: true });
@@ -447,61 +399,48 @@ export function createUI(app) {
       h('div', { class: 'run-actions' },
         h('button', { class: 'btn', html: `${icon('image')}<span>${has && md.kind !== 'text' ? 'Another' : 'Image or video'}</span>`, onclick: () => file.click() }),
         has ? h('button', { class: 'btn', html: `${icon('x')}<span>Remove</span>`, onclick: () => app.clearPicture() }) : null),
-      file,
-      words,
+      file, words,
       chips(Object.keys(FONTS).map(f => [f, f]), f => md.text.font === f, f => { md.text.font = f; if (words.value.trim()) app.setWords(words.value, f); renderBody(); }, 'small'),
       has ? showBlock(false) : h('p', { class: 'muted small' }, 'Or drop a picture or video anywhere on the page.'),
     ];
   }
-
-  function renderAdd() {
+  function renderFigures() {
     const A = app.adds;
-    const bodies = {
-      camera: cameraBody,
+    const F = A.figures;
+    const others = {
       hands: () => [
-        h('p', { class: 'muted small' }, 'A mirrored pair — a left and a right, like someone behind the sheet pressing both palms toward you.'),
         addSlider('hands', 'size', 'Size', 0.4, 2.5), addSlider('hands', 'push', 'Push through', 0, 1), addSlider('hands', 'open', 'Fist ↔ open', 0, 1), addSlider('hands', 'apart', 'How far apart', 0.15, 1),
         toggle('Copy my hands (camera), finger by finger', () => A.hands.copy, x => { app.setAddOption('hands', 'copy', x); renderBody(); }),
       ],
-      figures: () => {
-        const F = A.figures, cur = FIGURES.find(f => f.id === F.pick) || FIGURES[0];
-        return [
-          h('p', { class: 'fig-now' }, h('b', {}, cur.name), h('span', {}, ` — ${cur.blurb}`)),
-          h('p', { class: 'muted small' }, 'Drag any of them onto the toolbar and it becomes a tool like the hand: it follows your cursor under the sheet, and pushes through while you hold.'),
-          FIGURE_GROUPS.map(g => [
-            h('div', { class: 'sub-label' }, g),
-            h('div', { class: 'chips small' }, FIGURES.filter(f => f.group === g).map(f => h('button', {
-              class: `chip fig-chip${F.pick === f.id ? ' on' : ''}${app.figTools.includes(f.id) ? ' tooled' : ''}`, title: f.blurb, draggable: 'true',
-              onclick: () => app.pickFigure(f.id),
-              ondragstart: e => { e.dataTransfer.setData('text/x-figure', f.id); e.dataTransfer.effectAllowed = 'copy'; },
-            }, f.name))),
-          ]),
-          h('div', { class: 'run-actions' },
-            h('button', { class: 'btn', html: `${icon('dice')}<span>Another</span>`, onclick: () => app.pickFigure(app.figures.nextId(F.pick)) }),
-            h('button', { class: 'btn', html: `${icon('pin')}<span>${app.figTools.includes(F.pick) ? 'On the toolbar' : 'Put on the toolbar'}</span>`, disabled: app.figTools.includes(F.pick), onclick: () => { app.addFigTool(F.pick); renderBody(); } })),
-          addSlider('figures', 'size', 'Size', 0.3, 2.5), addSlider('figures', 'depth', 'How far it pushes through', 0.2, 2), addSlider('figures', 'fabric', 'Fabric over it: tight ↔ loose', 0, 1),
-          addSlider('figures', 'spin', 'Turning', -1, 1),
-          toggle('Change with the music', () => F.cycle, x => { app.setAddOption('figures', 'cycle', x); renderBody(); }, 'a new one from the same group every few bars, each re-forming out of the last'),
-          F.cycle ? addSlider('figures', 'every', 'Every', 1, 16, { step: 1, fmt: x => `${x} bar${x > 1 ? 's' : ''}` }) : null,
-          toggle('Repeat across the sheet', () => F.repeat, x => app.setAddOption('figures', 'repeat', x)),
-          toggle('Follow my mouse', () => F.follow, x => app.setAddOption('figures', 'follow', x), 'its eyes follow you either way'),
-        ];
-      },
       face: () => [
         addSlider('face', 'size', 'Size', 0.4, 2.5), addSlider('face', 'depth', 'How deep it presses', 0.2, 1.5),
-        toggle('Copy my face (camera): mouth, blinks, head turn', () => A.face.copy, x => { app.setAddOption('face', 'copy', x); renderBody(); }),
+        toggle('Copy my face (camera)', () => A.face.copy, x => { app.setAddOption('face', 'copy', x); renderBody(); }),
       ],
       ball: () => [
-        h('p', { class: 'muted small' }, 'The lines part around it like water round a stone. With music it hops on the beat and ripples where it lands.'),
         addSlider('ball', 'size', 'Size', 0.04, 0.4), addSlider('ball', 'speed', 'Speed', 0, 1.5), addSlider('ball', 'flow', 'How much the lines part', 0, 2), addSlider('ball', 'wake', 'Wake behind it', 0, 2),
         toggle('Follow my mouse', () => A.ball.follow, x => app.setAddOption('ball', 'follow', x)),
       ],
       orbs: () => [addSlider('orbs', 'amount', 'How far they rise', 0.2, 1.5), addSlider('orbs', 'grid', 'Grid', 2, 12, { step: 1, fmt: x => `${x}×${x}` })],
+      camera: cameraBody,
       picture: pictureBody,
     };
+    const addHead = a => h('div', { class: `add-head${A[a.id].on ? ' on' : ''}` },
+      h('span', { class: 'add-icon', html: icon(a.icon) }), h('div', { class: 'add-title' }, h('b', {}, a.name), h('small', {}, a.blurb)),
+      toggle('', () => A[a.id].on, on => app.setAdd(a.id, on)));
     return [
-      h('p', { class: 'lead' }, 'Add things to whatever look is on. Pin the ones you like (', h('span', { class: 'inline-icon', html: icon('pin') }), ') and they get a switch in the toolbar.'),
-      ADDS.map(a => h('div', { class: `add-card${A[a.id].on ? ' on' : ''}` }, addHead(a), A[a.id].on || a.id === 'camera' || a.id === 'picture' ? h('div', { class: 'add-body' }, bodies[a.id]()) : null)),
+      F.on ? h('div', { class: 'fig-controls' },
+        chips(STYLES, id => F.style === id, id => { F.style = id; renderBody(); }, 'seg'),
+        addSlider('figures', 'size', 'Size', 0.4, 2.5),
+        addSlider('figures', 'depth', 'Under ↔ out', 0.3, 1.7),
+        toggle('It follows my mouse', () => F.follow, x => { app.setAddOption('figures', 'follow', x); if (x) app.setTool('figure'); }),
+        toggle('A crowd of them', () => F.repeat, x => app.setAddOption('figures', 'repeat', x)),
+      ) : h('p', { class: 'lead' }, 'Pick one and it comes up out of the pattern under your cursor. Hold the mouse to bring it further out; pick it again to let it sink.'),
+      FIGURE_GROUPS.map(g => h('div', { class: 'group' },
+        h('div', { class: 'group-head' }, h('b', {}, g)),
+        h('div', { class: 'fig-grid' }, FIGURES.filter(f => f.group === g).map(figCard)))),
+      fold('more-things', 'Other things to add', null,
+        ADDS.filter(a => a.id !== 'figures').map(a => h('div', { class: `add-card${A[a.id].on ? ' on' : ''}` }, addHead(a),
+          A[a.id].on ? h('div', { class: 'add-body' }, others[a.id]()) : (a.id === 'camera' || a.id === 'picture') ? h('div', { class: 'add-body' }, others[a.id]()) : null))),
     ];
   }
 
@@ -512,22 +451,23 @@ export function createUI(app) {
     file.addEventListener('change', () => { if (file.files.length) app.addSongs([...file.files]); });
     const list = app.songs.list;
     return [
+      list.length ? h('div', { class: 'song-list' }, list.map(sg => h('div', { class: `song${sg.id === cur ? ' on' : ''}` },
+        h('button', { class: 'song-name', onclick: () => (sg.id === cur ? (a.togglePlay(), setTimeout(() => { renderBody(); renderTransport(); }, 60)) : app.playSongId(sg.id)) },
+          h('span', { html: icon(sg.id === cur && a.playing ? 'pause' : 'play') }), h('span', {}, sg.name)),
+        h('button', { class: 'song-x', 'aria-label': `Forget ${sg.name}`, html: icon('x'), onclick: () => app.songs.remove(sg.id) }))))
+        : h('p', { class: 'lead' }, 'Drop a song anywhere, or add some here. It listens to the whole thing (the tune, the slides, the beat, the sections) and directs it. Nothing is uploaded.'),
       h('div', { class: 'run-actions' },
-        h('button', { class: 'btn grow', html: `${icon('music')}<span>Add songs</span>`, onclick: () => file.click() }),
-        h('button', { class: `btn${a.mode === 'mic' ? ' on' : ''}`, html: `${icon('mic')}<span>Live</span>`, 'data-tip': 'Listen to an input instead (set it up in Play live)', onclick: () => app.useMic() }),
-        a.mode !== 'off' ? iconBtn('stop', 'Stop', () => app.stopAudio()) : null),
+        h('button', { class: `btn grow${list.length ? '' : ' primary'}`, html: `${icon('music')}<span>Add songs</span>`, onclick: () => file.click() })),
       file,
-      list.length
-        ? h('div', { class: 'song-list' }, list.map(sg => h('div', { class: `song${sg.id === cur ? ' on' : ''}` },
-          h('button', { class: 'song-name', onclick: () => (sg.id === cur ? (a.togglePlay(), setTimeout(renderBody, 60)) : app.playSongId(sg.id)) },
-            h('span', { html: icon(sg.id === cur && a.playing ? 'pause' : 'play') }), h('span', {}, sg.name)),
-          h('button', { class: 'song-x', 'aria-label': `Forget ${sg.name}`, html: icon('x'), onclick: () => app.songs.remove(sg.id) }))))
-        : h('p', { class: 'muted small' }, 'Drop songs anywhere on the page — several at once is fine. They stay in this browser so you can flip between them. Nothing is uploaded.'),
     ];
   }
-
-  // play live: a guitar through an interface, a headset mic… optionally heard through the speakers
-  function liveSection() {
+  function statusLine() {
+    const F = app.film, an = app.music.an;
+    if (F.listening > 0) return h('p', { class: 'status', id: 'listenStatus' }, `Listening… ${Math.round(F.listening * 100)}%`);
+    if (!an || app.audio.mode !== 'file') return null;
+    return h('p', { class: 'status' }, `${Math.round(an.bpm)} bpm · ${KEYS[an.key]} ${an.minor ? 'minor' : 'major'} · ${an.sections.length} sections${F.score ? ` · ${F.score.scenes.length} scenes` : ''}`);
+  }
+  function liveFold() {
     const a = app.audio, I = a.input, D = app.devices, live = a.mode === 'mic';
     const pick = (list, value, onchange) => {
       const el = h('select', { class: 'select' }, list.map(d => h('option', { value: d.id, selected: d.id === value ? true : null }, d.label)));
@@ -535,75 +475,108 @@ export function createUI(app) {
       return el;
     };
     const outputs = [{ id: '', label: 'System default' }, ...D.outputs.filter(o => o.id && o.id !== 'default')];
-    return section('Play live', live ? `● ${a.name}` : 'a guitar, a mic, anything',
-      h('p', { class: 'muted small' }, 'Plug a guitar into an audio interface (a Focusrite, say) or use any mic — the lines move with what you play.'),
+    return fold('play-live', 'Play live', live ? `● ${a.name}` : 'a guitar, a mic',
+      h('p', { class: 'muted small' }, 'A guitar through an interface, or any mic. It tracks the note you’re playing as you play it.'),
       D.inputs.length ? h('label', { class: 'field' }, h('span', {}, 'Input'), pick(D.inputs, I.deviceId, id => app.useInput(id))) : null,
       h('div', { class: 'run-actions' },
         live
           ? h('button', { class: 'btn', html: `${icon('stop')}<span>Stop listening</span>`, onclick: () => app.stopAudio() })
           : h('button', { class: 'btn primary', html: `${icon('mic')}<span>Start listening</span>`, onclick: () => app.useInput() })),
-      toggle('Hear it through the speakers, like an amp', () => I.monitor, on => app.setMonitor(on), 'with a mic, use headphones — or it’ll howl'),
+      toggle('Hear it through the speakers', () => I.monitor, on => app.setMonitor(on), 'with a mic, use headphones or it’ll howl'),
       I.monitor ? slider('Volume', { min: 0, max: 1.5, get: () => I.volume, set: x => a.setMonitor(true, x) }) : null,
-      slider('Input level', { min: 0.2, max: 4, get: () => I.level, set: x => a.setInputLevel(x), fmt: x => `${x.toFixed(1)}×`, hint: 'How hard the input drives the speakers (the picture adjusts itself)' }),
-      a.canChooseOutput ? h('label', { class: 'field' }, h('span', {}, 'Sound comes out of'), pick(outputs, I.outputId, id => app.setOutput(id))) : null,
-      h('p', { class: 'muted small' }, 'Going through the browser adds a little delay. For none at all, monitor on the interface itself and leave the speakers off here.'));
+      slider('Input level', { min: 0.2, max: 4, get: () => I.level, set: x => a.setInputLevel(x), fmt: x => `${x.toFixed(1)}×` }),
+      a.canChooseOutput ? h('label', { class: 'field' }, h('span', {}, 'Sound comes out of'), pick(outputs, I.outputId, id => app.setOutput(id))) : null);
   }
-
-  const RECIPES = [
-    ['bulge', 'bass', 0.5, 'Bass bulges it'], ['frame', 'beat', -0.08, 'Beat punches in'], ['freq', 'beat', 0.12, 'Beat jumps the scale'],
-    ['twist', 'loud', 0.3, 'Loudness twists'], ['warpN', 'mid', 0.5, 'Mids melt it'], ['thick', 'high', 0.35, 'Highs thin the lines'],
-    ['spinRate', 'bass', 0.25, 'Bass spins it'], ['vortex', 'loud', 0.25, 'Loudness winds the vortex'], ['flow', 'bass', 0.3, 'Bass pushes the lines'],
-  ];
   function renderSound() {
-    const S = app.sound;
-    const ss = (key, label, max, hint) => slider(label, { min: 0, max, hint, get: () => S[key], set: x => { S[key] = x; } });
-    const bar = label => { const fill = h('i'); const el = h('div', { class: 'meter' }, h('span', {}, label), h('div', { class: 'meter-bar' }, fill)); el.fill = fill; return el; };
-    meters = { bass: bar('Bass'), mid: bar('Mids'), high: bar('Highs') };
-    const tieOn = ([key, src]) => app.ties[key]?.src === src;
-    const t = app.tempo;
+    const F = app.film, S = app.sound, t = app.tempo;
+    const row = (label, items, key) => h('div', { class: 'opt-row' }, h('span', {}, label), chips(items, id => F[key] === id, id => app.setFilmOption(key, id), 'seg'));
     return [
-      section('Songs', app.audio.mode === 'file' ? `♪ ${app.audio.name}` : app.audio.mode === 'mic' ? 'listening live instead' : 'nothing playing', songsBlock(),
-        h('div', { class: 'meters' }, meters.bass, meters.mid, meters.high)),
-      liveSection(),
-      section('How hard it hits', null,
-        chips(Object.entries(app.LEVELS).map(([id, L]) => [id, L.name]), id => S.level === id, id => { app.setLevel(id); renderBody(); }),
-        h('p', { class: 'muted small' }, app.LEVELS[S.level]?.blurb),
-        ss('amount', 'How much the music moves it', 2, 'Scales the sway, the thump, loudness → intensity and every tie')),
-      section('The sound itself', 'it bends the picture',
-        ss('wave', 'Sound wave', 2, 'Like an oscilloscope: the lines become traces of the waveform'),
-        ss('spectrum', 'Spectrum spikes', 2, 'Rings spike with the frequencies, bass to treble round the circle'),
-        ss('land', 'Sound landscape', 2, 'The sheet rises into hills of the spectrum (best tilted back — try Line Landscape)')),
-      section('Your things', 'when you’ve added them',
-        ss('ballBounce', 'The ball hops on the beat', 1.5), ss('handsGrab', 'The hands grab on the bar', 1.5), ss('orbsBass', 'The orbs swell with the bass', 2)),
-      section('Ties', 'a value follows the music',
-        chips(RECIPES.map(r => [`${r[0]}|${r[1]}`, r[3]]), id => tieOn(id.split('|')), id => {
-          const r = RECIPES.find(x => `${x[0]}|${x[1]}` === id);
-          app.setTie(r[0], tieOn(r) ? null : r[1], tieOn(r) ? undefined : r[2]);
-          renderBody();
-        }, 'small'),
-        Object.entries(app.ties).map(([key, tie]) => {
-          const row = slider(`${SOURCES[tie.src]} → ${labelOf(key)}`, { min: -1, max: 1, get: () => app.ties[key]?.amt ?? 0, set: x => { if (app.ties[key]) app.ties[key].amt = x; } });
-          row.classList.add('tie');
-          row.top.insertBefore(h('button', { class: 'mod-x', 'aria-label': 'Remove', html: icon('x'), onclick: () => { app.setTie(key, null); renderBody(); } }), row.top.lastChild);
-          return row;
-        }),
-        h('p', { class: 'muted small' }, 'Any slider in Tweak can follow the music too — click its ∿.')),
-      section('Tempo', t.fromSong ? 'from the song' : 'for the bar sway',
+      songsBlock(),
+      statusLine(),
+      h('section', { class: 'sec' },
+        toggle('Direct it for me', () => F.auto, on => app.setFilmOption('auto', on), 'scenes change with the song, on its sections'),
+        F.auto ? h('div', { class: 'opts' },
+          row('Color', [['bw', 'B&W'], ['accent', 'One color'], ['full', 'Full']], 'color'),
+          row('Figures', [['none', 'None'], ['some', 'Some'], ['lots', 'Lots']], 'figures'),
+          row('Places', [[false, 'Flat'], [true, 'Flat + 3D']], 'worlds'),
+          row('Pace', [['slow', 'Slow'], ['normal', 'Normal'], ['fast', 'Fast']], 'pace'),
+          h('button', { class: 'btn wide', html: `${icon('dice')}<span>Another take</span>`, onclick: () => app.setFilmOption('seed', F.seed + 1) })) : null),
+      h('section', { class: 'sec' },
+        h('div', { class: 'opt-row' }, h('span', {}, 'It follows'), chips(Object.entries(app.MOODS).map(([id, M]) => [id, M.name]), id => F.mood === id, id => { app.setMood(id); renderBody(); }, 'seg')),
+        h('p', { class: 'muted small' }, app.MOODS[F.mood]?.blurb),
+        slider('How much', { min: 0, max: 2, get: () => S.amount, set: x => { S.amount = x; } })),
+      liveFold(),
+      fold('sound-fine', 'Fine control', null,
+        slider('Spectrum spikes', { min: 0, max: 2, get: () => S.spectrum, set: x => { S.spectrum = x; } }),
+        slider('Landscape of the sound', { min: 0, max: 2, get: () => S.land, set: x => { S.land = x; } }),
+        slider('The ball hops', { min: 0, max: 1.5, get: () => S.ballBounce, set: x => { S.ballBounce = x; } }),
+        slider('The hands grab', { min: 0, max: 1.5, get: () => S.handsGrab, set: x => { S.handsGrab = x; } }),
+        slider('The orbs swell', { min: 0, max: 2, get: () => S.orbsBass, set: x => { S.orbsBass = x; } }),
         slider('Tempo', { min: 40, max: 180, step: 0.5, fmt: x => `${x.toFixed(1)} bpm`, get: () => t.bpm, set: x => { t.bpm = x; t.fromSong = false; } }),
         h('div', { class: 'tempo-row' },
           h('button', { class: 'btn', onclick: e => { e.currentTarget.textContent = `Tap · ${app.tapTempo()}`; } }, 'Tap the beat'),
-          h('span', { class: 'muted small' }, 'Beats per bar'),
-          chips([[2, '2'], [3, '3'], [4, '4']], n => t.beatsPerBar === n, n => { t.beatsPerBar = n; renderBody(); }, 'small'))),
-      section('Change look by itself', null,
-        chips([['off', 'Off'], ['song', 'While music plays'], ['always', 'Always']], id => app.auto.when === id, id => { app.auto.when = id; renderBody(); }),
-        app.auto.when !== 'off' ? [
-          slider('Every', { min: 2, max: 32, step: 1, fmt: x => `${x} bars`, get: () => app.auto.every, set: x => { app.auto.every = x; } }),
-          chips(GROUPS.map(([id, name]) => [id, name]), id => app.auto.groups.includes(id), id => {
-            const G = app.auto.groups;
-            app.auto.groups = G.includes(id) ? (G.length > 1 ? G.filter(x => x !== id) : G) : [...G, id];
-            renderBody();
-          }, 'small'),
-        ] : null),
+          chips([[2, '2'], [3, '3'], [4, '4']], n => t.beatsPerBar === n, n => { t.beatsPerBar = n; renderBody(); }, 'small')),
+        Object.entries(app.ties).map(([key, tie]) => {
+          const r = slider(`${SOURCES[tie.src]} → ${labelOf(key)}`, { min: -1, max: 1, get: () => app.ties[key]?.amt ?? 0, set: x => { if (app.ties[key]) app.ties[key].amt = x; } });
+          r.classList.add('tie');
+          r.top.insertBefore(h('button', { class: 'mod-x', 'aria-label': 'Remove', html: icon('x'), onclick: () => { app.setTie(key, null); renderBody(); } }), r.top.lastChild);
+          return r;
+        }),
+        h('p', { class: 'muted small' }, 'Any slider in Tweak can follow the music too: click its ∿.')),
+    ];
+  }
+
+  // ---------------------------------------------------------------- Tweak
+  let resetBtn = null, feelReset = null, viewRows = [];
+  function renderTweak() {
+    const L = LOOKS[app.lookId], v = look(app.lookId);
+    resetBtn = h('button', { class: 'btn', disabled: !app.isEdited(app.lookId), onclick: () => app.resetLook(), html: `${icon('reset')}<span>Reset</span>` });
+    const has = k => Math.abs(v[k] || 0) > 0.001;
+    const rate = has('flyRate') ? 'flyRate' : has('objSpin') ? 'objSpin' : has('orbitRate') ? 'orbitRate' : null;
+    const shown = new Set([...L.tweaks, 'freq', 'thick', 'spinRate', 'flow', 'swell', rate, 'paper', 'ink', 'ink2', 'fog', 'bands', 'hueRate', 'glow', 'glowColor']);
+    const MORE = [['lines', 'Lines'], ['strange', 'Strange'], ['bend', 'Bend'], ['shape', 'Relief'], ['space', 'Space'], ['objects', 'Objects'], ['camera', 'The look’s own camera'], ['motion', 'Speeds'], ['look', 'Light & finish'], ['music', 'Music reactions']];
+    const swatch = p => h('button', {
+      class: 'swatch', title: p.name, 'aria-label': p.name,
+      style: `--paper:${p.paper};--ink:${p.ink};--ink2:${p.ink2 || p.ink}`, onclick: () => { app.applyPalette(p); renderBody(); },
+    });
+    const C = app.cine, V = app.view;
+    const deg = x => `${Math.round(x * 57.3)}°`;
+    const wrap = a => a - Math.PI * 2 * Math.round(a / (Math.PI * 2));
+    viewRows = [
+      slider('Tilt toward the horizon', { min: -0.4, max: 1.4, get: () => V.pitch, set: x => { V.pitch = x; }, fmt: deg, reset: () => { V.pitch = 0; } }),
+      slider('Turn', { min: -3.14, max: 3.14, get: () => wrap(V.yaw), set: x => { V.yaw = x; }, fmt: deg, reset: () => { V.yaw = 0; } }),
+      slider('Zoom', { min: 0.25, max: 3, get: () => 1 / V.zoom, set: x => { V.zoom = 1 / x; }, fmt: x => `${x.toFixed(2)}×`, reset: () => { V.zoom = 1; } }),
+    ];
+    return [
+      h('div', { class: 'tweak-head' },
+        h('div', {}, h('b', {}, L.name), h('small', {}, L.blurb)),
+        h('div', { class: 'tweak-btns' }, resetBtn,
+          iconBtn('save', 'Save it to Patterns', () => { const n = prompt('Name it', `${L.name} (mine)`); if (n?.trim()) app.saveLook(n.trim().slice(0, 40)); }))),
+      h('div', { class: 'swatches' }, PALETTES.map(swatch)),
+      L.tweaks.map(k => lookSlider(k)),
+      section('Motion', null,
+        ['freq', 'thick', 'spinRate'].filter(k => !L.tweaks.includes(k)).map(k => lookSlider(k)),
+        L.tweaks.includes('flow') ? null : lookSlider('flow', { min: -3, max: 3 }),
+        lookSlider('swell', { label: 'Waves rolling through' }), rate && !L.tweaks.includes(rate) ? lookSlider(rate) : null),
+      section('Camera', null,
+        toggle('Cinematic', () => C.on, on => app.setCinema(on), 'it flies from shot to shot by itself'),
+        C.on ? slider('Speed', { min: 0, max: 1, get: () => C.speed, set: x => { C.speed = x; }, fmt: x => (x < 0.25 ? 'drifting' : x < 0.5 ? 'cruising' : x < 0.8 ? 'sweeping' : 'racing') }) : null,
+        viewRows,
+        h('button', { class: 'link-btn', onclick: () => { app.resetView(); renderBody(); } }, 'Put the camera back')),
+      fold('tw-feel', 'Feel', 'calm, moving, bold',
+        h('div', { class: 'knobs' }, KNOBS.map(k => knob(k, () => app.feel[k.id], x => { app.feel[k.id] = x; feelReset.disabled = !feelMoved(app.feel); }))),
+        h('div', { class: 'knobs-foot' }, (feelReset = h('button', { class: 'link-btn', disabled: !feelMoved(app.feel), onclick: () => { app.resetFeel(); renderBody(); } }, 'Center them')))),
+      fold('more-color', 'Your own colors', null,
+        h('div', { class: 'color-row' }, ['paper', 'ink', 'ink2', 'fog'].map(colorPick)),
+        lookSlider('bands', { label: 'Every other line in the second ink' }),
+        lookSlider('hueRate', { label: 'Color cycle' }),
+        lookSlider('glow'),
+        toggle('Keep these colors when I change look', () => app.keepColors, on => app.setKeepColors(on))),
+      fold('more-all', 'Everything else', null, MORE.map(([g, name]) => {
+        const ps = PARAMS.filter(p => p.group === g && p.label && !shown.has(p.name));
+        return ps.length ? fold(`more-${g}`, name, `${ps.length}`, ps.map(p => lookSlider(p.name))) : null;
+      })),
+      slider('Glide to a new look', { min: 0.2, max: 8, step: 0.1, fmt: x => `${x.toFixed(1)} s`, get: () => app.glide, set: x => { app.glide = x; } }),
     ];
   }
 
@@ -617,10 +590,10 @@ export function createUI(app) {
     const cell = (img, label, onclick, cls = '') => h('button', { class: `ex-cell ${cls}`, onclick },
       img ? h('img', { src: img, alt: '' }) : h('span', { class: 'spinner' }), h('small', {}, label));
     const kids = X.kids.map((k, i) => cell(k.img, `#${i + 1}`, () => app.explorePick(i)));
-    const grid = [...kids.slice(0, 4), cell(X.parentImg, 'now — shuffle', () => app.exploreBreed(), 'parent'), ...kids.slice(4)];
+    const grid = [...kids.slice(0, 4), cell(X.parentImg, 'now: shuffle', () => app.exploreBreed(), 'parent'), ...kids.slice(4)];
     exploreEl.replaceChildren(
       h('div', { class: 'ex-head' },
-        h('div', {}, h('b', {}, 'Explore'), h('span', { class: 'muted small' }, 'Pick the one you like — it has 8 children. Keep going.')),
+        h('div', {}, h('b', {}, 'Breed'), h('span', { class: 'muted small' }, ' Pick the one you like: it has 8 children. Keep going.')),
         h('div', { class: 'ex-ctrls' },
           slider('Mutation', { min: 0.05, max: 1, get: () => X.strength, set: x => { X.strength = x; }, fmt: x => (x < 0.35 ? 'gentle' : x < 0.7 ? 'medium' : 'wild') }),
           chips(Object.keys(X.locks).map(k => [k, `keep ${k}`]), k => X.locks[k], k => { X.locks[k] = !X.locks[k]; renderExplore(); }, 'small'),
@@ -630,15 +603,14 @@ export function createUI(app) {
   }
 
   // ---------------------------------------------------------------- the first-run hint
-  const HINT_KEY = 'trippy.hint.v2';
+  const HINT_KEY = 'trippy.hint.v3';
   let hintShown = false;
   try { hintShown = !!localStorage.getItem(HINT_KEY); } catch {}
   function showHint() {
     if (hintShown) return;
-    hintEl.replaceChildren(
-      h('span', {}, h('b', {}, 'Drag'), ' to ripple · ', h('b', {}, 'right-drag'), ' to turn the camera · ', h('b', {}, 'scroll'), ' to zoom · ', h('b', {}, 'C'), ' for the cinematic camera.'),
-      h('button', { class: 'icon-btn', 'aria-label': 'Close', html: icon('x'), onclick: dismissHint }));
+    hintEl.textContent = 'Drag on it. Drop a song on it.';
     hintEl.hidden = false;
+    setTimeout(dismissHint, 7000);
   }
   function dismissHint() {
     if (hintEl.hidden) return;
@@ -648,19 +620,16 @@ export function createUI(app) {
   }
 
   // ---------------------------------------------------------------- live bits
-  let recTick = 0;
+  let mapTick = 0, recTick = 0;
   function tick(dt) {
-    if (meters) {
-      const a = app.audio;
-      meters.bass.fill.style.width = `${a.bass * 100}%`;
-      meters.mid.fill.style.width = `${a.mid * 100}%`;
-      meters.high.fill.style.width = `${a.high * 100}%`;
-    }
-    if (app.recording && (recTick += dt) > 0.5) {
+    idleT += dt;
+    const cl = document.body.classList;
+    if (idleT > 3 && !cl.contains('idle') && !tab && !app.explore.open && moreMenu.hidden && !document.querySelector('#bottom:hover, #corner:hover')) cl.add('idle');
+    if ((mapTick += dt) > 1 / 20) { mapTick = 0; paintMap(); }
+    if (app.recording && (recTick += dt) > 1) {
       recTick = 0;
-      const el = actionsEl.querySelector('.rec-time');
       const s = Math.floor((performance.now() - app.recordStart) / 1000);
-      if (el) el.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+      toast(`Recording ${fmtTime(s)}`);
     }
   }
 
@@ -668,29 +637,29 @@ export function createUI(app) {
     renderName();
     if (resetBtn) resetBtn.disabled = !app.isEdited(app.lookId);
     if (full && tab === 'tweak') renderBody();
-    if (tab === 'looks') {
-      const on = body.querySelector('.card.on span');
-      if (on && !on.querySelector('.dot') && app.isEdited(app.lookId)) on.append(h('i', { class: 'dot' }));
-    }
   }
 
-  applyView();
-  renderTop();
-  renderTabs();
-  renderBody();
+  document.body.classList.add('panel-closed');
+  renderCorner();
   renderDock();
-  renderNow();
+  renderTransport();
+  renderName();
   showHint();
 
   return {
-    toast, renderDock, renderExplore, dismissHint, setView, tick, openTab,
+    toast, renderDock, renderExplore, dismissHint, tick, openTab,
     get tab() { return tab; },
-    refresh() { renderTop(); renderTabs(); renderBody(); renderDock(); },
-    refreshTop: renderTop,
-    lookChanged() { renderName(); if (tab === 'looks' || tab === 'tweak') renderBody(); },
+    refresh() { renderCorner(); renderBody(); renderDock(); },
+    refreshTop: renderCorner,
+    lookChanged() {
+      renderName();
+      if (tab === 'tweak') renderBody();
+      if (tab === 'patterns') body.querySelectorAll('.card[data-look]').forEach(c => c.classList.toggle('on', c.dataset.look === app.lookId));
+    },
     lookEdited,
-    soundChanged() { renderNow(); if (tab === 'sound') renderBody(); },
-    addsChanged() { renderDock(); if (tab === 'add') renderBody(); },
+    soundChanged() { renderTransport(); if (tab === 'sound') renderBody(); },
+    listenProgress() { const el = document.getElementById('listenStatus'); if (el) el.textContent = `Listening… ${Math.round(app.film.listening * 100)}%`; },
+    addsChanged() { renderName(); renderDock(); if (tab === 'figures') renderBody(); },
     cinemaChanged() { renderDock(); if (tab === 'tweak') renderBody(); },
     viewChanged() { if (tab === 'tweak') viewRows.forEach(r => r.isConnected && r.sync()); },
   };

@@ -1,9 +1,10 @@
 // One WebGL2 context: the world pass (ray-marched, with echo trails), the brushes' distortion map, the
 // picture under the sheet (sharp, plus a blurred copy for the relief), the live sound, and the finishing pass.
-import { VERT, DISP_FRAG, COMP_FRAG, BLUR_FRAG } from './passes.js';
+import { VERT, DISP_FRAG, COMP_FRAG, BLUR_FRAG, LIVING_FRAG } from './passes.js';
 import { worldFrag } from '../engine/shader.js';
 import { SOUND_W, SOUND_ROWS, WAVE_ROWS } from '../audio.js';
 import { hexToRgb, SHADER_SLOTS } from '../engine/params.js';
+import { cameraFrame } from '../engine/camera.js';
 
 const SLOT = Object.fromEntries(SHADER_SLOTS.filter(s => s.channel == null).map((s, i) => [s.name, SHADER_SLOTS.indexOf(s)]));
 
@@ -38,7 +39,7 @@ export class Renderer {
     this.clearDisp = true;
     this.dispIdle = 0;
     this.camFrame = new Float32Array(9);  // right, up, back
-    this.figFrames = new Float32Array(27);
+    this.noFrame = new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]);
     this.zeroTex = this.makeTexture(1, 1, false);
     this.mediaTex = this.makeTexture(1, 1, false, true);
     this.mediaRaw = this.makeTexture(1, 1, false, true);
@@ -159,9 +160,9 @@ export class Renderer {
   }
 
   // the live sound: row 0 the waveform (0.5 = silence), rows 1–64 the spectrum's past, rows 65–128 the
-  // waveform's past — newest first
-  setSound(wave, hist, waveHist) {
-    const gl = this.gl, W = wave.length, H = 1 + hist.length / W + waveHist.length / W;
+  // waveform's past, rows 129–130 the melody's past (quick and slow) — newest first
+  setSound(wave, hist, waveHist, melody) {
+    const gl = this.gl, W = wave.length, H = 1 + hist.length / W + waveHist.length / W + 2;
     if (!this.soundTex) {
       this.soundTex = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, this.soundTex);
@@ -175,6 +176,8 @@ export class Renderer {
     this.soundBuf.set(wave, 0);
     this.soundBuf.set(hist, W);
     this.soundBuf.set(waveHist, W + hist.length);
+    if (melody) this.soundBuf.set(melody, W + hist.length + waveHist.length);
+    else this.soundBuf.fill(128, W + hist.length + waveHist.length);
     gl.bindTexture(gl.TEXTURE_2D, this.soundTex);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, W, H, gl.RED, gl.UNSIGNED_BYTE, this.soundBuf);
@@ -219,20 +222,46 @@ export class Renderer {
     this.mediaTex = C.tex;
   }
 
-  // the camera's frame and the way each figure faces, from the shader values: worked out here once a
-  // frame instead of in every pixel, and sent as uniforms, so the shader keeps its registers for marching
+  // the camera's frame, from the shader values: worked out here once a frame instead of in every pixel,
+  // and sent as uniforms, so the shader keeps its registers for marching
   setFrames(P) {
-    const cp = Math.cos(P[SLOT.pitch]), sp = Math.sin(P[SLOT.pitch]), cy = Math.cos(P[SLOT.yaw]), sy = Math.sin(P[SLOT.yaw]);
-    const cr = Math.cos(P[SLOT.roll]), sr = Math.sin(P[SLOT.roll]);
-    const right = [cy, sy, 0], up = [-sy * cp, cy * cp, sp], back = [sy * sp, -cy * sp, cp];
-    const F = this.camFrame;
-    for (let i = 0; i < 3; i++) { F[i] = right[i] * cr + up[i] * sr; F[3 + i] = up[i] * cr - right[i] * sr; F[6 + i] = back[i]; }
-    // a figure faces the camera's (eased) turn and tilt, tipped upright by its stand: a, b, then the tool
-    const G = this.figFrames, fy = P[SLOT.figCY], fp = P[SLOT.figCP], c = Math.cos(fy), s = Math.sin(fy);
-    [P[SLOT.figStA], P[SLOT.figStB], P[SLOT.ftSt]].forEach((stand, k) => {
-      const ph = fp + (1.5708 - fp) * stand, cph = Math.cos(ph), sph = Math.sin(ph);
-      G.set([c, s, 0, -s * cph, c * cph, sph, s * sph, -c * sph, cph], k * 9);
-    });
+    cameraFrame(P[SLOT.pitch], P[SLOT.yaw], P[SLOT.roll], this.camFrame);
+  }
+
+  // the living labyrinth: a few steps of its chemistry each frame, only while a look is using it.
+  // energy (0..1) pushes the feed, so loud passages grow new branches; a spot is a drop of B somewhere.
+  updateLiving(steps = 8, energy = 0, spot = null) {
+    const gl = this.gl;
+    if (!this.floatDisp) return;
+    if (!this.livingProg) {
+      this.livingProg = this.program(LIVING_FRAG);
+      this.livingT = [this.makeTarget(384, 384, true), this.makeTarget(384, 384, true)];
+      this.livingT.forEach(t => {
+        gl.bindTexture(gl.TEXTURE_2D, t.tex);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+      });
+      this.livingI = 0;
+      this.livingClear = true;
+    }
+    const P = this.livingProg, f = 0.037 + 0.006 * energy, k = 0.06 - 0.0012 * energy;
+    gl.useProgram(P.prog);
+    gl.uniform1i(P.loc('uPrev'), 0);
+    gl.uniform2f(P.loc('uRes'), 384, 384);
+    gl.uniform2f(P.loc('uFK'), f, k);
+    gl.viewport(0, 0, 384, 384);
+    gl.activeTexture(gl.TEXTURE0);
+    for (let i = 0; i < steps; i++) {
+      const src = this.livingT[this.livingI], dst = this.livingT[1 - this.livingI];
+      gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fb);
+      gl.bindTexture(gl.TEXTURE_2D, src.tex);
+      gl.uniform1f(P.loc('uClear'), this.livingClear ? 1 : 0);
+      gl.uniform4f(P.loc('uSpot'), spot ? spot[0] : 0, spot ? spot[1] : 0, spot ? spot[2] : 0, spot && i === 0 ? 1 : 0);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      this.livingClear = false;
+      this.livingI = 1 - this.livingI;
+    }
+    this.livingTex = this.livingT[this.livingI].tex;
   }
 
   // the brushes' distortion map. brush = { x, y, vx, vy, size, strength, mode, relax }
@@ -267,6 +296,7 @@ export class Renderer {
   render(P, rt, post) {
     const gl = this.gl, W = this.worldProg, u = n => W.loc(n);
     const prev = this.frames[this.fi], out = this.frames[1 - this.fi];
+    if (P[SLOT.living] > 0.001) this.updateLiving(rt.livingSteps ?? 8, rt.livingEnergy ?? 0, rt.livingSpot);
     gl.bindFramebuffer(gl.FRAMEBUFFER, out.fb);
     gl.viewport(0, 0, this.w, this.h);
     gl.useProgram(W.prog);
@@ -276,6 +306,7 @@ export class Renderer {
     bind(2, this.mediaTex, 'uMedia');
     bind(3, this.mediaRaw, 'uMediaSharp');
     bind(4, this.soundTex, 'uSound');
+    bind(5, this.livingTex || this.zeroTex, 'uLiving');
     gl.activeTexture(gl.TEXTURE0);
     gl.uniform1f(u('uMediaAspect'), this.mediaAspect);
     gl.uniform1fv(u('uFinger'), rt.fingers);
@@ -288,8 +319,7 @@ export class Renderer {
     gl.uniform3f(u('gRight'), F[0], F[1], F[2]);
     gl.uniform3f(u('gUp'), F[3], F[4], F[5]);
     gl.uniform3f(u('gBack'), F[6], F[7], F[8]);
-    gl.uniformMatrix3fv(u('uFigFrame'), false, this.figFrames);
-    gl.uniform2f(u('uFigSpin'), Math.cos(P[SLOT.figRot]), Math.sin(P[SLOT.figRot]));
+    gl.uniformMatrix3fv(u('uFigFrame'), false, rt.figFrame || this.noFrame);
     gl.uniform4fv(u('uRipples'), rt.ripples);
     let ripples = 0;
     for (let i = 0; i < rt.ripples.length; i += 4) if (rt.ripples[i + 3] > 0 && rt.realTime - rt.ripples[i + 2] < 5) ripples = 1;

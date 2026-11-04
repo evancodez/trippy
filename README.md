@@ -1,73 +1,36 @@
 # trippi
 
-A world of black-and-white op-art lines you can warp, ripple, twist and play music into. It can be flat or 3D.
+Op-art patterns you can warp, drown figures in, and play music into. Give it a song: it listens to the whole thing and directs it.
 
 No build step and no dependencies: plain HTML, ES modules and WebGL2.
 
-## How it's laid out
+## Using it
 
-The side panel has four tabs.
+Everything fades away when you stop moving the mouse. At the bottom:
 
-- **Looks**: every look, grouped by kind. Click one and everything glides there; the equation re-forms instead of cutting.
-  - **Lines**: Op Stripes, Squeeze, Lightning.
-  - **Rings & tunnels**: Ghost Rings, Tunnel, Square Tunnel, Diamonds, Spiral, Whirlpool.
-  - **Tiles**: Triangle Vortex, Vasarely, Dot Tunnel, Mandala.
-  - **3D sheets**: Silk, Chrome Silk, Line Landscape, Checker Hills, Triangle Floor, Endless Road, Dot Field, Orb Field.
-  - **Fly through**: Hallway, Triangle Shaft, Ring Tunnel, Lattice, Menger Sponge, Fractal Crystals, Colonnade.
-  - **Objects**: Striped Ball, Lumpy Blob, Impossible (Penrose), Möbius, Gyroscope.
-- **Tweak**: change the look you're on, most-used first.
-  - Color palettes, one click each.
-  - The four sliders that matter most for this look.
-  - Lines and motion: line count, weight, spin, flow, waves rolling through.
-  - **Camera**: tilt toward the horizon, turn and zoom, or switch on the **cinematic camera**.
-    - It sweeps from shot to shot on the bar: straight down, high, low across the lines to the horizon, tilted.
-    - In between it keeps flying: forward across open looks like a drone over a landscape, banking into its turns; around looks with a middle, circling them.
-    - **Speed** runs from drifting to racing. It can change the look as it goes and send waves through the lines.
-  - Three feel knobs that work on every look: Calm ↔ Wild, Still ↔ Moving, Thin ↔ Bold.
-  - Folded away: your own colors (a second ink on every other line, a color cycle, glow) and everything else by group.
-  - Tweaks stay with their look until you **Reset** it. A pink dot marks what you changed; double-click a slider to put just that one back. **Save** keeps a tweaked look in Looks.
-- **Add**: things you can put into any look. None is on until you add it, and you can pin any of them to the toolbar.
-  - **You (camera)**, with quick setups: Just me, Playing guitar, Hands & guitar, Lines over me, My face, Movement. Everything is worked out in the browser; no picture leaves your computer.
-  - **Hands**: a mirrored pair pressing through, or a copy of yours, finger by finger.
-  - **Figures**: shapes rising out of the sheet like the hands, drawn by the look's own lines bending over them. Their hollows (eye sockets, mouths, a pupil, a tunnel) go deep, through the fabric too. They turn to face the camera: from above they push up through the sheet; to a low camera they stand up out of the floor. Picking another in the same group makes the old one re-form into the new one; one from another group comes up after the old one sinks away. "Change with the music" moves on every few bars, within the group. They can also turn, follow your mouse, repeat across the sheet, sit tight or loose under the fabric, and push through more or less.
-    - *Presences*: a skull (its jaw moves with the music), a smooth ghost-in-the-shell face, the same face as a hollow mask, the Scream, singing lips, a breathing ribcage over a pit, someone trapped behind the sheet with palms pressed flat, an arm reaching out, Magritte's veiled Lovers, a Vitruvian figure, a meditator with a halo, praying hands.
-    - *Creatures*: a coiled serpent with its head up, a cobra, tentacles curling up from underneath, a pulsing jellyfish, a nautilus cut open to its chambers, mushrooms, a raven (wings beat with the music), a moth, a stag skull with antlers, a sitting cat.
-    - *Symbols*: an eyeball that follows you (its pupil a hole), a portal with a tunnel through the sheet, a trefoil knot, a hollow lattice orb, a tesseract that breathes with the music, a turning Merkaba, an ouroboros round a hole.
-    - **Drag any figure onto the toolbar** and it becomes a tool like the hand: it follows your cursor under the sheet and pushes through while you hold. Drag along the toolbar to reorder; right-click or drag off to remove.
-  - **Ghost face**: a face in the lines, or a copy of yours.
-  - **Ball**: a chrome ball the lines part around, with a turbulent wake (after Tame Impala's *Currents*). With music it hops on the beat and ripples where it lands.
-  - **Orbs** rising through the sheet.
-  - **Picture**: an image, a video or words.
-- **Sound**: your songs and how they move the picture.
-  - Songs you add are kept in this browser (IndexedDB) so you can flip between them. Nothing is uploaded.
-  - **Play live**: pick an input (a guitar through an audio interface such as a Focusrite, a headset mic, any mic).
-    - The browser's call processing (echo cancelling, noise suppression, auto gain) is off, and the input is mixed to mono so input 1 alone still fills both speakers.
-    - **Hear it through the speakers, like an amp**, with a volume, an input level, and a choice of output device (Chrome / Edge).
-    - Strums and plucks count as beats.
-  - **How hard it hits**: Off, Subtle, Lively (the default) or Wild.
-  - **The sound itself**:
-    - Each line carries the waveform from a slightly different moment: the newest down the middle, older ones further out, mirrored. The lines ripple outward with what you hear, and the waveform is auto-gained so a quiet guitar still makes big waves.
-    - Rings carry it round the circle and spike with the spectrum.
-    - The sheet can rise into a landscape of the spectrum, and the rolling waves grow when it's loud.
-  - What the music does to things you've added (the ball hops, the hands grab, the orbs swell).
-  - **Ties**: any slider can follow the bass, mids, highs, loudness, the beat or the bar (its ∿ button).
-  - Tempo, and changing look by itself (off unless you turn it on).
+- **Patterns** (`P`): every look. Click one and the whole equation glides there.
+  - **Solid**: flat, hard-edged black and white. Triangle Vortex, Endless Triangles (conformal: tiles keep their shape as they fall in for ever), Two Poles, Twin Whirlpools, Circle Limit (a real hyperbolic tiling, after Escher), Tumbling Blocks, Truchet, Blaze (after Riley), Stargate, Op Stripes, Squeeze, Vasarely…
+  - **Strange**: patterns out of mathematics and sound. Cymatics and Chladni Sand (the note decides the figure), Julia (a fractal walking with the tune), Quasicrystal, Agate, Ripple Tank, Living Labyrinth (reaction-diffusion: it grows by itself)…
+  - **Worlds**: the pattern as a place. Triangle Floor, Checker Hills, Line Landscape, Silk, Origami, Hobnail, Hallway, Menger Sponge…
+- **Figures** (`G`): things going under, or coming up. All silhouette, posed at an angle with the sheet cutting across them.
+  - *People*: the Hand, Not Waving, Creation, Skull, Ophelia, Icarus, Medusa, The Scream, The Lovers, Son of Man, Praying, Wanderer.
+  - *Beasts*: The Fluke, Sea Serpent, Kraken, Dalí's Elephant, Stag, Goya's Dog.
+  - *Monuments*: The Liner, Liberty, Moai, Steeple, Isle of the Dead, Providence, The Moon, The Eye, Monolith.
+  - Pick one and it comes up under your cursor and follows it exactly, leaning into the move and leaving a wake. Hold the mouse to bring it further out. Pick it again to let it sink.
+  - **Contours** draws it in its own sounding lines; **Silhouette** makes it a solid shape with a line of paper round it; **Draped** pours the pattern over it like the hand. **A crowd of them** makes a sea.
+  - *Other things to add* (in the same panel): a pair of hands, a ghost face, the chrome ball, orbs, you (the camera), a picture or words.
+- **Sound** (`M`): pick a song (or drop one anywhere). It's listened to once and remembered; nothing is uploaded.
+  - **Direct it for me** changes scenes with the song, landing them on its sections. Choose the **color** (B&W, one color, full), how many **figures**, **flat or 3D**, the **pace**, or **another take**.
+  - **It follows**: *Flow* rides the tune (slides, swells, sway) and the drums barely touch it. *Even* mixes them. *Hit* lets the drums lead.
+  - **Play live**: a guitar through an interface, or any mic. It tracks the note as you play.
+  - The bar above the dock is the song's map: its loudness with the tune's line through it. Click to go there.
+- **Tweak** (`T`): colors, this look's sliders, motion and camera; the rest folded away. Any slider can follow the music (its ∿ button), now including the melody, slides and sustain.
 
-**The toolbar:**
-- The left button uses the chosen tool:
-  - **Ripple**.
-  - **Twist**: hold it and it keeps winding, round and round; Alt or Option winds the other way.
-  - **Bulge**, **Pinch** and **Smear**.
-  - **Hand**: your cursor presses through from behind.
-  - **Camera**: drag to turn and tilt (drag up to look out to the horizon); Shift-drag slides.
-- Right-drag turns the camera with any tool. Scroll zooms; double-click puts the view back.
-- **Cinematic** (or `C`) hands the camera to the cinematic director.
-- *Size*, *Strength* and *Spring back* shape the tools.
-- Add-ons you pin show up as switches.
+**Tools**, right of those: Ripple, Twist, Bulge, Pinch, Smear, Figure, Camera (`1`–`7`). Click the current one for its size and strength. Right-drag turns the camera with any tool; scroll zooms; double-click puts it back. The film icon (`C`) is the cinematic camera.
 
-**Top bar:** Surprise and Explore (breed 8 variations of what you're looking at; pick one, repeat), then pause, picture, record (with the song), link, fullscreen and what's on screen. `H` hides everything.
+**Top right**: Surprise (`D`), and behind `···`: Breed this look (`E`), pause, picture, record (with the song), link, fullscreen, hide everything (`H`), and 60 fps.
 
-**Easy on the computer:** under "what's on screen", trippi draws 60 frames a second by default. On a 120 Hz screen that halves the GPU's work (heat, fans, battery) for motion this slow; switch it off to draw every refresh. On top of that, the shader is built with only the figures on screen, nothing is re-blurred or re-drawn that hasn't changed, and the resolution eases down on its own if a frame can't keep up, creeping back when it can.
+To go back to the version before this revamp: `git checkout before-revamp`.
 
 ## Run it locally
 
@@ -87,36 +50,31 @@ Import the GitHub repo in Vercel and keep the defaults: Framework Preset **Other
 
 ## How it works
 
-- **One ray-marched world** (`src/engine/shader.js`):
-  - A sheet of lines with a height field: folds, ripples, the face, the picture and the sound's landscape.
-  - Things that push through it: hands, orbs, objects, the ball. Soft unions stretch the lines over them like fabric.
-  - Spaces the sheet can melt into: a lattice, a Menger sponge, fractal crystals, a corridor. The floor can also drop away and leave objects floating.
-  - Flat looks are the same world seen straight on.
-- **One line equation**, painted on every surface:
-  - Straight lines, rings (round, square or diamond), a 1/r tunnel, spirals, checkers, triangles, moiré and contours are all weighted terms of one formula.
-  - On top go twist, vortex, bulge, waves or zigzags, melt, a squeeze band and a kaleidoscope.
-  - The lines are projected onto the world, or *wrapped* round walls and objects.
-- **A look is ~150 numbers** (`src/engine/params.js`, `src/engine/looks.js`).
-  - The world glides between them (`src/engine/world.js`).
-  - Speeds are added up per bar, so spins and flight stay smooth and settle back to rest.
-- **The music** arrives two ways:
-  - As levels: bass, mids, highs, loudness, beats and a bar clock (`src/audio.js`; the tempo comes from `src/analysis.js`).
-  - As the sound itself: a texture holding the live waveform (triggered so it stands still), its last ~2 s, and ~2.7 s of log-spaced spectrum, which all bend the line equation.
+- **One ray-marched world** (`src/engine/shader.js`): a sheet with a height field, and things joined to it with soft unions so the pattern pours over them. Flat looks are the same world seen straight on.
+- **One equation painted on every surface**: lines, rings, tunnels, spirals, checkers and triangles are weighted terms of one formula, with warps on top (twist, vortex, conformal maps, a floor and ceiling). Patterns that aren't lines (hyperbolic tiles, Truchet, cymatics, Julia, quasicrystal, reaction-diffusion) each give a value that crosses zero at its edges, so one threshold draws them all and they crossfade.
+- **A figure** (`src/engine/figures.js`) is a signed distance function with a pose, a waterline, and a bounding sphere. The fabric melts into it at the waterline and lets go higher up; rays that miss its sphere never evaluate it; a shader is compiled with only the figure on screen. The cursor is cast as a real ray onto the sheet (`src/engine/camera.js`), so it holds at any camera angle.
+- **Listening to a song** (`src/listen.js`, in a worker):
+  - harmonic/percussive separation by median-filtering the spectrogram, so drums and sustained sound are two signals;
+  - the melody: peaks of a long FFT → harmonic salience → a Viterbi path that prefers to move smoothly, fine enough to follow a slide guitar through its bends;
+  - chords and key; dynamic-programming beats; sections from a self-similarity novelty curve, each given a character (hush, flow, swell, pulse, peak).
+- **What it does with that** (`src/music.js`, `src/main.js`): the tune's curve is a row of a texture and flows out through the lines; the world leans with a slow version of it; a slide pushes the pattern along as the note moves. Drums are soft pushes that never touch the camera.
+- **The film** (`src/score.js`): scenes chosen per section, seeded by the song, so it can be rewound.
 
 ## Files
 
 | File | What's in it |
 | --- | --- |
-| `src/engine/shader.js` | The world: ray-marched sheet, hands, objects, spaces, the ball, the line equation, lighting, color |
-| `src/engine/params.js` | Every value of the world: ranges, groups, shader slots |
-| `src/engine/looks.js` | The looks (grouped, with their key sliders) and the color palettes |
-| `src/engine/world.js` | Gliding between looks, speeds, the music applied every frame |
-| `src/engine/feel.js` | The three feel knobs and breeding (Explore) |
-| `src/adds.js` | Add-ons: the ball's motion, the pair of hands, figures, the face, orbs |
-| `src/engine/figures.js` | The figure library: each one a 3D shape in GLSL. The world's shader is built with just the figures on screen, in the background |
-| `src/director.js` | The cinematic camera: shots, glides on the bar, drift |
-| `src/media.js`, `src/tracking.js` | The camera, pictures, video and words; face / hand / body / motion tracking (MediaPipe) |
-| `src/audio.js`, `src/analysis.js`, `src/songs.js` | Live audio (levels, beat, waveform, spectrum); tempo from a song; your song library |
-| `src/gl/renderer.js`, `src/gl/passes.js` | WebGL2: the world pass, brush distortion, picture relief, finishing pass |
-| `src/ui/ui.js`, `src/ui/kit.js` | The interface |
-| `src/main.js` | App state, looks and tweaks, tools, frame loop, songs, camera, recording, links |
+| `src/engine/shader.js` | The world, the line equation, the other patterns, color |
+| `src/engine/figures.js` | The figure library, each with its pose and waterline |
+| `src/engine/params.js`, `looks.js`, `world.js`, `feel.js` | Every value; the looks and palettes; gliding between them; breeding |
+| `src/engine/camera.js` | The camera on the CPU; a point on the screen → a point on the sheet |
+| `src/listen.js`, `listen.worker.js` | Listening to a whole song |
+| `src/music.js` | What the music is doing right now, from the analysis or live |
+| `src/score.js` | Scenes for a song |
+| `src/adds.js`, `src/director.js` | The figure's motion and the other add-ons; the cinematic camera |
+| `src/media.js`, `src/tracking.js` | The camera, pictures, video, words; face / hand / body tracking |
+| `src/audio.js`, `src/songs.js` | Live audio, live pitch; your song library and what was heard |
+| `src/gl/renderer.js`, `src/gl/passes.js` | WebGL2: the world pass, brushes, reaction-diffusion, finishing |
+| `src/ui/ui.js`, `src/ui/kit.js`, `styles.css` | The interface |
+| `src/main.js` | App state, tools, frame loop, songs, recording, links |
+| `assets/figures/` | The gallery's thumbnails |

@@ -17,8 +17,9 @@ const PLANAR = {
 const NEXT = { top: ['mid', 'low', 'tilted'], high: ['low', 'tilted'], mid: ['top', 'low'], low: ['top', 'high', 'mid', 'low'], tilted: ['top', 'high', 'low'] };
 const FLY = r => ({ pitch: r(-0.05, 0.3), roll: r(-0.5, 0.5), focal: r(0.9, 1.4), frame: 0.6 });
 const OBJECT = r => ({ pitch: r(0, 0.85), roll: r(-0.12, 0.12), focal: r(2.6, 4), frame: r(0.55, 0.8) });
-// looks you can fly across forever; the others have a middle worth keeping in view
-const OPEN = new Set(['lines', 'sheets']);
+// kind: 'open' (looks you can fly across for ever), 'center' (they have a middle worth keeping in view),
+// 'fly' (you're inside it) or 'object' (a thing in the dark)
+const OPEN = new Set(['open']);
 
 export class Director {
   constructor() {
@@ -81,7 +82,7 @@ export class Director {
     now.roll -= this.bank();
     let to;
     if (group === 'fly') to = FLY(r);
-    else if (group === 'dark') to = OBJECT(r);
+    else if (group === 'object') to = OBJECT(r);
     else {
       const opts = NEXT[this.kind] || ['top'];
       this.kind = opts[Math.floor(Math.random() * opts.length)];

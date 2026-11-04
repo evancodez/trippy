@@ -47,15 +47,16 @@ const GROUP_LOCKS = {
   colors: ['color', 'look'],
   camera: ['camera'],
   shapes: ['shape', 'space', 'objects'],
-  lines: ['lines', 'bend'],
+  lines: ['lines', 'bend', 'strange'],
 };
 const FEATURES = [
   { check: 1 }, { check: 1, tri: 1 }, { wAng: 1, wRad: 1, wLin: 0 }, { kaleido: 1 }, { moire: 1, wRad: 1, wLin: 0 },
   { radInv: 1, wRad: 1, wLin: 0 }, { square: 1, wRad: 1, wLin: 0 }, { vortex: 1.6 }, { pinch: 1 }, { wave: 1.2, zig: 1 },
   { pitch: 1.1, focal: 1.8 }, { folds: 1.2 }, { orbs: 1 }, { twist: 2 },
+  { conf: 1, spokes: 12, confA: 4, check: 1, tri: 1 }, { truchet: 1, freq: 20 }, { quasi: 1 }, { agate: 1 }, { blaze: 1, wRad: 1, wLin: 0 }, { ori: 1, pitch: 0.8, focal: 2 },
 ];
 // switches only come on whole (a 5% corridor is just a mess)
-const SWITCHES = new Set(['gyro', 'sponge', 'kifs', 'hall', 'columns', 'penrose', 'mobius', 'rings', 'blob', 'drop', 'wrap']);
+const SWITCHES = new Set(['gyro', 'sponge', 'hall', 'columns', 'penrose', 'mobius', 'blob', 'drop', 'wrap', 'hyper', 'cube', 'truchet', 'cym', 'julia', 'agate', 'wells', 'quasi', 'living', 'conf', 'planes']);
 
 // parent: full values (colors as rgb arrays) → a child set, ready for world.morphTo()
 export function breed(parent, strength = 0.5, locks = {}, seed = Math.random() * 1e9) {

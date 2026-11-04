@@ -1,26 +1,33 @@
 // Your songs, kept in this browser (IndexedDB) so you can flip between them in any mode, even after a
 // reload. Nothing is uploaded anywhere.
-const DB = 'trippy', STORE = 'songs', MAX = 30;
+const DB = 'trippy', STORE = 'songs', LISTENED = 'listened', MAX = 30;
 
 function openDB() {
   return new Promise((ok, fail) => {
-    const r = indexedDB.open(DB, 1);
-    r.onupgradeneeded = () => r.result.createObjectStore(STORE, { keyPath: 'id' });
+    const r = indexedDB.open(DB, 2);
+    r.onupgradeneeded = () => {
+      if (!r.result.objectStoreNames.contains(STORE)) r.result.createObjectStore(STORE, { keyPath: 'id' });
+      if (!r.result.objectStoreNames.contains(LISTENED)) r.result.createObjectStore(LISTENED);
+    };
     r.onsuccess = () => ok(r.result);
     r.onerror = () => fail(r.error);
   });
 }
 
 // run fn(store) in a transaction; resolves with the request's result (if fn returned a request)
-async function tx(mode, fn) {
+async function tx(mode, fn, store = STORE) {
   const db = await openDB();
   return new Promise((ok, fail) => {
-    const t = db.transaction(STORE, mode);
-    const req = fn(t.objectStore(STORE));
+    const t = db.transaction(store, mode);
+    const req = fn(t.objectStore(store));
     t.oncomplete = () => ok(req?.result);
     t.onerror = () => fail(t.error);
   });
 }
+
+// what was worked out about a song, kept so it only has to be listened to once
+export const loadListened = id => tx('readonly', st => st.get(id), LISTENED).catch(() => null);
+export const saveListened = (id, a) => tx('readwrite', st => st.put(a, id), LISTENED).catch(e => console.warn('could not keep the analysis', e));
 
 export const isSong = f => f.type.startsWith('audio/') || /\.(mp3|wav|m4a|aac|ogg|flac|opus)$/i.test(f.name);
 
@@ -60,6 +67,6 @@ export class SongLibrary {
   async remove(id) {
     this.list = this.list.filter(s => s.id !== id);
     this.onchange();
-    try { await tx('readwrite', st => st.delete(id)); } catch {}
+    try { await tx('readwrite', st => st.delete(id)); await tx('readwrite', st => st.delete(id), LISTENED); } catch {}
   }
 }

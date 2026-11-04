@@ -3,7 +3,7 @@
 // The camera and the picture go through media.js / tracking.js; the rest are written straight into the
 // world's values every frame (after the look and the music), so they ride along with whatever look is on.
 
-import { FIGURES, FIGURE_INDEX } from './engine/figures.js';
+import { FIGURES, FIGURE_INDEX, figureFrame } from './engine/figures.js';
 
 export const ADDS = [
   { id: 'camera', name: 'You', icon: 'camera', blurb: 'your camera, inside the lines' },
@@ -18,7 +18,7 @@ export const ADDS = [
 export const defaultAdds = () => ({
   camera: { on: false, pinned: false },
   hands: { on: false, pinned: false, size: 1, push: 0.35, open: 0.55, apart: 0.55, copy: false },
-  figures: { on: false, pinned: false, pick: 'skull', size: 1, depth: 1, fabric: 0.45, spin: 0, cycle: false, every: 4, repeat: false, follow: false },
+  figures: { on: false, pinned: false, pick: 'hand', style: 'contour', size: 1, depth: 1, fabric: 0.5, cycle: false, every: 8, repeat: false, follow: true },
   face: { on: false, pinned: false, size: 1, depth: 1, copy: false },
   ball: { on: false, pinned: false, size: 0.13, speed: 0.45, wake: 0.7, flow: 1, follow: false },
   orbs: { on: false, pinned: false, amount: 1, grid: 5 },
@@ -125,63 +125,54 @@ export function applyOrbs(v, cfg, pres, music, sound) {
   v.light = Math.max(v.light, 0.5 * pres);
 }
 
-// so a figure reads in any look (like the ghost face): light thins the ink on its slopes and the
-// lines bend over it
-export function figureLight(v, k) {
-  v.engrave = Math.max(v.engrave, 0.75 * k);
-  v.light = Math.max(v.light, 0.45 * k);
-  v.refract = Math.max(v.refract, 0.6 * k);
-}
+// how a figure is drawn: in its own contour lines, like a sounding chart; a solid shape with a line of paper
+// round it; or just the look's pattern poured over it, like the hand. (The monolith is always solid.)
+const FIG_STYLES = {
+  contour: f => ({ figInk: f.ink ?? 0, figCont: f.ink ? 0 : 55, figHalo: 0.013, figLens: 0 }),
+  silhouette: () => ({ figInk: 1, figCont: 0, figHalo: 0.02, figLens: 0.4 }),
+  draped: f => ({ figInk: f.ink ?? 0, figCont: 0, figHalo: 0, figLens: f.lens ?? 1.4 }),
+};
 
 // how much the fabric clings to a figure (its veil), as a soft-union radius
-export const figureSoft = (cfg, veil, S) => (0.02 + 0.2 * cfg.fabric * veil) * S;
+export const figureSoft = (cfg, veil, S) => (0.012 + 0.09 * cfg.fabric * veil) * S;
 
-// ---------------------------------------------------------------- figures pressing through the sheet
-// One figure at a time, and picking another doesn't cut: the old one re-forms into the new one.
-// With "change with the music" it moves on by itself every few bars. Eyes follow your pointer;
-// jaws and wings move with the sound.
+// ---------------------------------------------------------------- the figure going under
+// One at a time. It rises out of the sheet, holds its pose with the sheet cutting across it, and heaves a
+// little like something floating. With the mouse on it, it follows your cursor exactly (whatever the
+// camera's doing) and leans into the move; hold and it comes further out. Picking another: this one goes
+// under, then the next comes up.
 export class Figures {
   constructor() {
-    this.a = 0; this.b = 0; this.mix = 0;     // showing a, turning into b
-    this.t = 0;                               // its own clock (serpents slither, the ouroboros turns)
-    this.rot = 0;
+    this.a = FIGURE_INDEX.skull;              // showing
+    this.swap = null;                         // the one waiting for this one to go under
+    this.t = 0;                               // its own clock
     this.look = [0, 0];
     this.sing = 0;
     this.x = 0; this.y = 0; this.placed = false;
-    this.cy = null; this.cp = 0;              // which way they face: after the camera, unhurried
+    this.vx = 0; this.vy = 0;
+    this.press = 0;
+    this.cy = null; this.cp = 0;              // which way it faces: after the camera, unhurried
+    this.heave = 0;
+    this.frame = new Float32Array(9);
     this.nextBar = null; this.nextTime = 0;
-    this.swap = null;                         // one from another group, waiting for this one to sink away
   }
 
-  get current() { return FIGURES[this.swap ?? (this.mix > 0.5 ? this.b : this.a)].id; }
+  get current() { return FIGURES[this.swap ?? this.a].id; }
 
-  // one from the same group re-forms out of this one; one from another group waits for this one to sink
-  // away (main.js does that, while the shader for its group is built), then comes up
   pick(id) {
     const i = FIGURE_INDEX[id] ?? 0;
-    if (this.mix > 0) { this.a = this.mix > 0.5 ? this.b : this.a; this.mix = 0; }
-    this.swap = null;
-    if (i === this.a) return;
-    if (FIGURES[i].group !== FIGURES[this.a].group) { this.swap = i; return; }
-    this.b = i;
-    this.mix = 0.0001;
+    this.swap = i === this.a ? null : i;
   }
 
-  // the next one when changing with the music: another from the same group (so the shader already has
-  // it), never the same twice
   nextId(cur) {
-    const g = FIGURES[FIGURE_INDEX[cur] ?? 0].group, pool = FIGURES.filter(f => f.group === g && f.id !== cur);
+    const pool = FIGURES.filter(f => f.id !== cur && !f.special);
     return pool[Math.floor(Math.random() * pool.length)].id;
   }
 
-  // cfg: the add's settings; m: the music; pointer: where your pointer is on the sheet (or null); center: the view's middle
-  // Returns the id it moved on to, if it changed by itself this frame.
-  step(dt, cfg, m, pointer, center) {
+  // cfg: the add's settings; m: the music; aim: a function giving where a point on the figure's y axis has
+  // to be for it to sit under your cursor (or null: it stays at home), home: where it stays; held: mouse down
+  step(dt, cfg, m, aim, home, held, v) {
     let changed = null;
-    if (this.mix > 0 && this.canMorph !== false) {           // (once the shader can draw the new one)
-      this.mix = Math.min(1, this.mix + dt / 1.6);
-      if (this.mix >= 1) { this.a = this.b; this.mix = 0; }
-    }
     if (cfg.on && cfg.cycle) {
       if (m.on) {
         if (this.nextBar == null || this.nextBar > m.bar + cfg.every * 2) this.nextBar = Math.floor(m.bar) + cfg.every;
@@ -193,43 +184,63 @@ export class Figures {
       if (changed) { cfg.pick = changed; this.pick(changed); }
     } else this.nextBar = null;
     this.t += dt * (0.6 + (m.on ? m.loud : 0.4));
-    this.rot += dt * cfg.spin * 0.6;
-    // where it is: the middle of the view, or drifting after your pointer
-    const target = cfg.follow && pointer ? pointer : center;
-    if (!this.placed) { this.x = target[0]; this.y = target[1]; this.placed = true; }
-    const k = 1 - Math.exp(-dt * (cfg.follow ? 2.5 : 4));
-    this.x += (target[0] - this.x) * k; this.y += (target[1] - this.y) * k;
+    this.press += ((held ? 1 : 0) - this.press) * (1 - Math.exp(-dt * 5));
+    const f = FIGURES[this.a];
+    // which way it faces, a little behind the camera, so it watches you come round
+    if (this.cy == null) { this.cy = v.yaw; this.cp = v.pitch; }
+    const kc = 1 - Math.exp(-dt * 1.6);
+    this.cy += Math.atan2(Math.sin(v.yaw - this.cy), Math.cos(v.yaw - this.cy)) * kc;
+    this.cy = Math.atan2(Math.sin(this.cy), Math.cos(this.cy));
+    this.cp += (v.pitch - this.cp) * kc;
+    // it heaves on the water, leans into a move, and tips with the melody
+    const heaveA = 0.05 * Math.sin(this.t * 0.55), heaveB = 0.035 * Math.sin(this.t * 0.37 + 1.3);
+    const sp = v.frame / 0.6;
+    const lean = [clamp(-this.vx / sp * 0.16, -0.5, 0.5) + heaveA, clamp(-this.vx / sp * 0.22, -0.55, 0.55) + heaveB + (m.tilt || 0) * 0.22];
+    figureFrame(f, this.cy, this.cp, lean, this.frame);
+    const S = this.size = cfg.size * 1.06 * sp * (f.scale ?? 1) * (1 - 0.28 * Math.sin(clamp(this.cp, 0, 1.5))) * (cfg.repeat ? 0.72 : 1);
+    const Uz = this.frame[5];
+    // where it wants to be: with the point it's held by under your cursor, or at home
+    const hg = (f.grab ?? 0);
+    const lift = this.lift(cfg, m);
+    this.z = S * Uz * (lift - (f.water ?? 0));
+    let tx = home[0], ty = home[1];
+    if (aim) {
+      const on = aim(this.z + S * Uz * hg);
+      tx = on[0] - S * this.frame[3] * hg;
+      ty = on[1] - S * this.frame[4] * hg;
+    }
+    if (!this.placed) { this.x = tx; this.y = ty; this.placed = true; this.vx = this.vy = 0; }
+    const k = 1 - Math.exp(-dt * (aim ? 26 : 3));
+    const nx = this.x + (tx - this.x) * k, ny = this.y + (ty - this.y) * k;
+    const idt = 1 / Math.max(dt, 1e-3), kv = 1 - Math.exp(-dt * 7);
+    this.vx += ((nx - this.x) * idt - this.vx) * kv;
+    this.vy += ((ny - this.y) * idt - this.vy) * kv;
+    this.x = nx; this.y = ny;
     // eyes: on your pointer, or wandering
     let lx = Math.sin(this.t * 0.7) * 0.6, ly = Math.sin(this.t * 0.53 + 1) * 0.4;
-    if (pointer) { lx = clamp((pointer[0] - this.x) * 2.2, -1, 1); ly = clamp((pointer[1] - this.y) * 2.2, -1, 1); }
+    if (this.pointer) { lx = clamp((this.pointer[0] - this.x) / sp * 2.2, -1, 1); ly = clamp((this.pointer[1] - this.y) / sp * 2.2, -1, 1); }
     this.look[0] += (lx - this.look[0]) * (1 - Math.exp(-dt * 6));
     this.look[1] += (ly - this.look[1]) * (1 - Math.exp(-dt * 6));
-    const sing = m.on ? clamp(m.mid * 1.2 + m.bass * 0.4 - 0.15, 0, 1) : 0.15 + 0.15 * Math.sin(this.t * 1.3);
+    const sing = m.on ? clamp((m.voice ?? m.mid) * 1.1 + m.bass * 0.2 - 0.1, 0, 1) : 0.15 + 0.15 * Math.sin(this.t * 1.3);
     this.sing += (sing - this.sing) * (1 - Math.exp(-dt * 14));
     return changed;
   }
 
-  // every figure (this one and a figure tool) turns to face the camera, a little behind it, so it watches
-  // you come round
-  turn(v, dt) {
-    if (this.cy == null) { this.cy = v.yaw; this.cp = v.pitch; }
-    const k = 1 - Math.exp(-dt * 1.6);
-    this.cy += Math.atan2(Math.sin(v.yaw - this.cy), Math.cos(v.yaw - this.cy)) * k;
-    this.cy = Math.atan2(Math.sin(this.cy), Math.cos(this.cy));
-    this.cp += (v.pitch - this.cp) * k;
-    Object.assign(v, { figCY: this.cy, figCP: this.cp });
+  // how far out of the water, in figure units: the mouse, the slow heave, the depth slider and the song
+  lift(cfg, m) {
+    const f = FIGURES[this.a];
+    return (cfg.depth - 1) * 0.3 + this.press * (f.rise ?? 0.15) + 0.018 * Math.sin(this.t * 0.8) + (m.swell || 0) * 0.1;
   }
 
   apply(v, cfg, pres) {
     if (pres < 0.01) return;
-    const S = cfg.size * 0.95 * v.frame / 0.6;
-    const A = FIGURES[this.a], B = FIGURES[this.b], k = this.mix, lerp = key => A[key] + (B[key] - A[key]) * k;
+    const f = FIGURES[this.a], S = this.size, sp = v.frame / 0.6;
     Object.assign(v, {
-      fig: pres, figA: this.a, figB: this.b, figMix: k * k * (3 - 2 * k), figStA: A.stand, figStB: B.stand,
-      // standing up to a low camera, it comes up a little further, so its chin clears the sheet
-      figS: S, figX: this.x, figY: this.y, figZ: ((cfg.depth - 1) * 0.12 + lerp('lift') + 0.1 * Math.sin(Math.max(this.cp, 0)) * (1 - lerp('stand'))) * S, figSoft: figureSoft(cfg, lerp('veil'), S),
-      figRot: this.rot, figT: this.t, figLX: this.look[0], figLY: this.look[1], figSing: this.sing, figRep: cfg.repeat ? 1 : 0,
+      fig: pres, figA: this.a, figS: S, figX: this.x, figY: this.y, figZ: this.z,
+      figSoft: figureSoft(cfg, f.veil ?? 0.4, S), figBY: f.cy ?? 0, figBR: (f.r ?? 0.8) + 0.04, figSink: Math.max((f.r ?? 0.8) + Math.abs(f.cy ?? 0), 0.6),
+      figVX: clamp(this.vx / sp, -6, 6) * 0.6, figVY: clamp(this.vy / sp, -6, 6) * 0.6,
+      figT: this.t, figLX: this.look[0], figLY: this.look[1], figSing: this.sing, figRep: cfg.repeat ? 1 : 0, figSp: cfg.spacing || 1.15,
+      figMelt: 3.2, figDip: 0.05, figRing: 1, figEdge: 0, ...FIG_STYLES[cfg.style === 'auto' ? f.style ?? 'contour' : cfg.style ?? 'contour'](f, v),
     });
-    figureLight(v, pres);
   }
 }

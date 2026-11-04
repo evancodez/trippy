@@ -26,11 +26,11 @@ const POOLS = {
 };
 // and the figures that suit it
 const CAST = {
-  hush: ['moon', 'eye', 'lovers', 'dog', 'isle', 'wanderer', 'monolith', 'ophelia'],
-  flow: ['fluke', 'kraken', 'ophelia', 'serpent', 'hand', 'arm', 'isle', 'liner', 'wanderer'],
-  swell: ['arm', 'creation', 'liberty', 'kraken', 'fluke', 'steeple', 'elephant'],
-  pulse: ['skull', 'icarus', 'bowler', 'moai', 'stag', 'providence', 'elephant'],
-  peak: ['skull', 'medusa', 'scream', 'liberty', 'kraken', 'providence', 'arm'],
+  hush: ['eye', 'monolith', 'singer', 'manta'],
+  flow: ['manta', 'serpent', 'fluke', 'hand', 'arm', 'singer', 'wings'],
+  swell: ['wings', 'arm', 'kraken', 'fluke', 'singer'],
+  pulse: ['skull', 'icarus', 'kraken', 'serpent'],
+  peak: ['skull', 'wings', 'kraken', 'arm', 'singer'],
 };
 const ACCENTS = ['#d80146', '#ff5a1f', '#2d5bff', '#c9f73a', '#e8c547', '#19c3b2', '#ff4fa3'];
 const FULL = PALETTES.filter(p => !['Black & white', 'White on black'].includes(p.name));
@@ -55,7 +55,8 @@ export function buildScore(songId, an, opts) {
   const r = mulberry32(hashString(songId) ^ (opts.seed * 2654435761 >>> 0));
   const pick = a => a[Math.floor(r() * a.length)];
   const barLen = (60 / an.bpm) * an.meter;
-  const lenBars = { slow: 28, normal: 14, fast: 7 }[opts.pace] || 14;
+  const lenBars = { slow: 16, normal: 8, fast: 4 }[opts.pace] || 8;
+  const snap = x => { const D = an.down; if (!D?.length) return x; let lo = 0, hi = D.length - 1; while (lo < hi) { const c = (lo + hi) >> 1; if (D[c] < x) lo = c + 1; else hi = c; } const a = D[Math.max(lo - 1, 0)], b = D[lo]; return x - a < b - x ? a : b; };
   const accent = pick(ACCENTS);
   const scenes = [];
   const recent = [], recentFig = [];
@@ -64,10 +65,10 @@ export function buildScore(songId, an, opts) {
     const dur = sec.end - sec.start;
     const k = sec.kind;
     // quiet passages change less; the end of a long section doesn't need its own scene
-    const target = Math.max(8, lenBars * barLen * (k === 'hush' ? 1.6 : k === 'peak' ? 0.8 : 1));
+    const target = Math.max(6, lenBars * barLen * (k === 'hush' ? 1.5 : k === 'peak' ? 0.85 : 1));
     const parts = Math.max(1, Math.round(dur / target));
     for (let i = 0; i < parts; i++) {
-      const t0 = sec.start + (dur * i) / parts, t1 = sec.start + (dur * (i + 1)) / parts;
+      const t0 = i === 0 ? sec.start : snap(sec.start + (dur * i) / parts), t1 = i === parts - 1 ? sec.end : snap(sec.start + (dur * (i + 1)) / parts);
       const pool = POOLS[k] || POOLS.flow;
       const world = opts.worlds && pool.world.length && r() < (prevFlat ? 0.55 : 0.3);
       const options = (world ? pool.world : pool.flat).filter(id => LOOKS[id] && !recent.includes(id));
@@ -85,16 +86,20 @@ export function buildScore(songId, an, opts) {
         recentFig.push(figure); if (recentFig.length > 5) recentFig.shift();
         const tilted = (LOOKS[lookId].set.pitch || 0) > 0.6;
         const f = FIGURES.find(x => x.id === figure);
-        style = f?.style || (tilted ? pick(['draped', 'contour', 'contour']) : pick(['contour', 'contour', 'silhouette']));
+        style = f?.style || (tilted ? 'draped' : pick(['draped', 'draped', 'draped', 'silhouette']));
         // off-centre: thirds of the screen, and low if it's looking along the ground
         const side = r() < 0.5 ? -1 : 1;
         home = [side * (0.12 + r() * 0.28), tilted ? -0.2 : -0.08 + r() * 0.1];
       }
       // now and then, when it's big and it's a place: not one figure but a whole sea of them
       let crowd = false;
-      if (figure && world && (k === 'peak' || k === 'swell') && kindCam === 'open' && r() < 0.3) { figure = pick(['arm', 'arm', 'kraken', 'moai']); crowd = true; style = 'draped'; }
-      const cine = world ? (kindCam === 'fly' ? false : r() < 0.65) : r() < 0.18;
-      scenes.push({ t0, t1, look: lookId, palette, figure, style, home, crowd, cine, kind: k, cineSpeed: k === 'peak' ? 0.55 : k === 'hush' ? 0.15 : 0.32 });
+      if (figure && world && (k === 'peak' || k === 'swell') && kindCam === 'open' && r() < 0.3) { figure = pick(['arm', 'arm', 'kraken', 'wings']); crowd = true; style = 'draped'; }
+      // most of a scene is the morph into it: a slow change that fills the time, quicker when a big section lands
+      const length = t1 - t0, landing = i === 0 && (k === 'peak' || k === 'pulse');
+      const glide = landing ? Math.min(6, length * 0.5) : Math.max(4, Math.min(16, length * (k === 'hush' ? 0.85 : 0.72)));
+      const paceK = { slow: 0.75, normal: 1, fast: 1.25 }[opts.pace] || 1;
+      const cineSpeed = (k === 'peak' ? 0.72 : k === 'hush' ? 0.3 : k === 'flow' ? 0.46 : 0.58) * paceK;
+      scenes.push({ t0, t1, look: lookId, palette, figure, style, home, crowd, kind: k, cineSpeed, glide, first: i === 0 });
     }
   }
   return { scenes, accent };

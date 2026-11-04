@@ -320,6 +320,7 @@ export class Renderer {
     gl.uniform3f(u('gUp'), F[3], F[4], F[5]);
     gl.uniform3f(u('gBack'), F[6], F[7], F[8]);
     gl.uniformMatrix3fv(u('uFigFrame'), false, rt.figFrame || this.noFrame);
+    if (rt.figTrail) gl.uniform3fv(u('uFigTrail'), rt.figTrail);
     gl.uniform4fv(u('uRipples'), rt.ripples);
     let ripples = 0;
     for (let i = 0; i < rt.ripples.length; i += 4) if (rt.ripples[i + 3] > 0 && rt.realTime - rt.ripples[i + 2] < 5) ripples = 1;

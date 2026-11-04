@@ -16,7 +16,7 @@ export const TOOLS = [
   { id: 'bulge', icon: 'bulge', name: 'Bulge', tip: 'Bulge: hold to puff it up' },
   { id: 'pinch', icon: 'pinch', name: 'Pinch', tip: 'Pinch: hold to suck it in' },
   { id: 'smear', icon: 'smear', name: 'Smear', tip: 'Smear: drag like wet paint' },
-  { id: 'figure', icon: 'hand', name: 'Figure', tip: 'Your cursor has the figure: hold to bring it further out' },
+  { id: 'figure', icon: 'hand', name: 'Figure', tip: 'Your cursor has the hand or figure: hold the mouse and it reacts (6)' },
   { id: 'camera', icon: 'orbit', name: 'Camera', tip: 'Camera: drag to turn and tilt, scroll to zoom (right-drag works with any tool)' },
 ];
 
@@ -141,6 +141,8 @@ export function createUI(app) {
       row('expand', 'Fullscreen', () => app.toggleFullscreen(), 'F'),
       row('eye', 'Hide everything', () => app.toggleUI(), 'H'),
       h('div', { class: 'menu-gap' }),
+      toggle('Ring around the cursor', () => app.perf.ring, v => app.setRing(v), 'shows a brush tool’s size'),
+      toggle('Wander when left alone', () => app.perf.wander, v => app.setPref('wander', v), 'it drifts on to other looks'),
       toggle('60 frames a second', () => app.perf.cap60, v => app.setCap60(v), 'easier on the computer'));
     const r = e.currentTarget.getBoundingClientRect();
     moreMenu.style.top = `${r.bottom + 8}px`;
@@ -167,6 +169,7 @@ export function createUI(app) {
     toolPop.replaceChildren(
       mini('Size', 'size', 0.04, 0.5), mini('Strength', 'strength', 0.05, 1.5),
       ['twist', 'bulge', 'pinch', 'smear'].includes(app.tool) ? mini('Springs back', 'spring', 0, 1) : null,
+      toggle('Ring around the cursor', () => app.perf.ring, v => app.setRing(v)),
       h('button', { class: 'link-btn', onclick: () => { app.resetView(); toolPop.remove(); } }, 'Put everything back'));
     toolPop.querySelectorAll('.slider').forEach(s => s.sync?.());
     document.body.append(toolPop);
@@ -335,7 +338,7 @@ export function createUI(app) {
   }
 
   // ---------------------------------------------------------------- Figures
-  const STYLES = [['contour', 'Contours'], ['silhouette', 'Silhouette'], ['draped', 'Draped'], ];
+  const STYLES = [['draped', 'Draped'], ['contour', 'Contours'], ['silhouette', 'Silhouette']];
   function figCard(f) {
     const A = app.adds.figures, on = A.on && A.pick === f.id;
     return h('button', {
@@ -434,7 +437,7 @@ export function createUI(app) {
         addSlider('figures', 'depth', 'Under ↔ out', 0.3, 1.7),
         toggle('It follows my mouse', () => F.follow, x => { app.setAddOption('figures', 'follow', x); if (x) app.setTool('figure'); }),
         toggle('A crowd of them', () => F.repeat, x => app.setAddOption('figures', 'repeat', x)),
-      ) : h('p', { class: 'lead' }, 'Pick one and it comes up out of the pattern under your cursor. Hold the mouse to bring it further out; pick it again to let it sink.'),
+      ) : h('p', { class: 'lead' }, 'Pick one and it comes up out of the pattern under your cursor. Each does something when you hold the mouse: the hand makes a fist, the skull drops its jaw, the eye blinks.'),
       FIGURE_GROUPS.map(g => h('div', { class: 'group' },
         h('div', { class: 'group-head' }, h('b', {}, g)),
         h('div', { class: 'fig-grid' }, FIGURES.filter(f => f.group === g).map(figCard)))),

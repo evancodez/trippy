@@ -6,6 +6,8 @@ const TAU = Math.PI * 2;
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const frac = x => x - Math.floor(x);
 const inOut = x => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+const gentle = x => 0.5 - 0.5 * Math.cos(Math.PI * x);                         // a long morph: no rush in the middle
+const dist3 = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]);
 const ACCUMULATED = new Set(Object.values(RATE_TARGETS));
 const asValue = (name, x) => (isColorParam(name) ? (Array.isArray(x) ? x.slice() : hexToRgb(x)) : x);
 export const cloneValues = v => Object.fromEntries(Object.entries(v).map(([k, x]) => [k, Array.isArray(x) ? x.slice() : x]));
@@ -43,6 +45,16 @@ export class World {
     this.from = this.values();
     const target = cloneValues(this.to);
     for (const [k, x] of Object.entries(set)) if (PARAM_BY_NAME[k] && !ACCUMULATED.has(k)) target[k] = asValue(k, x);
+    // black on white to white on black: fading the two colors across each other would pass through a flat
+    // gray screen. The same picture can be had by keeping the colors where they are and flipping the pattern,
+    // which the shader does as a wipe.
+    if (set.paper !== undefined && set.ink !== undefined && Array.isArray(this.from.paper)) {
+      const f = this.from;
+      if (dist3(f.paper, target.ink) + dist3(f.ink, target.paper) < 0.7 * (dist3(f.paper, target.paper) + dist3(f.ink, target.ink))) {
+        [target.paper, target.ink] = [target.ink, target.paper];
+        target.invert = 1 - target.invert;
+      }
+    }
     this.to = target;
     this.t = 0;
     this.dur = Math.max(0.05, seconds);
@@ -56,7 +68,7 @@ export class World {
   }
 
   values() {
-    const k = inOut(Math.min(1, this.t / this.dur));
+    const x = Math.min(1, this.t / this.dur), k = this.dur > 3 ? gentle(x) : inOut(x);
     const v = {};
     for (const name of Object.keys(this.to)) {
       const a = this.from[name], b = this.to[name];

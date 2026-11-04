@@ -11,7 +11,8 @@ export function cameraFrame(pitch, yaw, roll, F = new Float32Array(9)) {
 // v: this frame's values; (u, w): the point on screen, as the shader's uv (height-normalised, centred);
 // z: the height of the plane to land on. The same ray the shader marches, for any tilt, turn and lens.
 const F = new Float32Array(9);
-export function rayOnSheet(v, u, w, z = 0) {
+// reach: how far from the camera it may land (a cursor on the horizon otherwise means miles away).
+export function rayOnSheet(v, u, w, z = 0, reach = Infinity) {
   cameraFrame(v.pitch, v.yaw, v.roll, F);
   const dist = 2 * v.frame * v.focal - (v.fly || 0);
   const ox = v.tx + F[6] * dist, oy = v.ty + F[7] * dist, oz = F[8] * dist;
@@ -19,6 +20,22 @@ export function rayOnSheet(v, u, w, z = 0) {
   let t = dz < -1e-3 ? (z - oz) / dz : Infinity;
   const far = (Math.abs(dist) + 2) * 4 / Math.max(Math.hypot(dx, dy, dz), 1e-3);   // up in the sky: as far as it goes along the ground
   if (!(t > 0) || t > far) t = far;
+  t = Math.min(t, reach / Math.max(Math.hypot(dx, dy, dz), 1e-3));
   hit[0] = ox + dx * t; hit[1] = oy + dy * t;
   return hit;
+}
+
+// how far the camera is from the point it looks at, and how high above the sheet it is
+export const camDist = v => Math.abs(2 * v.frame * v.focal - (v.fly || 0));
+export const camHeight = v => Math.max(cameraFrame(v.pitch, v.yaw, v.roll, F)[8] * (2 * v.frame * v.focal - (v.fly || 0)), 0.05);
+
+// flying through a world there's no sheet in front of the camera to land on: a point this far along the ray instead
+export const noSheet = v => 2 * v.frame * v.focal - (v.fly || 0) < 0.15;
+const hit3 = new Float32Array(3);
+export function rayAt(v, u, w, T) {
+  cameraFrame(v.pitch, v.yaw, v.roll, F);
+  const dist = 2 * v.frame * v.focal - (v.fly || 0);
+  for (let i = 0; i < 3; i++) hit3[i] = F[6 + i] * dist + F[i] * u * T + F[3 + i] * w * T - F[6 + i] * v.focal * T;
+  hit3[0] += v.tx; hit3[1] += v.ty;
+  return hit3;
 }

@@ -738,6 +738,9 @@ void main() {
       rr = 1.0;
     } else {
       vec2 sq0 = p.xy, nn = n.xy * (REFRACT + figL * FIGLENS);
+      // seen from straight above, a shape under the sheet would hardly show: lean the pattern over it by its
+      // height, the way lines lie over a form on a tilted page (a low camera does this by itself)
+      if (RELIEF > 0.0) sq0 -= rot(YAW) * vec2(0.62, 0.78) * p.z * RELIEF;
       sq0 = ballFlow(sq0 + nn * 0.12);
       if (FIG > 0.001) sq0 = figFlow(sq0);
       if (WRAP < 0.999) {                                // lines bend over the relief
@@ -783,9 +786,19 @@ void main() {
       if (deep > 0.0) v = mix(v, FIGINK > 0.5 ? -1.0 : 1.0, deep);                       // hollows: the other color, in a silhouette; ink otherwise
     }
     if (figO > 0.0) v = mix(v, -1.0, figO);                                              // and a gap of paper just outside it
+    if (FIGNEG > 0.0) {                                                                  // on a flat pattern: the shape is the pattern, flipped
+      float neg = deep > 0.0 ? figL * (1.0 - deep) : figL;
+      v = mix(v, -v, neg * FIGNEG);
+    }
     float w = fwidth(v) * 0.8 + 1e-3;
     float k = smoothstep(-w, w, v);
-    k = mix(k, 1.0 - k, INVERT);
+    float flip = INVERT;
+    if (flip > 0.001 && flip < 0.999) {                                                  // on its way: the negative spreads out from the middle, its edge rippling
+      float ra = length(uv), ang = atan(uv.y, uv.x);
+      float reach = smoothstep(0.15, 0.85, flip) * (length(vec2(uRes.x / uRes.y, 1.0)) * 0.5 + 0.16);
+      flip = smoothstep(-0.004, 0.004, reach - ra * (1.0 + 0.09 * sin(ang * 5.0 + reach * 6.0) + 0.05 * sin(ang * 11.0 - reach * 9.0)));
+    }
+    k = mix(k, 1.0 - k, flip);
     col = mix(paper, ink, k);
     float spec = pow(max(dot(reflect(-L, n), -rd), 0.0), 40.0);
     if (onBall) {

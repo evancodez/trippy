@@ -9,7 +9,10 @@
 //   water where its waterline is, on its own y axis: the sheet cuts it there at rest.
 //   rise  how much further it comes up while you hold the mouse down (figure units).
 //   veil  how much the fabric clings (0 comes clean through, 1 draped like a ghost).
-//   grab  the point (figure y) that sits under your cursor.
+//   grab  the point (figure y) that sits under your cursor: near the waterline for anything that rises from
+//         it, so it stands up from your cursor the way the hand stands up from the wrist.
+//   swim  it isn't placed, it swims under the sheet after your cursor: 'trail' a body dragged along like a
+//         rope, 'glide' a flat thing that turns as it goes. See Figures.swim.
 //   r, cy bounding sphere: radius and centre height. Rays that miss it never evaluate the figure.
 //   ink   1: a solid black thing, not draped in the pattern (the monolith).
 // The order here is the id the shader switches on; `call` is how it's drawn, `uses` other figures' code.
@@ -17,35 +20,20 @@
 
 export const FIGURES = [
   // people, going under
-  { id: 'hand', name: 'Hand', group: 'People', blurb: 'your cursor, pressing through from behind', special: true, grab: 0.1 },
-  { id: 'arm', scale: 0.95, name: 'Not Waving', group: 'People', blurb: 'one arm, straining up out of the water', call: 'figArm(p, t, sing)', pose: [0.2, 0.1, -0.16], water: -0.3, rise: 0.22, veil: 0.55, grab: 0.28, r: 0.95, cy: 0.05 },
-  { id: 'creation', scale: 1.0, name: 'Creation', group: 'People', blurb: 'two hands that almost touch', call: 'figCreation(p, t, sing)', pose: [0, 0.02, -0.06], water: -0.42, rise: 0.18, veil: 0.5, grab: 0.1, r: 1.06, cy: -0.05 },
-  { id: 'skull', lean: 0.1, name: 'Skull', group: 'People', blurb: 'sunk to the teeth, sockets all the way down', call: 'figSkull(p, sing)', pose: [0.38, -0.02, -0.16], water: -0.27, rise: 0.2, veil: 0.4, grab: 0.05, r: 0.62, cy: 0.0 },
-  { id: 'ophelia', name: 'Ophelia', group: 'People', blurb: 'floating on her back, one hand still out, after Millais', call: 'figOphelia(p, t, sing)', pose: [0, 0.02, -0.06], water: -0.05, rise: 0.14, veil: 0.55, grab: 0.14, r: 1.05, cy: 0.02 },
-  { id: 'icarus', scale: 0.92, name: 'Icarus', group: 'People', blurb: 'two legs and a splash, after Bruegel', call: 'figIcarus(p, t, sing)', pose: [0.15, 0.08, 0.26], water: -0.26, rise: 0.2, veil: 0.4, grab: 0.1, r: 0.92, cy: 0.05 },
-  { id: 'medusa', scale: 0.88, name: 'Medusa', group: 'People', blurb: 'chin up, mouth open, her hair alive', call: 'figMedusa(p, t, sing)', pose: [-0.28, 0.3, 0.14], water: -0.26, rise: 0.2, veil: 0.35, grab: 0.05, r: 0.8, cy: 0.02 },
-  { id: 'scream', scale: 0.88, name: 'The Scream', group: 'People', blurb: 'hands to its head, a mouth into the dark, after Munch', call: 'figScream(p, t, sing)', pose: [0.1, 0.22, 0.1], water: -0.36, rise: 0.22, veil: 0.4, grab: 0.1, r: 0.78, cy: -0.05 },
-  { id: 'lovers', style: 'draped', name: 'The Lovers', group: 'People', blurb: 'two veiled heads, kissing through the sheet, after Magritte', call: 'figLovers(p, t)', pose: [0.05, 0.15, 0.0], water: -0.34, rise: 0.14, veil: 0.5, grab: 0.05, r: 0.74, cy: -0.02 },
-  { id: 'bowler', name: 'Son of Man', group: 'People', blurb: 'a bowler hat, a green apple where the face should be, after Magritte', call: 'figBowler(p, t, sing)', pose: [0.08, 0.2, 0.0], water: -0.32, rise: 0.18, veil: 0.35, grab: 0.15, r: 0.82, cy: 0.05 },
-  { id: 'praying', scale: 0.9, name: 'Praying', group: 'People', blurb: 'two hands pressed together, sleeves going under, after Dürer', call: 'figPraying(p, t)', pose: [0.8, 0.08, 0.14], water: -0.3, rise: 0.2, veil: 0.45, grab: 0.1, r: 0.85, cy: 0.0 },
-  { id: 'wanderer', scale: 0.92, name: 'Wanderer', group: 'People', blurb: 'on a rock, looking out over the lines, after Friedrich', call: 'figWanderer(p, t)', pose: [0.2, 0.1, 0.0], water: -0.34, rise: 0.14, veil: 0.2, grab: 0.2, r: 0.9, cy: 0.02 },
+  { id: 'hand', name: 'Hand', group: 'People', blurb: 'your cursor is the wrist. Hold: it makes a fist', special: true },
+  { id: 'arm', scale: 0.95, name: 'Not Waving', group: 'People', blurb: 'one arm, straining up out of the water. Hold: the fingers close', call: 'figArm(p, t, sing, press)', pose: [0.2, 0.1, -0.16], water: -0.3, rise: 0.22, veil: 0.55, grab: -0.22, r: 0.95, cy: 0.05 },
+  { id: 'singer', scale: 1.45, name: 'The Singer', group: 'People', blurb: 'a face pushing through the sheet, its mouth on the melody. Hold: it opens wide', call: 'figSinger(p, t, sing, press)', pose: [0.3, -0.42, 0.12], lean: 0.12, water: -0.2, rise: 0.1, veil: 0.8, grab: 0.0, r: 0.72, cy: -0.08 },
+  { id: 'skull', lean: 0.1, name: 'Skull', group: 'People', blurb: 'sunk to the chin, sockets all the way down. Hold: the jaw drops', call: 'figSkull(p, max(sing * 0.5, press))', pose: [0.38, -0.08, -0.14], water: -0.36, rise: 0.14, veil: 0.4, grab: 0.0, r: 0.66, cy: -0.02 },
+  { id: 'icarus', scale: 0.92, name: 'Icarus', group: 'People', blurb: 'two legs and a splash, after Bruegel. Hold: they kick', call: 'figIcarus(p, t, sing, press)', pose: [0.15, 0.08, 0.26], water: -0.26, rise: 0.2, veil: 0.4, grab: -0.2, r: 0.95, cy: 0.05 },
   // beasts
-  { id: 'fluke', scale: 0.88, name: 'The Fluke', group: 'Beasts', blurb: 'a whale going down', call: 'figFluke(p, t, sing)', pose: [0.3, 0.14, 0.22], water: -0.3, rise: 0.24, veil: 0.3, grab: 0.25, r: 0.95, cy: 0.02 },
-  { id: 'serpent', scale: 0.8, name: 'Sea Serpent', group: 'Beasts', blurb: 'humps in the water and a long neck', call: 'figSerpent(p, t, sing)', pose: [0.12, 0.1, 0.0], water: -0.1, rise: 0.12, veil: 0.35, grab: 0.1, r: 1.05, cy: 0.1 },
-  { id: 'kraken', scale: 0.88, name: 'Kraken', group: 'Beasts', blurb: 'arms coming up from underneath, curling', call: 'figKraken(p, t, sing)', pose: [0.0, 0.1, 0.0], water: -0.32, rise: 0.22, veil: 0.4, grab: 0.2, r: 0.98, cy: 0.05 },
-  { id: 'elephant', scale: 0.7, name: 'Elephant', group: 'Beasts', blurb: 'on legs like a mosquito’s, after Dalí', call: 'figElephant(p, t)', pose: [0.28, 0.1, 0.0], water: -0.5, rise: 0.14, veil: 0.25, grab: 0.25, r: 1.0, cy: 0.05 },
-  { id: 'stag', scale: 0.92, name: 'Stag', group: 'Beasts', blurb: 'antlers and a long skull, sunk to the eyes', call: 'figStag(p, t)', pose: [0.34, 0.3, -0.14], water: -0.22, rise: 0.2, veil: 0.3, grab: 0.2, r: 0.9, cy: 0.1 },
-  { id: 'dog', name: 'The Dog', group: 'Beasts', blurb: 'just a head above the sand, looking up, after Goya', call: 'figDog(p, t)', pose: [0.1, 0.14, 0.0], water: -0.16, rise: 0.1, veil: 0.5, grab: 0.05, r: 0.72, cy: -0.05 },
-  // monuments
-  { id: 'liner', scale: 0.8, name: 'The Liner', group: 'Monuments', blurb: 'stern in the air, going down by the head', call: 'figLiner(p, t)', pose: [0.32, 0.1, 0.0], water: -0.2, rise: 0.12, veil: 0.2, grab: 0.2, r: 1.05, cy: 0.1 },
-  { id: 'liberty', scale: 0.85, name: 'Liberty', group: 'Monuments', blurb: 'sunk to the lips, the torch still up', call: 'figLiberty(p, t)', pose: [0.25, 0.18, 0.12], water: -0.14, rise: 0.14, veil: 0.25, grab: 0.1, r: 0.98, cy: 0.08 },
-  { id: 'moai', scale: 0.82, name: 'Moai', group: 'Monuments', blurb: 'two stone heads, buried to the chest', call: 'figMoai(p)', pose: [1.12, 0.1, 0.02], water: -0.34, rise: 0.12, veil: 0.25, grab: 0.1, r: 1.02, cy: 0.0 },
-  { id: 'steeple', scale: 0.75, name: 'Steeple', group: 'Monuments', blurb: 'a drowned village, leaning', call: 'figSteeple(p)', pose: [0.45, 0.1, 0.12], water: -0.3, rise: 0.16, veil: 0.2, grab: 0.2, r: 1.0, cy: 0.12 },
-  { id: 'isle', scale: 0.85, lens: 0.6, name: 'Isle of the Dead', group: 'Monuments', blurb: 'cliffs, cypresses and very little else, after Böcklin', call: 'figIsle(p, t)', pose: [0.1, 0.1, 0.0], water: -0.2, rise: 0.1, veil: 0.2, grab: 0.1, r: 1.0, cy: 0.0 },
-  { id: 'providence', scale: 0.72, name: 'Providence', group: 'Monuments', blurb: 'a pyramid, its top floating, and the eye', call: 'figProvidence(p, t, look, sing)', pose: [0.0, 0.14, 0.0], water: -0.3, rise: 0.14, veil: 0.25, grab: 0.15, r: 0.95, cy: 0.08 },
-  { id: 'moon', scale: 0.9, name: 'The Moon', group: 'Monuments', blurb: 'a crescent with a profile, rising', call: 'figMoon(p, t)', pose: [0.0, 0.12, 0.26], water: -0.42, rise: 0.24, veil: 0.3, grab: 0.0, r: 0.72, cy: 0.0 },
-  { id: 'eye', lean: 0, name: 'The Eye', group: 'Monuments', blurb: 'half under, following you, after Redon', call: 'figEye(p, look)', pose: [0, 0, 0], water: -0.12, rise: 0.2, veil: 0.7, grab: 0.05, r: 0.5, cy: 0.0 },
-  { id: 'monolith', style: 'silhouette', scale: 0.88, name: 'Monolith', group: 'Monuments', blurb: '1 : 4 : 9', call: 'figMonolith(p)', pose: [0.32, 0.08, 0.05], water: -0.42, rise: 0.25, veil: 0.1, grab: 0.15, ink: 1, r: 0.8, cy: -0.06 },
+  { id: 'fluke', scale: 0.88, name: 'The Fluke', group: 'Beasts', blurb: 'a whale going down. Hold: the tail lifts and flexes', call: 'figFluke(p, t, sing, press)', pose: [0.3, 0.14, 0.22], water: -0.3, rise: 0.24, veil: 0.3, grab: -0.24, r: 0.95, cy: 0.02 },
+  { id: 'kraken', scale: 0.88, name: 'Kraken', group: 'Beasts', blurb: 'arms from underneath that lean toward you. Hold: they coil', call: 'figKraken(p, t, sing, press, look)', pose: [0.0, 0.1, 0.0], water: -0.32, rise: 0.22, veil: 0.4, grab: -0.26, r: 0.98, cy: 0.05 },
+  { id: 'serpent', swim: 'trail', scale: 1.0, name: 'Sea Serpent', group: 'Beasts', blurb: 'swims under the sheet after your cursor, its neck rising with the tune. Hold: it rears', call: 'figSerpent(p, t, sing, press)', veil: 0.5 },
+  { id: 'manta', swim: 'glide', scale: 0.92, name: 'Manta', group: 'Beasts', blurb: 'glides under the sheet, circling your cursor. Hold: its wings beat', call: 'figManta(p, t, sing, press)', veil: 0.55, r: 1.3, cy: 0 },
+  // signs
+  { id: 'wings', scale: 0.8, name: 'Wings', group: 'Signs', blurb: 'something with wings, going under. Hold: they sweep forward', call: 'figWings(p, t, sing, press)', pose: [0.28, 0.06, 0.08], water: -0.34, rise: 0.2, veil: 0.4, grab: -0.3, r: 1.2, cy: 0.08 },
+  { id: 'eye', lean: 0, name: 'The Eye', group: 'Signs', blurb: 'half under, and it watches your cursor, after Redon. Click: it blinks', call: 'figEye(p, t, look, press)', pose: [0, 0, 0], water: -0.1, rise: 0.1, veil: 0.7, grab: 0.0, r: 0.6, cy: 0.05 },
+  { id: 'monolith', style: 'silhouette', scale: 0.72, name: 'Monolith', group: 'Signs', blurb: '1 : 4 : 9', call: 'figMonolith(p)', pose: [0.32, 0.08, 0.05], water: -0.42, rise: 0.25, veil: 0.1, grab: -0.3, ink: 1, r: 0.8, cy: -0.06 },
 ];
 export const FIGURE_INDEX = Object.fromEntries(FIGURES.map((f, i) => [f.id, i]));
 export const FIGURE_GROUPS = [...new Set(FIGURES.map(f => f.group))];
@@ -89,7 +77,8 @@ float gFRow = 0.0;              // repeated: this copy's own number, so a crowd 
 float handPose(vec3 p, vec4 fc, float tc, float spread) {
   float d = sdRoundBox(p - vec3(0.0, -0.01, 0.0), vec3(0.068, 0.08, 0.017), 0.03);
   d = smin(d, sdCapsule(p, vec3(-0.035, -0.08, 0.0), vec3(0.04, -0.085, 0.0), 0.045), 0.04);
-  if (length(p - vec3(0.0, 0.1, 0.0)) - 0.34 > 0.04) return min(d, length(p - vec3(0.0, 0.1, 0.0)) - 0.32);
+  float far = length(p - vec3(0.0, 0.1, 0.0)) - 0.34;
+  if (far > 0.22) return min(d, far);                                                          // far enough that the fabric can't feel the difference
   for (int i = 0; i < 4; i++) {
     float fi = float(i);
     float len = (i == 0 ? 0.78 : i == 1 ? 0.99 : i == 2 ? 1.06 : 0.95) * 0.245;
@@ -121,239 +110,120 @@ float handPose(vec3 p, vec4 fc, float tc, float spread) {
 // each figure's own code, after a //@ id line
 const LIB = `
 //@ arm
-// one arm out of the water, the hand open as far as it goes, the fingers trying
-float figArm(vec3 p, float t, float sing) {
+// one arm out of the water, the hand open as far as it goes, the fingers trying; hold and they close on nothing
+float figArm(vec3 p, float t, float sing, float press) {
   p.x += 0.03 * sin(t * 0.7 + p.y * 1.6) * smoothstep(0.4, -0.5, p.y);
   float f = 0.5 + 0.5 * sin(t * 1.3);
   vec3 wr = vec3(0.03, 0.02, 0.0), el = vec3(-0.1, -0.5, -0.1);
-  float d = sdLimb(p, el, wr, 0.1, 0.052);                                                   // the forearm
+  float d = sdLimb(p, el, wr, 0.1, 0.05);                                                     // the forearm
+  d = smin(d, sdEll(p - mix(el, wr, 0.25) - vec3(-0.012, 0.0, 0.012), vec3(0.092, 0.2, 0.082)), 0.05);   // its muscle
   d = smin(d, sdLimb(p, vec3(-0.18, -0.95, -0.2), el, 0.13, 0.095), 0.04);                     // the upper arm, under
   vec3 q = (p - vec3(0.045, 0.1, 0.0)) / 1.25;
   q.xy = rot(-0.14) * q.xy;
   q.yz = rot(-0.2) * q.yz;
-  float c = 0.06 + 0.2 * f + 0.25 * sing;
-  return smin(d, handPose(q, vec4(c, c * 0.8, c * 0.6, c * 0.4), 0.15, 1.15) * 1.25, 0.03) * 0.9;
+  float c = 0.06 + 0.2 * f + 0.25 * sing + press * 1.05;
+  return smin(d, handPose(q, vec4(c, c * 0.8, c * 0.6, c * 0.4 + press * 0.3), 0.15 + press * 0.7, 1.15 - press * 0.7) * 1.25, 0.03) * 0.9;
 }
-//@ creation
-// the two arms of the Sistine ceiling: one limp from the left, the other reaching from the right
-float figCreation(vec3 p, float t, float sing) {
-  float gap = 0.016 + 0.02 * (0.5 + 0.5 * sin(t * 0.5)) - 0.012 * sing;
-  // his: from the left, the wrist dropped, the finger only just lifted
-  vec3 w1 = vec3(-0.43, 0.1, 0.0);
-  float d = sdLimb(p, vec3(-1.02, -0.5, -0.06), vec3(-0.68, 0.05, -0.02), 0.078, 0.052);
-  d = smin(d, sdLimb(p, vec3(-0.68, 0.05, -0.02), w1, 0.052, 0.034), 0.03);
-  vec3 q = (p - (w1 + vec3(0.1, -0.035, 0.0))) / 1.2;
-  q.xy = rot(1.86) * q.xy;
-  d = smin(d, handPose(q, vec4(0.6, 0.5, 0.42, 0.05), 1.1, 0.95) * 1.2, 0.014);
-  // the other: from the right, level, the finger out straight
-  vec3 w2 = vec3(0.42, 0.14, 0.0);
-  float e = sdLimb(p, vec3(1.02, -0.45, -0.05), vec3(0.72, 0.15, -0.02), 0.075, 0.05);
-  e = smin(e, sdLimb(p, vec3(0.72, 0.15, -0.02), w2, 0.05, 0.034), 0.03);
-  q = ((p - (w2 + vec3(-0.135 + gap, -0.014, 0.0))) * vec3(-1.0, 1.0, 1.0)) / 1.2;
-  q.xy = rot(1.5) * q.xy;
-  e = smin(e, handPose(q, vec4(0.8, 0.72, 0.6, -0.02), 1.1, 0.95) * 1.2, 0.014);
-  return min(d, e) * 0.9;
-}
-//@ skull
-float figSkull(vec3 p, float jaw) {
+//@ singer
+// a face pressed up through the sheet, tipped back, eyes shut, in the proportions of a classical bust: the
+// way the veiled marbles do it. Its jaw hangs from the hinge and goes with the tune.
+float figSinger(vec3 p, float t, float sing, float press) {
+  float open = clamp(sing * 0.75 + press + 0.08 + 0.04 * sin(t * 0.9), 0.0, 1.0);
   vec3 m = mx(p);
-  float d = sdEll(p - vec3(0.0, 0.1, -0.07), vec3(0.25, 0.26, 0.29));                          // the dome
-  d = smaxF(d, -sdEll(m - vec3(0.34, 0.0, -0.02), vec3(0.1, 0.13, 0.15)), 0.05);              // temples, pinched in
-  d = smin(d, sdEll(p - vec3(0.0, -0.04, 0.05), vec3(0.2, 0.15, 0.16)), 0.05);                // brow and upper face
-  d = smin(d, sdEll(m - vec3(0.145, -0.07, 0.08), vec3(0.06, 0.05, 0.07)), 0.03);             // cheekbones
-  d = smin(d, sdCapsule(m, vec3(0.16, -0.075, 0.04), vec3(0.22, -0.06, -0.09), 0.022), 0.025);   // and their arches back to the ears
-  d = smin(d, sdEll(p - vec3(0.0, -0.165, 0.04), vec3(0.115, 0.06, 0.09)), 0.04);             // where the top teeth sit
-  float jy = -0.3 - jaw * 0.05;
-  float j = sdEll(p - vec3(0.0, jy, 0.03), vec3(0.12, 0.045, 0.1));                          // the jaw, dropping as it sings
-  j = smin(j, sdCapsule(m, vec3(0.1, jy, -0.01), vec3(0.16, -0.12, -0.08), 0.028), 0.03);
-  d = smin(d, j, 0.02);
-  vec3 tq = p - vec3(0.0, -0.205, -0.004);                                                  // the teeth: a row of six soft swells
-  float ta = atan(tq.x, tq.z), ti = (clamp(floor(ta / 0.3), -3.0, 2.0) + 0.5) * 0.3;
-  tq.xz = rot(ti) * tq.xz;
-  d = smin(d, sdEll(tq - vec3(0.0, 0.0, 0.122), vec3(0.022, 0.034, 0.018)), 0.012);
-  d = smaxF(d, -sdEll(p - vec3(0.0, -0.245 - jaw * 0.025, 0.1), vec3(0.12, 0.008 + jaw * 0.025, 0.09)), 0.012);   // the gap between the jaws
-  vec3 e = m - vec3(0.098, 0.012, 0.17);
-  e.xy = rot(0.15) * e.xy;
-  hollow(sdEll(e, vec3(0.066, 0.058, 0.34)));                                                  // the sockets go deep: through bone and fabric
-  hollow(sdEll(m - vec3(0.019, -0.105, 0.19), vec3(0.022, 0.042, 0.26)));                      // the nose: two lobes, a heart upside down
+  float d = sdEll(p - vec3(0.0, 0.1, -0.06), vec3(0.205, 0.24, 0.25));                         // the cranium
+  d = smin(d, sdEll(p - vec3(0.0, 0.08, 0.085), vec3(0.17, 0.15, 0.105)), 0.06);               // the forehead
+  d = smaxF(d, -sdEll(m - vec3(0.27, 0.05, 0.1), vec3(0.09, 0.12, 0.13)), 0.05);               // temples
+  d = smin(d, sdEll(p - vec3(0.0, -0.05, 0.08), vec3(0.15, 0.125, 0.115)), 0.05);              // the mid-face
+  d = smin(d, sdEll(m - vec3(0.108, -0.035, 0.122), vec3(0.052, 0.04, 0.05)), 0.06);           // cheekbones
+  // the jaw, on its hinge
+  vec3 j = p - vec3(0.0, -0.06, -0.02);
+  j.yz = rot(-open * 0.42) * j.yz;
+  float jd = sdEll(j - vec3(0.0, -0.09, 0.075), vec3(0.125, 0.09, 0.12));
+  jd = smin(jd, sdEll(j - vec3(0.0, -0.172, 0.155), vec3(0.05, 0.04, 0.05)), 0.05);            // the chin
+  jd = smin(jd, sdEll(j - vec3(0.0, -0.098, 0.195), vec3(0.04, 0.014, 0.024)), 0.02);          // the lower lip
+  d = smin(d, jd, 0.04);
+  d = smin(d, sdLimb(p, vec3(0.0, -0.16, -0.1), vec3(0.0, -0.62, -0.22), 0.1, 0.125), 0.07);   // the neck
+  // the brow, and under it shallow sockets, a closed lid lying in each
+  d = smin(d, sdEll(m - vec3(0.068, 0.082, 0.165), vec3(0.08, 0.02, 0.035)), 0.045);
+  d = smaxF(d, -sdEll(m - vec3(0.074, 0.032, 0.2), vec3(0.056, 0.026, 0.04)), 0.035);
+  d = smin(d, sdEll(m - vec3(0.074, 0.026, 0.155), vec3(0.042, 0.022, 0.026)), 0.022);
+  // the nose: a long straight line from the brow, a small tip
+  d = smin(d, sdLimb(p, vec3(0.0, 0.07, 0.175), vec3(0.0, -0.03, 0.222), 0.014, 0.019), 0.03);
+  d = smin(d, length(p - vec3(0.0, -0.042, 0.226)) - 0.02, 0.022);
+  d = smin(d, sdEll(m - vec3(0.022, -0.054, 0.204), vec3(0.014, 0.011, 0.015)), 0.016);
+  // the upper lip, and the mouth behind it going all the way down
+  d = smin(d, sdEll(p - vec3(0.0, -0.096, 0.198), vec3(0.042, 0.01, 0.017)), 0.02);
+  float gape = 0.003 + open * 0.05;
+  vec3 mo = p - vec3(0.0, -0.116 - open * 0.03, 0.17);
+  float cav = sdEll(mo, vec3(0.034 + open * 0.008, gape, 0.1));
+  d = smaxF(d, -cav, 0.006);
+  hollow(cav + 0.002);
   return d * 0.85;
 }
-//@ ophelia
-// a head on its back in the water, a profile against the sky: forehead, nose, lips, chin. Her hair
-// spreads out across the surface; one hand is still up.
-float figOphelia(vec3 p, float t, float sing) {
-  vec3 c = p - vec3(-0.14, 0.0, 0.0);
-  vec3 h = c / 1.45;
-  h.xy = rot(-1.42 + 0.03 * sin(t * 0.4)) * h.xy;                                               // lying back: her +x, up to the sky
-  float d = sdEll(h - vec3(-0.05, 0.05, 0.0), vec3(0.11, 0.13, 0.11));
-  d = smin(d, sdEll(h - vec3(0.05, 0.015, 0.0), vec3(0.055, 0.085, 0.075)), 0.03);
-  d = smin(d, sdLimb(h, vec3(0.09, 0.055, 0.0), vec3(0.15, -0.005, 0.0), 0.022, 0.016), 0.018);   // the nose
-  d = smin(d, sdEll(h - vec3(0.114, -0.052, 0.0), vec3(0.024, 0.024, 0.034)), 0.008);             // lips, parted
-  d = smin(d, sdEll(h - vec3(0.083, -0.118, 0.0), vec3(0.036, 0.032, 0.042)), 0.016);             // the chin
-  d = smin(d, sdLimb(h, vec3(-0.02, -0.08, -0.01), vec3(-0.08, -0.36, -0.02), 0.052, 0.07), 0.03);  // the throat, going under
-  d *= 1.45;
-  hollow(sdEll(h - vec3(0.052, 0.058, 0.07), vec3(0.03, 0.012, 0.05)) * 1.45);                    // a closed eye
-  for (int k = 0; k < 3; k++) {                                                                   // the hair, adrift
-    float fk = float(k), x = p.x + 0.3;
-    float y = -0.02 + 0.08 * (fk - 1.0) + (0.03 + 0.06 * smoothstep(0.0, -0.6, x)) * sin(x * (8.0 + fk * 2.0) + t * 0.8 + fk * 2.0);
-    float r = mix(0.006, 0.026, smoothstep(-0.72, -0.05, x));
-    d = smin(d, max(length(vec2(p.y - y, p.z + 0.02)) - r, max(x - 0.05, -x - 0.72)) * 0.8, 0.018);
-  }
-  vec3 q = (p - vec3(0.62, 0.12, 0.08)) / 0.95;                                                    // and a hand, just out
-  q.xy = rot(-0.34 + 0.05 * sin(t * 0.8)) * q.xy;
-  float f = 0.3 + 0.08 * sin(t * 0.6);
-  float hand = smin(handPose(q, vec4(f, f, f * 0.9, f * 0.7), 0.5, 0.95) * 0.95, sdLimb(p, vec3(0.5, -0.45, 0.05), vec3(0.62, 0.03, 0.08), 0.06, 0.04), 0.03);
-  return min(d, hand) * 0.85;
+//@ skull
+// bone, not a balloon: a long cranium pinched at the temples, a shelf of brow, cheekbones and their arches,
+// and a jaw on a hinge that can drop. The sockets and the nose go all the way down.
+float figSkull(vec3 p, float jaw) {
+  vec3 m = mx(p);
+  float d = sdEll(p - vec3(0.0, 0.11, -0.08), vec3(0.245, 0.255, 0.3));                        // the dome
+  d = smaxF(d, -sdEll(m - vec3(0.32, -0.01, 0.03), vec3(0.1, 0.12, 0.16)), 0.05);              // temples, pinched in
+  d = smin(d, sdEll(p - vec3(0.0, -0.035, 0.075), vec3(0.165, 0.125, 0.11)), 0.04);            // the upper face
+  d = smin(d, sdEll(m - vec3(0.082, 0.052, 0.168), vec3(0.09, 0.028, 0.04)), 0.028);           // the brow
+  d = smin(d, sdEll(m - vec3(0.14, -0.075, 0.105), vec3(0.052, 0.04, 0.055)), 0.02);           // cheekbones
+  d = smin(d, sdCapsule(m, vec3(0.16, -0.08, 0.07), vec3(0.235, -0.055, -0.08), 0.015), 0.02);  // and their arches, back to the ears
+  d = smin(d, sdEll(p - vec3(0.0, -0.165, 0.105), vec3(0.095, 0.05, 0.08)), 0.03);             // where the top teeth sit
+  // the top teeth: a row of soft pegs round the arch
+  vec2 ta = p.xz - vec2(0.0, 0.075);
+  float ang = atan(ta.x, ta.y), ti = (clamp(floor(ang / 0.25), -4.0, 3.0) + 0.5) * 0.25;
+  vec2 tq = rot(ti) * ta;
+  float tooth = sdEll(vec3(tq.x, p.y + 0.205, tq.y - 0.094), vec3(0.0135, 0.03, 0.016));
+  d = smin(d, tooth, 0.004);
+  // the jaw, swinging from the hinge in front of the ear
+  vec3 j = p - vec3(0.0, -0.09, -0.04);
+  j.yz = rot(-jaw * 0.5) * j.yz;
+  vec3 jm = mx(j);
+  float jd = sdCapsule(jm, vec3(0.165, 0.0, 0.0), vec3(0.14, -0.155, 0.02), 0.026);            // the upright part
+  jd = smin(jd, sdLimb(jm, vec3(0.14, -0.155, 0.02), vec3(0.05, -0.2, 0.18), 0.027, 0.03), 0.02);   // the bar forward
+  jd = smin(jd, sdEll(j - vec3(0.0, -0.205, 0.195), vec3(0.058, 0.03, 0.03)), 0.022);          // the chin
+  vec2 tb = j.xz - vec2(0.0, 0.1);
+  float angB = atan(tb.x, tb.y), tiB = (clamp(floor(angB / 0.3), -3.0, 2.0) + 0.5) * 0.3;
+  vec2 tqB = rot(tiB) * tb;
+  jd = smin(jd, sdEll(vec3(tqB.x, j.y + 0.16, tqB.y - 0.082), vec3(0.0125, 0.026, 0.015)), 0.004);
+  d = min(d, jd);
+  vec3 e = m - vec3(0.092, 0.002, 0.17);
+  e.xy = rot(0.2) * e.xy;
+  float sock = sdEll(e, vec3(0.062, 0.054, 0.34));
+  d = smaxF(d, -sock, 0.012);
+  hollow(sock + 0.005);
+  float nose = sdEll(m - vec3(0.018, -0.082, 0.2), vec3(0.021, 0.042, 0.26));
+  d = smaxF(d, -nose, 0.008);
+  hollow(nose + 0.004);
+  return d * 0.85;
 }
 //@ icarus
 // the moment nobody noticed: two legs, the knees bent, kicking
 float figLeg(vec3 p, vec3 hip, vec3 knee, vec3 ankle, vec3 toe) {
-  float d = sdLimb(p, hip, knee, 0.12, 0.072);
-  d = smin(d, sdLimb(p, knee, ankle, 0.078, 0.038), 0.03);
-  d = smin(d, sdEll(p - mix(knee, ankle, 0.28) - vec3(-0.03, 0.0, 0.0), vec3(0.06, 0.13, 0.065)), 0.04);   // the calf
-  d = smin(d, sdLimb(p, ankle, toe, 0.05, 0.026), 0.03);
+  float d = sdLimb(p, hip, knee, 0.125, 0.07);
+  d = smin(d, sdLimb(p, knee, ankle, 0.075, 0.034), 0.03);
+  d = smin(d, sdEll(p - mix(knee, ankle, 0.3) - vec3(-0.028, 0.0, 0.0), vec3(0.058, 0.13, 0.062)), 0.04);   // the calf
+  vec3 foot = normalize(toe - ankle);
+  d = smin(d, sdLimb(p, ankle, toe, 0.042, 0.027), 0.025);                                   // the top of the foot
+  d = smin(d, length(p - ankle + foot * 0.035) - 0.043, 0.025);                              // the heel
+  d = smin(d, sdEll(p - toe - foot * 0.016, vec3(0.038, 0.03, 0.025)), 0.018);                // the toes
   return d;
 }
-float figIcarus(vec3 p, float t, float sing) {
-  float a = sin(t * 1.8), b = sin(t * 1.8 + 2.2);
+float figIcarus(vec3 p, float t, float sing, float press) {
+  float a = sin(t * 1.8) + press * 0.7 * sin(t * 7.3), b = sin(t * 1.8 + 2.2) + press * 0.7 * sin(t * 7.3 + 2.0);
   float d = figLeg(p, vec3(-0.08, -0.6, -0.04), vec3(-0.12 + 0.05 * a, -0.14, 0.02), vec3(-0.27 + 0.13 * a, 0.28, 0.0), vec3(-0.17 + 0.17 * a, 0.46, 0.0));
   d = min(d, figLeg(p, vec3(0.08, -0.6, -0.02), vec3(0.24 + 0.04 * b, -0.12, 0.0), vec3(0.1 + 0.14 * b, 0.34, 0.03), vec3(0.2 + 0.18 * b, 0.53, 0.03)));
   return d * 0.85;
 }
-//@ medusa
-// a head thrown back, every strand of her hair a snake: one fold of the angle per snake, so all of them cost one
-float figMedusa(vec3 p, float t, float sing) {
-  vec3 q = p; q.y -= 0.02;
-  float d = sdEll(q - vec3(0.0, 0.02, -0.02), vec3(0.165, 0.2, 0.165));                        // the head
-  d = smin(d, sdEll(q - vec3(0.0, -0.13, 0.03), vec3(0.11, 0.1, 0.1)), 0.05);                  // the jaw
-  d = smin(d, sdLimb(q, vec3(0.0, -0.1, -0.05), vec3(0.0, -0.46, -0.08), 0.085, 0.13), 0.05);  // the neck going under
-  d = smin(d, sdEll(q - vec3(0.0, -0.01, 0.15), vec3(0.022, 0.058, 0.035)), 0.02);             // the nose
-  vec3 m = mx(q);
-  hollow(sdEll(m - vec3(0.066, 0.052, 0.14), vec3(0.036, 0.022, 0.2)));                        // eyes
-  hollow(sdEll(q - vec3(0.0, -0.105, 0.13), vec3(0.058, 0.026 + 0.036 * sing, 0.22)));         // the scream
-  float ang = atan(q.x, q.y);                                                                  // 0 straight up
-  float N = 9.0, w = 4.2 / N;
-  float idx = clamp(floor(ang / w + N * 0.5), 0.0, N - 1.0);
-  for (int k = 0; k < 2; k++) {
-    float i = clamp(idx + float(k), 0.0, N - 1.0);
-    float a0 = (i - N * 0.5 + 0.5) * w;
-    vec2 v = rot(a0) * q.xy;                                                                   // along this snake (+y), and across it
-    float L = 0.3 + 0.09 * sin(i * 2.4 + 1.3), s = clamp((v.y - 0.15) / L, 0.0, 1.0);
-    float lat = v.x - sin(s * 8.5 - t * 2.3 + i * 1.9) * (0.02 + 0.075 * s);
-    float z = q.z + 0.03 + 0.05 * sin(i * 3.1) - 0.08 * s * s;
-    float r = mix(0.05, 0.012, s * s);
-    float e = length(vec3(lat, max(v.y - 0.15 - L, 0.0) + min(v.y - 0.15, 0.0), z)) - r;
-    d = smin(d, e * 0.72, 0.016);
-  }
-  return d * 0.85;
-}
-//@ scream
-// after Munch: the long head, narrowing to a jaw, hands to its temples, swaying
-float figScream(vec3 p, float t, float sing) {
-  p.x += 0.07 * sin(p.y * 4.5 + t * 0.9) * smoothstep(-0.02, -0.6, p.y);
-  vec3 m = mx(p);
-  float d = sdEll(p - vec3(0.0, 0.17, -0.01), vec3(0.165, 0.2, 0.15));                       // the dome
-  d = smin(d, sdEll(p - vec3(0.0, -0.05, 0.0), vec3(0.082, 0.15, 0.09)), 0.05);              // narrowing to the jaw
-  d = smin(d, sdLimb(p, vec3(0.0, -0.16, -0.03), vec3(0.0, -0.8, -0.06), 0.04, 0.15), 0.04);  // a thin neck, widening down
-  d = smin(d, sdLimb(m, vec3(0.1, -0.56, -0.05), vec3(0.19, -0.3, 0.0), 0.05, 0.034), 0.05);  // arms up, elbows in
-  d = smin(d, sdLimb(m, vec3(0.19, -0.3, 0.0), vec3(0.135, -0.08, 0.03), 0.032, 0.024), 0.015);
-  vec3 h = m - vec3(0.125, 0.0, 0.05);
-  h.xy = rot(0.1) * h.xy;
-  h.xz = rot(-0.5) * h.xz;
-  d = smin(d, handPose(h / 0.62, vec4(0.1, 0.08, 0.06, 0.04), 0.5, 0.5) * 0.62, 0.012);       // long hands, flat to its jaw
-  hollow(sdEll(m - vec3(0.062, 0.14, 0.11), vec3(0.042, 0.056, 0.3)));
-  hollow(sdEll(p - vec3(0.0, -0.06, 0.1), vec3(0.04 + 0.012 * sing, 0.07 + 0.03 * sing, 0.3)));   // the mouth, an O
-  return d * 0.85;
-}
-//@ lovers
-// a head in profile, facing +x, its features a little past life so they read through the sheet
-float headProfile(vec3 p) {
-  float d = sdEll(p - vec3(-0.05, 0.06, 0.0), vec3(0.1, 0.12, 0.1));
-  d = smin(d, sdEll(p - vec3(0.045, 0.01, 0.0), vec3(0.05, 0.085, 0.07)), 0.03);
-  d = smin(d, sdLimb(p, vec3(0.09, 0.05, 0.0), vec3(0.15, -0.005, 0.0), 0.022, 0.015), 0.018);  // nose
-  d = smin(d, sdEll(p - vec3(0.115, -0.05, 0.0), vec3(0.026, 0.024, 0.034)), 0.008);            // lips
-  d = smin(d, sdEll(p - vec3(0.085, -0.115, 0.0), vec3(0.036, 0.03, 0.042)), 0.016);            // chin
-  d = smin(d, sdLimb(p, vec3(-0.03, -0.06, -0.01), vec3(-0.08, -0.42, -0.03), 0.055, 0.075), 0.03);   // neck
-  return d;
-}
-// Magritte's lovers: two veiled heads, lips together, foreheads apart
-float figLovers(vec3 p, float t) {
-  float k = 0.004 * sin(t * 0.8);
-  p /= 1.2;
-  p.y -= 0.03;
-  vec3 a = p - vec3(-0.142 - k, 0.0, 0.0), b = (p - vec3(0.142 + k, 0.0, 0.0)) * vec3(-1.0, 1.0, 1.0);
-  a.xy = rot(0.1) * a.xy; b.xy = rot(0.1) * b.xy;
-  float d = smin(headProfile(a), headProfile(b), 0.008);
-  d = smin(d, sdEll(p - vec3(0.0, -0.5, -0.03), vec3(0.42, 0.14, 0.12)), 0.06);                 // shoulders, under
-  return d * 1.2;
-}
-//@ bowler
-// a man in a bowler hat with a green apple where his face should be
-float figBowler(vec3 p, float t, float sing) {
-  float d = sdEll(p - vec3(0.0, 0.03, 0.0), vec3(0.125, 0.16, 0.13));                         // the head
-  d = smin(d, sdLimb(p, vec3(0.0, -0.1, 0.0), vec3(0.0, -0.22, 0.0), 0.06, 0.08), 0.03);
-  vec3 m = mx(p);
-  d = smin(d, sdEll(p - vec3(0.0, -0.44, -0.02), vec3(0.3, 0.2, 0.13)), 0.1);                 // the shoulders of a coat
-  d = smin(d, sdLimb(p, vec3(0.0, -0.2, 0.09), vec3(0.0, -0.4, 0.13), 0.03, 0.05), 0.02);      // a tie
-  float crown = sdEll(p - vec3(0.0, 0.2, 0.0), vec3(0.135, 0.125, 0.14));
-  crown = max(crown, 0.145 - p.y);
-  vec2 bq = vec2(length((p.xz) * vec2(1.0, 1.1)) - 0.205, p.y - 0.14);
-  float brim = length(max(abs(bq) - vec2(0.014, 0.0), 0.0)) - 0.012;
-  brim = max(brim, -(length(p.xz) - 0.1));
-  float hat = min(crown, brim);
-  d = min(smin(d, hat, 0.008), 1e3);
-  float bob = 0.006 * sin(t * 0.9) + 0.01 * sing;
-  vec3 a = p - vec3(0.0, 0.015 + bob, 0.15);
-  float ap = length(a.xy * vec2(1.0, 1.04)) - 0.098;                                           // the apple, hanging where the face should be
-  ap = smin(ap, length(a.xy - vec2(0.03, -0.05)) - 0.085, 0.05);
-  ap = smin(ap, length(a.xy - vec2(-0.03, -0.05)) - 0.085, 0.05);
-  ap = smaxF(ap, -(length(a.xy - vec2(0.0, 0.115)) - 0.03), 0.02);
-  ap = min(ap, sdLimb(vec3(a.xy, 0.0), vec3(0.0, 0.07, 0.0), vec3(0.018, 0.13, 0.0), 0.011, 0.009));
-  ap = min(ap, sdEll(vec3(a.xy - vec2(0.058, 0.118), 0.0), vec3(0.044, 0.018, 0.1)));
-  hollow(max(ap, abs(p.z - 0.05) - 0.3));
-  return d * 0.85;
-}
-//@ praying
-// a pair of hands, side on, palm to palm, the cuffs going under
-float figPraying(vec3 p, float t) {
-  p.xy = rot(0.02 * sin(t * 0.5)) * p.xy;
-  float side = p.x > 0.0 ? 1.0 : -1.0;
-  vec3 m = vec3(abs(p.x), p.yz);
-  m.x -= 0.03;
-  // each hand a palm against the middle, tilted so the fingertips meet and the heels stay apart
-  m.xy = rot(0.09) * m.xy;
-  vec3 q = vec3(m.z, m.y, -m.x);
-  float c = 0.03;
-  float d = handPose((q - vec3(0.0, 0.14, 0.0)) / 1.45, vec4(c, c, c, c), 0.4, 0.75) * 1.45;
-  d = smin(d, sdLimb(m, vec3(0.03, -0.02, 0.0), vec3(0.1, -0.34, 0.03), 0.05, 0.07), 0.04);     // the wrists
-  d = smin(d, sdLimb(m, vec3(0.11, -0.36, 0.03), vec3(0.2, -0.82, 0.05), 0.105, 0.145), 0.012);  // the cuffs, wider
-  return d * 0.85;
-}
-//@ wanderer
-// from behind, on a crag, the coat blowing, looking out over the lines
-float figWanderer(vec3 p, float t) {
-  // the rock: a profile cut out of a block, broken and uneven
-  float x = p.x;
-  float top = -0.14 - 0.55 * smoothstep(0.05, 0.75, abs(x + 0.03)) - 0.035 * abs(sin(x * 15.0 + 0.6)) - 0.018 * abs(sin(x * 41.0));
-  float rock = max((p.y - top) * 0.62, length(p.xz * vec2(0.8, 1.6)) - 0.72);
-  float sw = 0.012 * sin(t * 1.3);
-  vec3 q = p - vec3(0.0, -0.14, 0.0);
-  vec3 m = mx(q);
-  float b = sdLimb(m, vec3(0.036, 0.0, 0.0), vec3(0.03, 0.2, 0.0), 0.024, 0.038);               // the legs, apart
-  b = smin(b, sdLimb(q, vec3(0.0, 0.2, 0.0), vec3(-0.012 - sw, 0.3, 0.0), 0.078, 0.07), 0.018);  // the coat
-  b = smin(b, sdLimb(q, vec3(-0.012, 0.28, 0.0), vec3(0.0, 0.47, 0.0), 0.07, 0.048), 0.015);
-  b = smin(b, sdLimb(q, vec3(0.0, 0.48, 0.0), vec3(0.0, 0.52, 0.0), 0.022, 0.022), 0.006);
-  b = smin(b, sdEll(q - vec3(0.0, 0.57, 0.0), vec3(0.036, 0.046, 0.04)), 0.006);                 // the head
-  b = smin(b, sdEll(q - vec3(0.042 + sw, 0.585, 0.0), vec3(0.04, 0.016, 0.03)), 0.014);          // hair in the wind
-  b = smin(b, sdLimb(q, vec3(-0.06, 0.44, 0.0), vec3(-0.112, 0.27, 0.0), 0.022, 0.018), 0.012);  // an arm, and the stick
-  b = min(b, sdCapsule(q, vec3(-0.112, 0.27, 0.0), vec3(-0.17, 0.0, 0.0), 0.0085));
-  return min(rock, b) * 0.9;
-}
 //@ fluke
-// a whale's tail going down, water coming off it
-float figFluke(vec3 p, float t, float sing) {
+// a whale's tail going down, water coming off it; hold and it lifts and flexes
+float figFluke(vec3 p, float t, float sing, float press) {
   p.xy = rot(0.05 * sin(t * 0.5)) * p.xy;
   vec3 m = mx(p);
+  m.z -= (0.12 + 0.28 * press + 0.08 * sing) * m.x * m.x * (0.8 + 0.2 * sin(t * 1.2));           // the lobes curl forward
   float d = sdLimb(p, vec3(0.0, -0.95, -0.2), vec3(0.0, 0.24, 0.0), 0.2, 0.038);                // the stock
   // each lobe swept back, thin, its trailing edge a long curve to a point
   vec3 a = m - vec3(0.27, 0.36, 0.0);
@@ -370,37 +240,16 @@ float figFluke(vec3 p, float t, float sing) {
   }
   return d * 0.85;
 }
-//@ serpent
-// three humps out of the water, travelling, and a long neck at the front
-float figSerpent(vec3 p, float t, float sing) {
-  float x = p.x + 0.42;
-  float s = clamp((x + 0.62) / 0.9, 0.0, 1.0);
-  float y = -0.08 + (0.12 + 0.03 * sin(t * 0.4)) * sin(x * 13.0 + t * 1.4);                       // the humps
-  float d = length(vec2(p.y - y, p.z)) - mix(0.03, 0.075, s);
-  d = max(d, x - 0.32);
-  d = max(d, -x - 0.62);
-  float sw = 0.022 * sin(t * 0.9) + 0.012 * sing;
-  vec3 A = vec3(-0.12, -0.22, 0.0), B = vec3(0.22, -0.28, 0.0), C = vec3(0.5, 0.1, 0.0), D = vec3(0.34 + sw, 0.42, 0.0), E = vec3(0.13 + sw * 1.5, 0.47, 0.0);
-  float b = sdLimb(p, A, B, 0.075, 0.08);
-  b = smin(b, sdLimb(p, B, C, 0.08, 0.058), 0.04);
-  b = smin(b, sdLimb(p, C, D, 0.058, 0.04), 0.04);
-  b = smin(b, sdLimb(p, D, E, 0.04, 0.036), 0.03);
-  vec3 h = p - E;
-  float hd = sdEll(h - vec3(-0.05, -0.012, 0.0), vec3(0.09, 0.038, 0.042));                       // the head, long and low
-  hd = smin(hd, sdEll(h - vec3(-0.125, -0.024, 0.0), vec3(0.05, 0.022, 0.028)), 0.02);
-  hd = smin(hd, sdLimb(h, vec3(0.005, 0.02, 0.0), vec3(0.075, 0.075, 0.0), 0.016, 0.003), 0.012);  // a horn
-  hollow(length(h - vec3(-0.048, 0.003, 0.038)) - 0.012);                                         // the eye
-  return smin(smin(d, b, 0.03), hd, 0.02) * 0.8;
-}
 //@ kraken
-// arms from underneath: thick at the water, thin as a whip at the tip, each curling tighter as it goes
-float figKraken(vec3 p, float t, float sing) {
+// arms from underneath: thick at the water, thin as a whip at the tip, each curling tighter as it goes.
+// They lean toward your cursor and coil when you hold.
+float figKraken(vec3 p, float t, float sing, float press, vec2 look) {
   float d = 1e3;
   for (int j = 0; j < 3; j++) {
     float fj = float(j), side = fj == 1.0 ? -1.0 : 1.0;
     vec3 a = vec3(fj == 0.0 ? -0.03 : fj == 1.0 ? -0.33 : 0.34, -0.72, fj == 0.0 ? -0.05 : 0.08);
-    float L = fj == 0.0 ? 0.24 : 0.17, r = fj == 0.0 ? 0.125 : 0.095, ang = side * -0.14;
-    float curl = side * (0.1 + 0.04 * sin(t * 0.8 + fj * 2.1) + 0.015 * sing);
+    float L = fj == 0.0 ? 0.24 : 0.17, r = fj == 0.0 ? 0.125 : 0.095, ang = side * -0.14 + look.x * 0.2;
+    float curl = side * (0.1 + 0.04 * sin(t * 0.8 + fj * 2.1) + 0.015 * sing + 0.09 * press);
     for (int i = 0; i < 10; i++) {
       float fi = float(i);
       ang += curl * (0.25 + fi * fi * 0.13);
@@ -412,243 +261,122 @@ float figKraken(vec3 p, float t, float sing) {
   }
   return d * 0.82;
 }
-//@ elephant
-// after Dalí: the great weight of it on legs that should snap, an obelisk on its back
-float figElephant(vec3 p, float t) {
-  float w = sin(t * 0.8);
-  vec3 q = p - vec3(0.0, 0.3, 0.0);
-  float d = sdEll(q, vec3(0.27, 0.15, 0.13));                                                    // the body
-  d = smin(d, sdEll(q - vec3(0.27, 0.03, 0.0), vec3(0.1, 0.1, 0.09)), 0.05);                     // the head
-  d = smin(d, sdEll(q - vec3(0.22, 0.04, 0.0), vec3(0.06, 0.09, 0.15)), 0.02);                   // ears
-  vec3 T0 = vec3(0.34, 0.0, 0.0), T1 = vec3(0.42, -0.1, 0.0), T2 = vec3(0.42, -0.24, 0.0), T3 = vec3(0.5, -0.33 + 0.02 * w, 0.0);
-  d = smin(d, sdLimb(q, T0, T1, 0.04, 0.028), 0.03);                                             // the trunk
-  d = smin(d, sdLimb(q, T1, T2, 0.028, 0.02), 0.015);
-  d = smin(d, sdLimb(q, T2, T3, 0.02, 0.012), 0.012);
-  d = min(d, sdLimb(q, vec3(0.33, -0.03, 0.03), vec3(0.47, -0.12, 0.03), 0.014, 0.004));         // a tusk
-  d = smin(d, sdLimb(q, vec3(-0.27, 0.03, 0.0), vec3(-0.35, -0.14, 0.0), 0.012, 0.005), 0.01);   // the tail
-  // the obelisk
-  vec3 ob = q - vec3(-0.02, 0.15, 0.0);
-  float w0 = 0.055 - ob.y * 0.11;
-  float o = max(abs(ob.x) - w0, abs(ob.z) - w0);
-  o = max(o, dot(vec2(abs(ob.x), ob.y), vec2(0.8, 0.6)) - 0.26);
-  o = max(o, -ob.y);
-  d = smin(d, o * 0.8, 0.01);
-  d = smin(d, sdEll(q - vec3(-0.02, 0.14, 0.0), vec3(0.12, 0.022, 0.1)), 0.012);
-  // four legs: long, thin, knotted at the knee, the sway of a walk
-  vec3 hips[2]; hips[0] = vec3(0.18, -0.08, 0.075); hips[1] = vec3(-0.18, -0.08, 0.075);
-  vec3 m = vec3(q.x, q.y, abs(q.z));
-  float sgn = q.z > 0.0 ? 1.0 : -1.0;
-  for (int i = 0; i < 2; i++) {
-    float ph = (i == 0 ? 0.0 : 3.14) + (sgn > 0.0 ? 0.0 : 1.57);
-    vec3 h = hips[i], k = h + vec3(0.03 * sin(t * 0.8 + ph), -0.42, 0.012), f = k + vec3(0.05 * sin(t * 0.8 + ph), -0.55, 0.012);
-    d = smin(d, sdLimb(m, h, k, 0.02, 0.008), 0.012);
-    d = smin(d, sdLimb(m, k, f, 0.008, 0.004), 0.008);
-    d = min(d, length(m - k) - 0.014);
+//@ serpent
+// its whole body, a rope of points dragged along behind your cursor (worked out on the CPU, in the sheet's
+// own axes, z up): only the humps and the neck come through. The head is built along the last link.
+uniform vec3 uFigTrail[16];
+float figSerpent(vec3 p, float t, float sing, float press) {
+  float above = p.z - 0.85;
+  if (above > 0.2) return above;                                                                 // nothing reaches this high
+  float d = 1e3, rPrev = 0.006;
+  for (int i = 15; i > 0; i--) {
+    float s = float(i - 1) / 15.0;                                                             // 0 the head, 1 the tail
+    float r = mix(0.058, 0.098, smoothstep(0.0, 0.22, s)) * (1.0 - 0.94 * smoothstep(0.42, 1.0, s));
+    d = min(d, sdLimb(p, uFigTrail[i], uFigTrail[i - 1], rPrev, r));
+    rPrev = r;
   }
-  return d * 0.85;
+  vec3 f = normalize(uFigTrail[0] - uFigTrail[1]);
+  vec3 r = normalize(cross(f, vec3(0.0, 0.0, 1.0)) + vec3(1e-4, 0.0, 0.0)), u = cross(r, f);
+  vec3 o = p - uFigTrail[0];
+  if (dot(o, o) > 0.3) return d * 0.85;                                                       // too far for the head to matter
+  vec3 q = vec3(dot(o, r), dot(o, u), dot(o, f));                                              // across, up, along the snout
+  vec3 m = mx(q);
+  float hd = sdEll(q - vec3(0.0, 0.012, 0.06), vec3(0.078, 0.048, 0.125));                     // the skull
+  hd = smin(hd, sdEll(q - vec3(0.0, -0.002, 0.17), vec3(0.046, 0.03, 0.075)), 0.025);          // the snout
+  hd = smin(hd, sdEll(m - vec3(0.044, 0.042, 0.075), vec3(0.026, 0.018, 0.045)), 0.012);       // the brow
+  hd = smin(hd, sdLimb(m, vec3(0.03, 0.045, 0.0), vec3(0.068, 0.15, -0.16), 0.019, 0.003), 0.012);   // the horns, swept back
+  float open = clamp(sing * 0.5 + press, 0.0, 1.0) * 0.6;
+  vec3 j = q - vec3(0.0, -0.015, -0.02);
+  j.yz = rot(open) * j.yz;
+  hd = min(hd, sdEll(j - vec3(0.0, -0.016, 0.125), vec3(0.05, 0.016, 0.125)));                 // the jaw
+  hollow(length(m - vec3(0.062, 0.026, 0.09)) - 0.012);                                        // the eye
+  return min(d, hd) * 0.85;
 }
-//@ stag
-float figStag(vec3 p, float t) {
-  p *= 1.25;
-  p.y += 0.04;
-  vec3 m = mx(p);
-  vec3 k = p / 1.5, km = mx(k);
-  float d = sdEll(k - vec3(0.0, 0.07, -0.01), vec3(0.105, 0.085, 0.085));                    // the braincase
-  d = smin(d, sdEll(k - vec3(0.0, -0.1, 0.02), vec3(0.068, 0.17, 0.06)), 0.05);              // the long face
-  d = smin(d, sdEll(km - vec3(0.07, 0.03, 0.035), vec3(0.042, 0.04, 0.045)), 0.03);          // rims round the eyes
-  d = smin(d, sdEll(k - vec3(0.0, -0.26, 0.03), vec3(0.04, 0.05, 0.04)), 0.03);              // the muzzle
-  d *= 1.5;
-  hollow(sdEll(km - vec3(0.072, 0.03, 0.07), vec3(0.03, 0.03, 0.25)) * 1.2);                  // eye sockets, deep
-  hollow(sdEll(km - vec3(0.016, -0.17, 0.07), vec3(0.016, 0.08, 0.2)) * 1.2);                 // the long nose
-  vec3 a0 = vec3(0.06, 0.12, 0.0), a1 = vec3(0.19, 0.26, 0.0), a2 = vec3(0.32, 0.46, -0.02), a3 = vec3(0.32, 0.7, -0.06);
-  d = smin(d, sdLimb(m, a0, a1, 0.03, 0.022), 0.02);
-  d = smin(d, sdLimb(m, a1, a2, 0.022, 0.018), 0.008);
-  d = smin(d, sdLimb(m, a2, a3, 0.018, 0.009), 0.006);
-  d = min(d, sdLimb(m, a1, a1 + vec3(-0.07, 0.18, 0.04), 0.017, 0.006));                      // the tines
-  vec3 md = mix(a1, a2, 0.55);
-  d = min(d, sdLimb(m, md, md + vec3(0.16, 0.09, 0.0), 0.015, 0.005));
-  d = min(d, sdLimb(m, a2, a2 + vec3(-0.11, 0.17, 0.0), 0.014, 0.005));
-  d = min(d, sdLimb(m, a2 + vec3(0.0, 0.1, -0.02), a2 + vec3(0.14, 0.2, -0.02), 0.012, 0.004));
-  return d * 0.8;
-}
-//@ dog
-// Goya's dog: a head, small, looking up from behind a slope that fills the world
-float figDog(vec3 p, float t) {
-  float d = sdEll(p - vec3(-0.5, -0.62, -0.05), vec3(0.9, 0.56, 0.4));                           // the slope
-  vec3 h = (p - vec3(0.14, 0.0 + 0.008 * sin(t * 0.7), 0.0)) / 1.5;
-  h.xy = rot(-0.5) * h.xy;
-  float e = sdEll(h, vec3(0.085, 0.078, 0.07));                                                 // the skull
-  e = smin(e, sdLimb(h, vec3(0.05, -0.015, 0.0), vec3(0.135, -0.03, 0.0), 0.056, 0.04), 0.03);    // the muzzle
-  e = smin(e, length(h - vec3(0.155, -0.012, 0.0)) - 0.022, 0.01);                              // the nose
-  e = smin(e, sdEll(h - vec3(-0.075, -0.05, 0.0), vec3(0.058, 0.115, 0.024)), 0.012);           // the ear, hanging
-  hollow((length(h - vec3(0.03, 0.03, 0.058)) - 0.014) * 1.5);                                   // the eye
-  e *= 1.5;
-  e = smin(e, sdLimb(p, vec3(0.14, -0.05, 0.0), vec3(0.04, -0.5, -0.03), 0.09, 0.15), 0.04);    // the neck
-  return smin(d, e, 0.04) * 0.85;
-}
-//@ liner
-// a liner going down by the head, her stern in the air, the screws turning on nothing
-float figLiner(vec3 p, float t) {
-  vec3 q = p - vec3(0.02, 0.0, 0.0);
-  q.xy = rot(-0.68) * q.xy;
-  float hw = 0.075 * (1.0 - 0.45 * smoothstep(0.3, 1.0, abs(q.x)));
-  float hull = sdBox(q - vec3(0.0, -0.05, 0.0), vec3(0.72, 0.075, hw));
-  float up = sdBox(q - vec3(0.08, 0.075, 0.0), vec3(0.5, 0.055, hw * 0.82));
-  float top = sdBox(q - vec3(0.12, 0.15, 0.0), vec3(0.4, 0.024, hw * 0.7));
-  float d = min(min(hull, up), top);
-  d = smin(d, sdEll(q - vec3(-0.72, -0.03, 0.0), vec3(0.08, 0.1, hw)), 0.02);                    // the counter stern (she's up on the left)
-  // the funnels, raked, the same way the hull goes
-  for (int i = 0; i < 4; i++) {
-    float x = -0.22 + float(i) * 0.19;
-    vec3 f = q - vec3(x, 0.26, 0.0);
-    f.x += f.y * 0.25;
-    d = min(d, max(length(f.xz * vec2(1.0, 1.3)) - 0.038, abs(f.y) - 0.1));
-  }
-  d = min(d, sdCapsule(q, vec3(-0.5, 0.15, 0.0), vec3(-0.53, 0.46, 0.0), 0.009));                // masts
-  d = min(d, sdCapsule(q, vec3(0.5, 0.15, 0.0), vec3(0.47, 0.42, 0.0), 0.009));
-  vec3 sc = q - vec3(-0.8, -0.085, 0.0);                                                         // a rudder and the screws
-  d = min(d, sdBox(sc + vec3(-0.02, 0.0, 0.0), vec3(0.012, 0.06, 0.006)));
-  sc.yz = rot(t * 1.1) * sc.yz;
-  d = min(d, max(length(sc.yz * vec2(1.0, 3.0)) - 0.06, abs(sc.x - 0.05) - 0.01));
-  d = min(d, max(length(sc.zy * vec2(1.0, 3.0)) - 0.06, abs(sc.x - 0.05) - 0.01));
+//@ manta
+// a ray under the sheet: flat, wide, its wings a wave running out to the tips, the tips breaking the surface.
+// Across, up, forward (its frame turns as it swims).
+float figManta(vec3 p, float t, float sing, float press) {
+  float ax = abs(p.x), u = clamp(ax / 1.0, 0.0, 1.0);
+  float amp = 0.1 + 0.05 * sing + 0.2 * press;
+  p.y -= amp * sin(t * 2.0 - ax * 2.4) * ax * (0.5 + ax);                                       // the wave, stronger toward the tips
+  p.z += 0.09 * ax * sin(t * 2.0 - ax * 2.4 - 1.2);                                             // and they trail behind it
+  // the outline: a leading edge sweeping back to the tip, a trailing edge coming in to meet it
+  float lead = mix(0.34, -0.26, pow(u, 0.72)), trail = mix(-0.5, -0.31, u);
+  float zc = 0.5 * (lead + trail), hc = max(0.5 * (lead - trail), 0.005);
+  float zz = clamp((p.z - zc) / hc, -1.0, 1.0);
+  float th = (0.012 + 0.11 * (1.0 - u) * (1.0 - u)) * sqrt(max(1.0 - zz * zz, 0.0)) + 0.004;     // thick along the spine, thin at the edges
+  float d = max(max(abs(p.y) - th, abs(p.z - zc) - hc), ax - 1.0) * 0.55;
+  d = smin(d, sdEll(p - vec3(0.0, 0.03, 0.06), vec3(0.17, 0.072, 0.3)), 0.05);                  // the body
+  vec3 m = vec3(ax, p.yz);
+  d = smin(d, sdEll(m - vec3(0.14, 0.036, 0.25), vec3(0.03, 0.03, 0.05)), 0.03);                 // the eyes, on the corners of the head
+  // the two horns at the front, curled in
+  float cv = 0.02 * sin(t * 1.3);
+  d = smin(d, sdLimb(m, vec3(0.145, 0.0, 0.3), vec3(0.17, -0.008, 0.42), 0.033, 0.024), 0.03);
+  d = smin(d, sdLimb(m, vec3(0.17, -0.008, 0.42), vec3(0.115 + cv, -0.012, 0.53), 0.024, 0.01), 0.015);
+  // the tail, a whip
+  vec3 b0 = vec3(0.0, 0.0, -0.46), b1 = vec3(0.05 * sin(t * 1.6), 0.0, -0.78), b2 = vec3(0.11 * sin(t * 1.6 - 0.9), 0.0, -1.16);
+  d = smin(d, sdLimb(p, b0, b1, 0.024, 0.012), 0.03);
+  d = min(d, sdLimb(p, b1, b2, 0.012, 0.003));
   return d * 0.9;
 }
-//@ liberty
-// the crown, sunk to the lips, and the arm still holding it up
-float figLiberty(vec3 p, float t) {
-  vec3 q = p - vec3(-0.16, -0.05, 0.0);
-  float d = sdEll(q, vec3(0.135, 0.17, 0.14));                                                   // the head, heavy
-  d = smin(d, sdEll(q - vec3(0.0, -0.13, 0.02), vec3(0.1, 0.09, 0.1)), 0.04);
-  d = smin(d, sdEll(q - vec3(0.0, -0.02, 0.135), vec3(0.018, 0.05, 0.03)), 0.02);                // the nose
-  d = smin(d, sdEll(q - vec3(0.0, 0.065, 0.115), vec3(0.11, 0.018, 0.03)), 0.03);                // the brow
-  vec3 m = mx(q);
-  hollow(sdEll(m - vec3(0.052, 0.03, 0.125), vec3(0.026, 0.016, 0.1)));
-  d = smin(d, sdEll(q - vec3(0.0, 0.125, -0.01), vec3(0.15, 0.03, 0.14)), 0.015);                // the diadem
-  float a = atan(q.x, q.y + 0.08);                                                               // seven spikes, a fan
-  float w = 0.42, i = clamp(floor(a / w + 0.5), -3.0, 3.0);
-  vec2 v = rot(i * w) * vec2(q.x, q.y + 0.08);
-  d = min(d, sdLimb(vec3(v, q.z + 0.005), vec3(0.0, 0.2, 0.0), vec3(0.0, 0.47, 0.0), 0.03, 0.002));
-  // the arm, the robe's sleeve falling from it, and the torch
-  vec3 sh = vec3(0.1, -0.4, -0.04), el = vec3(0.3, -0.04, 0.0), wr = vec3(0.35, 0.34, 0.0);
-  float arm = sdLimb(p, sh, el, 0.1, 0.066);
-  arm = smin(arm, sdLimb(p, el, wr, 0.066, 0.042), 0.03);
-  arm = smin(arm, sdEll(p - vec3(0.35, 0.37, 0.0), vec3(0.05, 0.06, 0.05)), 0.02);               // the fist
-  vec3 tq = p - vec3(0.37, 0.36, 0.0);
-  float torch = sdLimb(tq, vec3(0.0, -0.06, 0.0), vec3(0.0, 0.18, 0.0), 0.022, 0.032);
-  torch = smin(torch, max(length(tq.xz) - 0.085, abs(tq.y - 0.19) - 0.014), 0.008);              // the balcony
-  float fl = 0.005 * sin(t * 2.3);
-  torch = min(torch, sdLimb(tq, vec3(0.0, 0.2, 0.0), vec3(fl, 0.31, 0.0), 0.045, 0.002));         // the flame
-  return min(min(d, arm), torch) * 0.85;
-}
-//@ moai
-// one of the Easter Island heads, seen nearly side on: a flat top, a shelf of a brow, a long wedge of a
-// nose, pursed lips, a jaw like a step
-float moaiHead(vec3 p) {
-  vec3 m = mx(p);
-  float d = sdBox(p - vec3(0.0, 0.12, -0.04), vec3(0.11, 0.19, 0.1)) - 0.045;                    // the skull
-  d = smin(d, sdBox(p - vec3(0.0, -0.3, -0.05), vec3(0.14, 0.22, 0.1)) - 0.05, 0.05);            // the neck and chest
-  d = smin(d, sdBox(p - vec3(0.0, 0.17, 0.08), vec3(0.11, 0.025, 0.06)) - 0.012, 0.012);         // the brow, a shelf
-  d = smin(d, sdLimb(p, vec3(0.0, 0.15, 0.12), vec3(0.0, -0.08, 0.21), 0.03, 0.05), 0.014);      // the nose
-  d = smin(d, sdBox(p - vec3(0.0, -0.13, 0.11), vec3(0.075, 0.012, 0.055)) - 0.012, 0.014);      // the upper lip, out
-  d = smin(d, sdBox(p - vec3(0.0, -0.18, 0.1), vec3(0.07, 0.012, 0.05)) - 0.01, 0.012);          // the lower lip, pursed
-  d = smin(d, sdBox(p - vec3(0.0, -0.26, 0.085), vec3(0.08, 0.03, 0.06)) - 0.01, 0.014);         // the chin
-  d = smin(d, sdBox(m - vec3(0.13, 0.03, -0.03), vec3(0.018, 0.14, 0.03)), 0.012);               // long ears
-  hollow(sdEll(m - vec3(0.07, 0.1, 0.1), vec3(0.04, 0.03, 0.06)));                               // and no eyes, shadow under the shelf
-  return d;
-}
-float figMoai(vec3 p) {
-  float d = moaiHead((p - vec3(-0.12, 0.1, 0.0)) / 1.25) * 1.25;
-  vec3 q = (p - vec3(0.5, -0.1, -0.2)) / 0.92;
-  return min(d, moaiHead(q) * 0.9) * 0.9;
-}
-//@ steeple
-// a church under water to its belfry, the spire leaning
-float figSteeple(vec3 p) {
-  vec3 q = p;
-  q.y += 0.1;
-  float tower = sdBox(q - vec3(0.0, -0.15, 0.0), vec3(0.13, 0.42, 0.13));
-  float a = max(abs(q.x), abs(q.z));
-  float spire = max(a - (0.135 - (q.y - 0.27) * 0.21), abs(q.y - 0.62) - 0.35);
-  float d = min(tower, spire * 0.92);
-  d = min(d, sdBox(mx(q) - vec3(0.148, 0.28, 0.148), vec3(0.018, 0.09, 0.018)));                  // pinnacles
-  d = min(d, sdCapsule(q, vec3(0.0, 0.96, 0.0), vec3(0.0, 1.14, 0.0), 0.012));                    // the cross
-  d = min(d, sdCapsule(q, vec3(-0.05, 1.07, 0.0), vec3(0.05, 1.07, 0.0), 0.011));
-  vec3 n = q - vec3(-0.34, -0.15, -0.06);                                                         // the nave, its roof
-  float nave = sdBox(n, vec3(0.22, 0.15, 0.1));
-  float roof = dot(vec2(abs(n.z), n.y), vec2(0.75, 0.66)) - 0.17;
-  nave = min(nave, max(max(roof, abs(n.x) - 0.23), -n.y));
-  d = min(d, nave);
-  // the belfry's arches and a clock, right through it
-  vec3 b = vec3(abs(q.x), q.y, q.z) - vec3(0.0, 0.13, 0.13);
-  float arch = min(max(abs(q.x) - 0.05, abs(q.y - 0.09) - 0.09), length(q.xy - vec2(0.0, 0.18)) - 0.05);
-  hollow(max(arch, abs(q.z) - 0.3));
-  hollow(max(length(q.xy - vec2(0.0, -0.1)) - 0.05, abs(q.z - 0.13) - 0.04));
-  return d * 0.85;
-}
-//@ isle
-// cliffs in a horseshoe with the middle fallen away, one dark door, and cypresses straight up out of it
-float figIsle(vec3 p, float t) {
-  float x = p.x, ax = abs(x);
-  float crack = 0.03 * abs(sin(x * 26.0 + 1.0)) + 0.016 * abs(sin(x * 67.0)) + 0.008 * sin(p.y * 29.0);
-  float top = mix(0.34 + 0.09 * sin(x * 2.0 + 0.4), -0.1, smoothstep(0.26, 0.11, ax)) - 0.72 * smoothstep(0.5, 0.86, ax) - crack;
-  float block = max((p.y - top) * 0.7, abs(p.z + 0.04 * cos(x * 3.6)) - 0.15);
-  float d = max(block, ax - 0.86);
-  float c = 1e3;
-  for (int i = 0; i < 5; i++) {                                                                  // the cypresses: narrow flames, tall
-    float fi = float(i), xx = -0.17 + fi * 0.085;
-    float h = 0.56 + 0.2 * sin(fi * 2.4 + 0.5);
-    c = smin(c, sdEll(p - vec3(xx + 0.005 * sin(t * 0.6 + fi), -0.24 + h * 0.5, -0.04), vec3(0.052, h * 0.56, 0.05)), 0.01);
+//@ wings
+// a wing is a hand: the feathers are its fingers, broad and overlapping, fanned from the bone with the long
+// ones at the end. Something is going under with them still up. Hold and they sweep forward.
+float figWings(vec3 p, float t, float sing, float press) {
+  float body = sdEll(p - vec3(0.0, -0.56, -0.04), vec3(0.17, 0.3, 0.13));                       // a back, going down
+  vec3 m = mx(p) - vec3(0.05, -0.36, 0.0);
+  float flap = 0.12 * sin(t * 0.9) + 0.06 * sing + 0.75 * press;
+  m.xz = rot(flap) * m.xz;
+  float open = 1.0 + 0.08 * sing + 0.04 * sin(t * 0.9 + 0.8) - 0.16 * press;
+  vec3 A = vec3(0.0), B = vec3(0.3, 0.22, -0.02), C = vec3(0.5, 0.5, 0.0);
+  float d = sdLimb(m, A, B, 0.085, 0.06);
+  d = smin(d, sdLimb(m, B, C, 0.06, 0.04), 0.04);
+  for (int i = 0; i < 11; i++) {
+    float f = float(i) / 10.0;
+    vec3 r = mix(mix(A, B, min(f * 1.8, 1.0)), C, max((f - 0.555) / 0.445, 0.0));                 // where it grows from
+    float ang = mix(-0.72, 1.15, pow(f, 1.25)) * open;                                           // out and down near the body, up at the end
+    float L = mix(0.3, 0.62, smoothstep(0.0, 0.8, f));
+    vec3 dir = vec3(cos(ang), sin(ang), -0.12 - 0.1 * f + 0.1 * f * sin(t * 1.1 + f * 3.0));
+    vec3 e = r + dir * L;
+    vec3 c = mix(r, e, 0.55) + vec3(-dir.y, dir.x, 0.0) * 0.035;                                 // each one bowed a little
+    float fd = min(sdLimb(m, r, c, 0.048, 0.06), sdLimb(m, c, e, 0.06, 0.03));
+    fd = max(fd, abs(m.z - mix(r.z, e.z, clamp(dot(m - r, dir) / L, 0.0, 1.0))) - 0.022);        // flat, a blade, not a sausage
+    d = smin(d, fd, 0.004);
   }
-  d = min(d, c);
-  hollow(sdBox(p - vec3(-0.52, -0.1, 0.0), vec3(0.042, 0.09, 0.3)));                            // a door in the rock
-  hollow(sdBox(p - vec3(0.5, -0.04, 0.0), vec3(0.034, 0.075, 0.3)));
-  return d * 0.85;
-}
-//@ providence
-// the pyramid on the dollar: its top floating free, an eye in it that finds you
-float figProvidence(vec3 p, float t, vec2 look, float sing) {
-  vec3 q = p; q.y += 0.1;
-  float a = max(abs(q.x), abs(q.z));
-  float slope = dot(vec2(a, q.y), vec2(0.8, 0.6));
-  float py = max(max(slope - 0.3, -q.y - 0.8), q.y - 0.2);
-  py += 0.003 * smoothstep(0.7, 0.95, sin(q.y * 58.0));                                          // the courses of stone
-  float lift = 0.07 + 0.02 * sin(t * 0.7) + 0.05 * sing;
-  vec3 c = q - vec3(0.0, lift, 0.0);
-  float cap = max(dot(vec2(max(abs(c.x), abs(c.z)), c.y), vec2(0.8, 0.6)) - 0.3, 0.24 - c.y);
-  float d = min(py, cap) * 0.9;
-  vec3 e = c - vec3(0.0, 0.335, 0.0);                                                            // the eye, an almond right through it
-  float alm = max(length(e.xy - vec2(0.0, -0.075)) - 0.1, length(e.xy - vec2(0.0, 0.075)) - 0.1);
-  float ball = length(e.xy - vec2(look.x * 0.012, look.y * 0.008)) - 0.026;
-  hollow(max(max(alm, -ball), abs(e.z) - 0.4));
-  return d;
-}
-//@ moon
-// a crescent with a profile in its inner curve
-float figMoon(vec3 p, float t) {
-  vec3 q = p;
-  q.xy = rot(0.06 * sin(t * 0.3)) * q.xy;
-  float d = length(q.xy) - 0.42;
-  vec3 c = q - vec3(0.2, 0.05, 0.0);
-  float bite = length(c.xy) - 0.34;
-  d = smaxF(d, -bite, 0.012);
-  float f = sdEll(q - vec3(-0.11, 0.09, 0.0), vec3(0.09, 0.1, 0.1));                            // a brow
-  f = smin(f, sdLimb(q, vec3(-0.11, 0.06, 0.0), vec3(0.015, -0.02, 0.0), 0.05, 0.014), 0.03);    // the nose
-  f = smin(f, sdEll(q - vec3(-0.08, -0.12, 0.0), vec3(0.06, 0.03, 0.05)), 0.03);                 // the lips
-  f = smin(f, sdEll(q - vec3(-0.09, -0.21, 0.0), vec3(0.07, 0.05, 0.05)), 0.03);                 // the chin
-  d = smin(d, f, 0.03);
-  d = max(d, abs(q.z) - 0.09 * sqrt(max(1.0 - dot(q.xy, q.xy) / 0.2, 0.05)));                    // lens-thin
-  hollow(max(length((q.xy - vec2(-0.085, 0.09)) * vec2(1.0, 2.2)) - 0.03, abs(q.z) - 0.2));
-  return d * 0.85;
+  return smin(d, body, 0.08) * 0.8;
 }
 //@ eye
-// an eye the size of a balloon, half under; the iris turns to find you, the pupil goes down for ever
-float figEye(vec3 p, vec2 look) {
-  vec3 dir = normalize(vec3(look.x * 0.75, look.y * 0.75, 1.0));
+// an eye the size of a balloon, half under: a ball in a socket, an almond of lid, lashes along the top. The
+// iris turns to find you, the pupil goes down for ever; it blinks now and then, and when you click.
+float figEye(vec3 p, float t, vec2 look, float press) {
+  vec3 dir = normalize(vec3(look.x * 0.6, look.y * 0.45, 1.0));
   float ball = length(p) - 0.36;
   float c = dot(p, dir) / max(length(p), 1e-4);
-  ball += 0.012 * smoothstep(0.86, 0.9, c) - 0.006 * smoothstep(0.92, 0.95, c) * sin(atan(p.y, p.x) * 40.0);
-  hollow(sdCapsule(p, dir * 0.6, dir * 0.05, 0.075));
-  return ball * 0.9;
+  ball -= 0.016 * smoothstep(0.8, 0.86, c) * (1.0 - smoothstep(0.93, 0.97, c));                 // the iris, standing proud
+  float pupil = sdCapsule(p, dir * 0.6, dir * 0.05, 0.095);
+  float lid0 = pow(0.5 + 0.5 * sin(t * 0.37 + sin(t * 0.13) * 3.0), 40.0);                       // now and then
+  float shut = max(press, lid0);
+  // the lids: a shell over the ball, open in an almond that closes
+  float W = 0.34, k = clamp(1.0 - (p.x * p.x) / (W * W), 0.0, 1.0);
+  float top = mix(0.215, -0.045, shut) * k - 0.02, bot = mix(-0.17, -0.05, shut) * k - 0.02;
+  float gap = max(max(p.y - top, bot - p.y), abs(p.x) - W);
+  float R = length(p), shell = abs(R - 0.385) - 0.027;
+  float lid = smaxF(shell, -gap, 0.012);
+  lid = max(lid, -p.z - 0.2);
+  float d = smin(ball, lid, 0.006);
+  // the brow, a fold above it
+  d = smin(d, sdEll(p - vec3(0.0, 0.33, 0.13), vec3(0.42, 0.075, 0.17)), 0.09);
+  // lashes, from the edge of the top lid, curling up and out
+  vec3 m = mx(p);
+  for (int i = 0; i < 4; i++) {
+    float f = (float(i) + 0.5) / 4.0;
+    float x = f * W * 0.92, y = mix(0.215, -0.045, shut) * (1.0 - x * x / (W * W)) - 0.02;
+    vec3 a = vec3(x, y, sqrt(max(0.1482 - x * x - y * y, 0.0)));
+    vec3 e = a + vec3(0.045 + f * 0.1, mix(0.15, -0.03, shut), 0.09);
+    d = smin(d, sdLimb(m, a, e, 0.012, 0.002), 0.008);
+  }
+  if (shut < 0.92) hollow(pupil);
+  return d * 0.85;
 }
 //@ monolith
 float figMonolith(vec3 p) {
@@ -663,7 +391,7 @@ const TAIL = `
 vec2 figFlow(vec2 q) {
   if (FIG < 0.001 || FIGREP > 0.5) return q;
   vec2 c = vec2(FIGX, FIGY), o = q - c;
-  float R = 0.3 * FIGS * FIG, r2 = dot(o, o), k = R * R / (r2 + R * R);
+  float R = 0.3 * FIGS * FIG * FIGSWIRL, r2 = dot(o, o), k = R * R / (r2 + R * R);
   q = c + rot(0.5 * k) * o * (1.0 - 0.28 * k);
   float r = sqrt(r2) / FIGS;
   q += o / max(sqrt(r2), 1e-4) * FIGS * 0.016 * FIG * FIGRING * sin(r * 30.0 - FIGT * 2.6) * exp(-r * 2.4) * smoothstep(0.03, 0.2, r);
@@ -741,7 +469,7 @@ export function figuresGLSL(ids = []) {
   const cases = ids.map(id => `    case ${FIGURE_INDEX[id]}: return ${FIGURES[FIGURE_INDEX[id]].call};`).join('\n');
   return HEAD + need.map(id => CHUNKS[id] || '').join('\n') + `
 float figure3D(int id, vec3 p) {
-  float t = FIGT + 0.6 * gFRow, sing = FIGSING;
+  float t = FIGT + 0.6 * gFRow, sing = FIGSING, press = FIGP;
   vec2 look = vec2(FIGLX, FIGLY);
   switch (id) {
 ${cases}

@@ -7,9 +7,9 @@ import { World, defaultValues, cloneValues, stepFactor, mulberry32 } from './eng
 import { LOOKS, GROUPS, NEUTRAL, look, PALETTES, COLOR_KEYS, camKind } from './engine/looks.js';
 import { PARAM_BY_NAME, hexToRgb, rgbToHex, isColorParam, DEFAULTS } from './engine/params.js';
 import { applyFeel, defaultFeel, breed } from './engine/feel.js';
-import { ADDS, defaultAdds, Ball, Figures, applyHands, applyFace, applyOrbs } from './adds.js';
+import { ADDS, defaultAdds, Ball, Figures, CursorHand, applyHands, applyFace, applyOrbs } from './adds.js';
 import { FIGURES, FIGURE_INDEX, figureBank } from './engine/figures.js';
-import { rayOnSheet } from './engine/camera.js';
+import { rayOnSheet, rayAt, noSheet, camDist } from './engine/camera.js';
 import { Director } from './director.js';
 import { AudioEngine } from './audio.js';
 import { SongLibrary, isSong, loadListened, saveListened } from './songs.js';
@@ -65,7 +65,7 @@ const app = {
   ties: {},                 // a value → a music source: { bulge: { src: 'bass', amt: 0.3 } }
   tempo: { bpm: 70, beatsPerBar: 2, fromSong: false },
   // the cinematic camera: glides from shot to shot on the bar; can change the look as it goes
-  cine: { on: false, speed: 0.6, looks: true, every: 2, groups: GROUPS.map(g => g[0]), waves: 0.6 },
+  cine: { on: false, speed: 0.5, looks: true, every: 1, groups: GROUPS.map(g => g[0]), waves: 0.35 },
   director: new Director(),
   // tools, and your own camera moves (on top of the look's, or the director's)
   tool: 'ripple',
@@ -114,6 +114,7 @@ app.pickLook = (id, seconds = app.glide) => {
   if (!LOOKS[id]) return;
   app.lookId = id;
   if (app.film?.score) app.film.held = app.film.scene;        // you chose: the film carries on from the next scene
+  app.cine.keep = false;                                      // the new look's own camera, unless the director's flying
   app.world.morphTo(lookValues(id), seconds);
   ui?.lookChanged();
 };
@@ -287,8 +288,16 @@ function applySound(v, m) {
     const p = PARAM_BY_NAME[key];
     if (p && typeof v[key] === 'number') v[key] = clamp(v[key] + ride[key] * m.sway * M, p.min, p.max);
   }
+  // and on a long slow swell of its own, over sixteen bars, so it's never just sitting on one picture
+  if ((m.known && app.film.auto) || app.wandering) {
+    let n = 0;
+    for (const key in ride) {
+      const p = PARAM_BY_NAME[key];
+      if (p && typeof v[key] === 'number') v[key] = clamp(v[key] + ride[key] * 1.1 * Math.sin(m.bar * Math.PI / 8 + n * 2.1), p.min, p.max);
+      n++;
+    }
+  }
   v.flow += m.glide * 1.3 * M;
-  v.roll += m.sway * 0.05 * M;
   v.tx += m.sway * 0.025 * M * v.frame;
   v.mwave = M * (0.55 + 0.75 * m.voice);
   v.mland = M * 0.7 * clamp((v.pitch - 0.25) * 1.2, 0, 1);
@@ -327,45 +336,47 @@ app.setMood = id => { if (MOODS[id]) app.film.mood = id; };
 // the cinematic camera, before speeds and music (so the bar's sway and the bass thump still ride on top)
 app.setCinema = on => {
   app.cine.on = on;
+  app.cine.keep = !on;                            // off: it comes to rest where it is
+  if (app.film.driving) app.film.camHeld = !on;   // you've got the camera, or given it back; the next scene takes it again
   ui.cinemaChanged();
 };
 function applyCinema(v, m, dt) {
   const C = app.cine, D = app.director;
   if (D.due(m, C) && C.looks && (D.shots + 1) % C.every === 0) {
     const ids = Object.keys(LOOKS).filter(k => k !== app.lookId && C.groups.includes(LOOKS[k].group));
-    if (ids.length) app.pickLook(ids[Math.floor(Math.random() * ids.length)], Math.max(2, Math.round(12 - 10 * C.speed)) * m.barLen * 0.75);
+    if (ids.length) app.pickLook(ids[Math.floor(Math.random() * ids.length)], Math.max(5, D.len[1] * 0.8));
   }
   D.update(dt, v, camKind(app.lookId), m, C);
   D.apply(v);
-  v.swell = Math.max(v.swell, C.waves * D.mix);
+  // wherever it's going, the tune leans it: a slide tips the whole world with it
+  const M = m.M * app.sound.amount * (m.on ? 1 : 0);
+  v.roll += m.sway * 0.06 * M;
+  v.yaw += m.sway * 0.035 * M;
+  v.pitch += m.sway * 0.04 * M * clamp(v.pitch * 2, 0, 1);
+  // and when it's low over the sheet, the sheet rolls a little; looking straight down that would just be noise
+  v.swell = Math.max(v.swell, C.waves * D.mix * clamp((v.pitch - 0.45) * 1.6, 0, 1));
 }
 
-// the film: as the song plays, move to the scene the score has for this moment. A scene lands on its beat:
-// the glide starts a little before it. Pick a look yourself and it stays until the next section.
-const GLIDE_BARS = 2.2;
-function applyFilm(m) {
-  const F = app.film;
-  if (!F.auto || !F.score || !m.known || !app.audio.el) return;
-  const barLen = m.barLen, t = app.audio.el.currentTime, glide = Math.min(5, Math.max(1.4, barLen * GLIDE_BARS));
-  const i = sceneAt(F.score, t + glide * 0.55);
-  if (i === F.scene) return;
+// the film: as the song plays, keep moving to the scene the score has next. A morph is long, and its steepest
+// moment lands on the scene's first beat: it's already turning into the next thing before that arrives.
+// The camera is always on its way somewhere. Pick a look yourself and it stays until the next scene.
+function goToScene(i, glide) {
+  const F = app.film, S = F.score.scenes[i];
   F.scene = i;
+  F.camHeld = false;
   if (i <= F.held) return;
   F.held = -1;
-  const S = F.score.scenes[i];
   app.tweaks[S.look] = { ...paletteSet(S.palette) };
   app.lookId = S.look;
   app.world.morphTo(lookValues(S.look), glide);
-  app.cine.on = S.cine;
-  app.cine.looks = false;
-  app.cine.speed = S.cineSpeed;
   const A = app.adds.figures;
   if (S.figure) {
     A.style = S.style;
     A.size = S.figure === 'monolith' ? 1 : 1.15;
     A.repeat = !!S.crowd;
     app.figures.home = S.home;
-    app.figures.parked = false;
+    app.figures.parked = null;
+    if (S.home) { app.hand.u = S.home[0]; app.hand.w = S.home[1]; }
     A.follow = false;
     app.pickFigure(S.figure, { drive: false });
   } else if (A.on) {
@@ -373,6 +384,25 @@ function applyFilm(m) {
   }
   ui?.lookChanged();
   ui?.renderDock();
+}
+function applyFilm(m) {
+  const F = app.film, C = app.cine;
+  if (!F.auto || !F.score || !m.known || !app.audio.el) { if (F.driving) { F.driving = false; C.on = false; C.keep = true; C.looks = true; C.ahead = null; C.kind = null; ui?.cinemaChanged(); } return; }
+  const t = app.audio.el.currentTime, S = F.score.scenes;
+  // seeking: straight to where you went, not by way of everything between
+  const here = sceneAt(F.score, t);
+  if (F.scene < 0 || here < F.scene - 1 || here > F.scene + 1) goToScene(here, 2.5);
+  else {
+    const nx = F.scene + 1;
+    if (nx < S.length && t + S[nx].glide * 0.5 >= S[nx].t0) goToScene(nx, S[nx].glide);
+  }
+  const cur = S[Math.max(F.scene, 0)];
+  F.driving = true;
+  C.on = !F.camHeld; C.looks = false;
+  C.speed = cur.cineSpeed;
+  C.kind = cur.kind;
+  // the camera's next pose can suit what will be showing by the time it gets there
+  C.ahead = secs => { const j = sceneAt(F.score, t + secs), c = S[j]; return { group: camKind(c.look), kind: c.kind, fresh: c.first && j !== sceneAt(F.score, t) }; };
 }
 app.rebuildScore = () => {
   const F = app.film, an = app.music.an;
@@ -506,13 +536,14 @@ app.stopAudio = () => app.audio.stop();
 // ------------------------------------------------------------------ add-ons
 const pres = { hands: 0, face: 0, orbs: 0, figures: 0 };
 app.figures = new Figures();
+app.hand = new CursorHand();
 // pick a figure: the one showing goes under, then this one comes up, and your mouse has it
 app.pickFigure = (id, { drive = true } = {}) => {
   app.adds.figures.pick = id;
   if (id !== 'hand') app.figures.pick(id);
   if (pres.figures < 0.01 && id !== 'hand') { app.figures.a = FIGURE_INDEX[id] ?? 0; app.figures.swap = null; app.figures.placed = false; }   // nothing showing yet: straight up
   app.adds.figures.on = true;
-  if (drive) { app.tool = 'figure'; app.adds.figures.follow = true; app.adds.figures.size = 1; app.figures.home = null; app.figures.parked = false; updateRing(); }
+  if (drive) { app.tool = 'figure'; app.adds.figures.follow = true; app.adds.figures.size = 1; app.figures.home = null; app.figures.parked = null; updateRing(); }
   ui?.renderDock();
   ui?.addsChanged();
 };
@@ -712,7 +743,6 @@ function applyInputs(v, m) {
 }
 
 // add-ons and the view, after the look and the music
-const handTool = { on: 0, x: 0, y: 0, press: 0 };
 function applyAdds(v, m, dt) {
   const A = app.adds;
   const V = app.view;
@@ -722,7 +752,7 @@ function applyAdds(v, m, dt) {
   v.yaw += V.yaw;
   v.pitch = clamp(v.pitch + V.pitch, -0.35, 1.42);
   // tilted back, a long lens would push the camera miles away: widen it as it tilts
-  if (v.focal > 2.2) v.focal += (2.0 - v.focal) * clamp((v.pitch - 0.12) / 0.7, 0, 1);
+  if (v.focal > 2) v.focal = 2 + (v.focal - 2) * (1 - clamp((v.pitch - 0.12) / 0.7, 0, 1));
   // the figure on screen: the world's shader is rebuilt with just it (in the background, the first time),
   // and it comes up once that's in. The hand is its own thing, always in the shader.
   const F = app.figures, pickHand = A.figures.pick === 'hand';
@@ -739,34 +769,31 @@ function applyAdds(v, m, dt) {
   applyFace(v, A.face, A.face.copy && tracker.face ? 0 : pres.face);
   applyOrbs(v, A.orbs, pres.orbs, m, app.sound);
   const driving = app.tool === 'figure' && pointer.inside && A.figures.follow;
+  const reach = 4 * camDist(v);
   if (A.figures.on || pres.figures > 0.01) {
-    F.pointer = pointer.inside ? [...rayOnSheet(v, pointer.x, pointer.y, 0)] : null;
-    const aim = driving ? z => rayOnSheet(v, pointer.x, pointer.y, z) : null;
-    if (driving) F.parked = true;
-    const home = F.parked ? [F.x, F.y] : F.home ? rayOnSheet(v, F.home[0], F.home[1], 0) : rayOnSheet(v, 0, -0.2 * Math.sin(Math.max(v.pitch, 0)), 0);
+    F.pointer = pointer.inside ? [...rayOnSheet(v, pointer.x, pointer.y, 0, reach)] : null;
+    if (driving) { F.parked = [pointer.x, pointer.y]; }
+    // under your cursor, or (the cursor's gone) still where you left it on the screen, whatever the camera does
+    const aim = F.parked ? z => noSheet(v) ? rayAt(v, F.parked[0], F.parked[1], 1.5 * (F.size || 1)) : rayOnSheet(v, F.parked[0], F.parked[1], z, reach) : null;
+    const home = F.home ? rayOnSheet(v, F.home[0], F.home[1], 0, reach) : rayOnSheet(v, 0, -0.2 * Math.sin(Math.max(v.pitch, 0)), 0, reach);
     if (F.step(dt, A.figures, m, aim, home, pointer.down && app.tool === 'figure', v)) ui.addsChanged();
     F.apply(v, A.figures, pres.figures);
     rt.figFrame = F.frame;
+    rt.figTrail = F.trail;
   }
   app.ball.apply(v, A.ball);
-  // the hand: your cursor pressing through from behind, wherever the camera is
-  const handSize = 1.25 * v.frame / 0.6 * (A.figures.size || 1);
+  // the hand: your cursor is its wrist, wherever the camera is
   const wantHand = A.figures.on && pickHand;
-  if (wantHand && (app.tool === 'figure' && pointer.inside && A.figures.follow)) {
-    const zh = 0.04 + handTool.press * 0.32 + 0.12 * handSize;
-    const on = rayOnSheet(v, pointer.x, pointer.y, zh);
-    handTool.x = ease(handTool.x, on[0], 26, dt);
-    handTool.y = ease(handTool.y, on[1] - 0.1 * handSize, 26, dt);
-  } else if (handTool.on < 0.01) { handTool.x = v.tx; handTool.y = v.ty - 0.1 * handSize; }
-  handTool.on = ease(handTool.on, wantHand ? 1 : 0, 4, dt);
-  handTool.press = ease(handTool.press, pointer.down && pickHand && app.tool === 'figure' ? 1 : 0, 6, dt);
-  if (handTool.on > 0.001) {
-    Object.assign(v, {
-      h2on: handTool.on, h2x: handTool.x, h2y: handTool.y, h2z: 0.04 + handTool.press * 0.32, h2s: handSize, h2a: 0.15,
-      h2curl: 0.15 + handTool.press * 0.9, h2spread: 0.6 - handTool.press * 0.3,
-    });
-    v.handSoft = Math.min(v.handSoft, 0.2);
+  const onHand = app.tool === 'figure' && pickHand;
+  if (app.hand.step(dt, A.figures, m, v, onHand && pointer.inside && A.figures.follow ? [pointer.x, pointer.y] : null, wantHand, pointer.down && onHand, rt.fingers)) {
+    app.hand.apply(v);
   }
+  // seen from above, a shape would hardly show: the lines lean over it by its height
+  const shapes = Math.max(pres.figures, app.hand.on);
+  v.relief = shapes * (pickHand ? 0.6 : 0.8) * (1 - clamp((v.pitch - 0.08) / 0.75, 0, 1));
+  // and to keep its outline on a busy pattern, the pattern flips inside it
+  v.figNeg = (!pickHand && A.figures.style === 'draped' ? 1 : 0) * (1 - clamp((v.pitch - 0.2) / 0.5, 0, 1));
+  if (v.figSwirl > 0) v.figSwirl = 0.4 + 0.6 * clamp((v.pitch - 0.2) / 0.5, 0, 1);
   applyInputs(v, m);
   // never a screen of one solid color, whatever the music, the ties or the cinematic camera do:
   // keep at least a few lines in view however far it zooms in, and never let the ink flood the frame
@@ -901,7 +928,7 @@ function toUV(e) {
 }
 function updateRing(e) {
   if (e) { ring.style.left = `${e.clientX}px`; ring.style.top = `${e.clientY}px`; }
-  const show = !['camera', 'figure'].includes(app.tool) && !matchMedia('(pointer: coarse)').matches;
+  const show = app.perf.ring && !['camera', 'figure'].includes(app.tool) && !matchMedia('(pointer: coarse)').matches;
   ring.classList.toggle('show', show && pointer.inside && !pointer.move);
   const d = app.brush.size * 2 * canvas.getBoundingClientRect().height * (app.tool === 'ripple' ? 0.6 : 1);
   ring.style.width = ring.style.height = `${d}px`;
@@ -1029,6 +1056,27 @@ app.setTool = id => {
   ui.renderDock();
 };
 
+// ------------------------------------------------------------------ left alone, it wanders
+// No song, nobody touching it for a while: the camera sets off and the looks turn slowly into each other.
+// Use it (not just a stray mouse movement) and the camera comes to rest where it is, on whatever's showing.
+const WANDER_AFTER = 18;
+const touched = { any: 0, used: 0 };
+addEventListener('pointermove', () => { touched.any = performance.now() / 1000; }, { passive: true });
+for (const ev of ['pointerdown', 'wheel', 'keydown']) addEventListener(ev, () => { touched.any = touched.used = performance.now() / 1000; }, { passive: true, capture: true });
+function wander() {
+  const C = app.cine, W = app.wandering, now = performance.now() / 1000;
+  const shaping = app.tool === 'figure' && pointer.inside && app.adds.figures.on && now - touched.any < 1;
+  if (W) {
+    if (touched.used > W || shaping || app.film.driving || !app.perf.wander) {
+      app.wandering = 0; C.on = false; C.keep = true; C.kind = null; ui.cinemaChanged();
+    }
+    return;
+  }
+  if (app.perf.wander && !C.on && !app.film.driving && !app.paused && !app.recording && !document.hidden && now - Math.max(touched.any, touched.used) > WANDER_AFTER) {
+    app.wandering = now; C.on = true; C.keep = false; C.looks = true; C.speed = 0.42; C.kind = 'flow'; ui.cinemaChanged();
+  }
+}
+
 // ------------------------------------------------------------------ the frame loop
 let scale = 1;
 const maxScale = () => Math.min(window.devicePixelRatio || 1, 1);
@@ -1059,9 +1107,11 @@ function adapt(dt) {
 // 60 frames a second is all this needs. On a 120 Hz screen, drawing every refresh doubles the GPU's work
 // (heat, fans, battery) for motion this slow, so by default every other refresh is skipped there.
 const PERF_KEY = 'trippy.perf.v1';
-app.perf = { cap60: true };
+app.perf = { cap60: true, ring: true, wander: true };
 try { Object.assign(app.perf, JSON.parse(localStorage.getItem(PERF_KEY) || '{}')); } catch {}
-app.setCap60 = on => { app.perf.cap60 = !!on; try { localStorage.setItem(PERF_KEY, JSON.stringify(app.perf)); } catch {} };
+app.setPref = (key, on) => { app.perf[key] = !!on; try { localStorage.setItem(PERF_KEY, JSON.stringify(app.perf)); } catch {} };
+app.setCap60 = on => app.setPref('cap60', on);
+app.setRing = on => { app.setPref('ring', on); updateRing(); };
 
 let last = performance.now(), lastRaw = last, refresh = 16.7;
 const t0 = last;
@@ -1079,6 +1129,7 @@ function frame(now) {
   const m = liveMusic(dt);
   renderer.setSound(a.wave, a.hist, a.waveHist, app.music.row);
   applyFilm(m);
+  wander();
   const w = app.world, cur = w.current || w.values();
   updateTools(dt);
   // the ball: wander (or follow the mouse), hop on the beat, ripple when it lands

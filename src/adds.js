@@ -151,8 +151,9 @@ export class CursorHand {
     this.t += dt;
     if (cursor) { this.u = cursor[0]; this.w = cursor[1]; }
     const sp = v.frame / 0.6, s = this.s = 1.25 * sp * (cfg.size || 1);
-    // it turns with the camera so the fingers stay up the screen; straight on it's held just as it always was
-    const a = this.a = Math.atan2(Math.sin(HAND_TURN + v.yaw + v.roll), Math.cos(HAND_TURN + v.yaw + v.roll));
+    // it comes up facing you, then keeps that orientation: turn the camera and you see it from another side
+    if (!this.placed) this.a = Math.atan2(Math.sin(HAND_TURN + v.yaw + v.roll), Math.cos(HAND_TURN + v.yaw + v.roll));
+    const a = this.a;
     const ox = -Math.sin(a) * WRIST_BACK[0] * s, oy = Math.cos(a) * WRIST_BACK[0] * s, oz = WRIST_BACK[1] * s;
     // how far it stands out of the sheet, and how far a press pushes it (never most of the way to the lens)
     const fly = noSheet(v);
@@ -248,14 +249,10 @@ export class Figures {
     this.t += dt * (0.6 + (m.on ? m.loud : 0.4));
     this.press += ((held ? 1 : 0) - this.press) * (1 - Math.exp(-dt * 5));
     const f = FIGURES[this.a];
+    // it comes up facing the camera, then keeps that orientation: turn the camera and you see it from another side
+    if (this.cy == null) { this.cy = v.yaw; this.cp = v.pitch; }
     if (f.swim) { this.swim(dt, cfg, m, aim, home, v, f); return changed; }
     this.rope = null;
-    // which way it faces, a little behind the camera, so it watches you come round
-    if (this.cy == null) { this.cy = v.yaw; this.cp = v.pitch; }
-    const kc = 1 - Math.exp(-dt * 1.6);
-    this.cy += Math.atan2(Math.sin(v.yaw - this.cy), Math.cos(v.yaw - this.cy)) * kc;
-    this.cy = Math.atan2(Math.sin(this.cy), Math.cos(this.cy));
-    this.cp += (v.pitch - this.cp) * kc;
     // it heaves on the water, leans into a move, and tips with the melody
     const heaveA = 0.05 * Math.sin(this.t * 0.55), heaveB = 0.035 * Math.sin(this.t * 0.37 + 1.3);
     const sp = v.frame / 0.6;
@@ -294,7 +291,7 @@ export class Figures {
   // something that swims: it goes after your cursor, and when you stop it circles there, so it never quite
   // stops moving. Left alone (a song's running the show) it goes round the screen by itself.
   swim(dt, cfg, m, aim, home, v, f) {
-    const sp = v.frame / 0.6, cp = clamp(v.pitch, 0, 1.5);
+    const sp = v.frame / 0.6, cp = clamp(this.cp, 0, 1.5);
     const S = this.size = cfg.size * sp * (f.scale ?? 1) * (1 - 0.28 * Math.sin(cp));
     let tx, ty;
     if (aim) { const on = aim(S * 0.1); tx = on[0]; ty = on[1]; }
@@ -369,8 +366,8 @@ export class Figures {
     // right = up x forward; up tips over by the bank
     const R0 = [-hy * cb, hx * cb, sb], U0 = [hy * sb, -hx * sb, cb], B0 = [hx, hy, 0];
     // and it tips its back toward a low camera, so it breaches instead of lying flat and unseen
-    const tip = 0.72 * Math.sin(clamp(v.pitch, 0, 1.4));
-    const cy = Math.cos(v.yaw), sy = Math.sin(v.yaw);
+    const tip = 0.72 * Math.sin(clamp(this.cp, 0, 1.4));
+    const cy = Math.cos(this.cy), sy = Math.sin(this.cy);
     const to = [sy * Math.sin(tip), -cy * Math.sin(tip), Math.cos(tip)];      // up, leaning to the camera
     const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
     const nrm = a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };

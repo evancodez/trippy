@@ -541,7 +541,7 @@ app.hand = new CursorHand();
 app.pickFigure = (id, { drive = true } = {}) => {
   app.adds.figures.pick = id;
   if (id !== 'hand') app.figures.pick(id);
-  if (pres.figures < 0.01 && id !== 'hand') { app.figures.a = FIGURE_INDEX[id] ?? 0; app.figures.swap = null; app.figures.placed = false; }   // nothing showing yet: straight up
+  if (pres.figures < 0.01 && id !== 'hand') { app.figures.a = FIGURE_INDEX[id] ?? 0; app.figures.swap = null; app.figures.placed = false; app.figures.cy = null; }   // nothing showing yet: straight up
   app.adds.figures.on = true;
   if (drive) { app.tool = 'figure'; app.adds.figures.follow = true; app.adds.figures.size = 1; app.figures.home = null; app.figures.parked = null; updateRing(); }
   ui?.renderDock();
@@ -758,7 +758,7 @@ function applyAdds(v, m, dt) {
   const F = app.figures, pickHand = A.figures.pick === 'hand';
   const drawn = FIGURES[F.a].id;
   renderer.useFigures(figureBank(A.figures.on || pres.figures > 0.01 ? [F.swap != null && pres.figures < 0.02 ? FIGURES[F.swap].id : drawn] : []));
-  if (F.swap != null && pres.figures < 0.02 && renderer.hasFigure(FIGURES[F.swap].id)) { F.a = F.swap; F.swap = null; }   // the old one has gone: the next one comes up
+  if (F.swap != null && pres.figures < 0.02 && renderer.hasFigure(FIGURES[F.swap].id)) { F.a = F.swap; F.cy = null; F.swap = null; }   // the old one has gone: the next one comes up
   for (const k of ['hands', 'face', 'orbs', 'figures']) {
     const on = A[k].on && (k !== 'figures' || (!pickHand && F.swap == null && renderer.hasFigure(FIGURES[F.a].id)));
     pres[k] = ease(pres[k], on ? 1 : 0, k === 'figures' ? (on ? 1.5 : 2.6) : 3, dt);
@@ -788,6 +788,8 @@ function applyAdds(v, m, dt) {
   if (app.hand.step(dt, A.figures, m, v, onHand && pointer.inside && A.figures.follow ? [pointer.x, pointer.y] : null, wantHand, pointer.down && onHand, rt.fingers)) {
     app.hand.apply(v);
   }
+  // no ring around the cursor means none in the water round a figure either
+  if (!app.perf.ring) v.figRing = v.figDip = 0;
   // seen from above, a shape would hardly show: the lines lean over it by its height
   const shapes = Math.max(pres.figures, app.hand.on);
   v.relief = shapes * (pickHand ? 0.6 : 0.8) * (1 - clamp((v.pitch - 0.08) / 0.75, 0, 1));
@@ -932,7 +934,7 @@ function updateRing(e) {
   ring.classList.toggle('show', show && pointer.inside && !pointer.move);
   const d = app.brush.size * 2 * canvas.getBoundingClientRect().height * (app.tool === 'ripple' ? 0.6 : 1);
   ring.style.width = ring.style.height = `${d}px`;
-  ring.classList.toggle('down', pointer.down);
+  ring.classList.toggle('down', show && pointer.down);
 }
 app.updateRing = updateRing;
 

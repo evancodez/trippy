@@ -38,7 +38,7 @@ ${shaderDefines()}
 #define PI 3.14159265359
 #define TAU 6.28318530718
 
-vec3 gRight, gUp, gBack;       // the camera's frame (the impossible triangle is built from it)
+uniform vec3 gRight, gUp, gBack;   // the camera's frame, worked out on the CPU (renderer.js); the impossible triangle is built from it
 float gCalm = 1.0;             // 0 inside you when "keep it still inside" is on: the warps leave you alone
 float gAura = 0.0;             // how far the lines are pushed around you
 float gBand = 0.0;             // 0 / 1: which ink this line gets (every other line in the second ink)
@@ -373,6 +373,7 @@ vec2 ballFlow(vec2 q) {
   return c + rel;
 }
 
+float gFD = 1e3;               // the figures' distance the last time map() looked (the march's last look is at the hit)
 float map(vec3 p) {
   float d = (p.z - heightField(p.xy) + DROP * DROP * 40.0) * uStepK;
   float sw = GYRO + SPONGE + KIFS + HALL;
@@ -388,9 +389,10 @@ float map(vec3 p) {
   if (COLUMNS > 0.001) d = smin(d, columnsSDF(p), 0.03);
   d = smin(d, objects(p), OBJSOFT);
   if (BALL > 0.001) d = smin(d, ballSDF(p), 0.02);
-  if (FIG > 0.001 || FTON > 0.001) {
+  if ((FIG > 0.001 || FTON > 0.001) && gFigNear) {
     // figures, joined to the sheet like the hands; their hollows go through both
     float fd = figuresSDF(p);
+    gFD = fd;
     d = smin(d, fd, FIGSOFT);
     if (gFHole < 0.3 * gFS) d = smaxF(d, -gFHole, 0.01 * gFS);
   }
@@ -513,18 +515,11 @@ void main() {
     uv = tw.xy + rot(tw.z * exp(-dot(dd, dd) / (tw.w * tw.w))) * dd;
   }
 
-  // camera: orbit around the target; FRAME keeps the sheet the same size whatever the lens
-  float cp = cos(PITCH), sp = sin(PITCH), cy = cos(YAW), sy = sin(YAW);
-  vec3 right = vec3(cy, sy, 0.0);
-  vec3 up = vec3(-sy * cp, cy * cp, sp);
-  vec3 back = vec3(sy * sp, -cy * sp, cp);
-  vec2 ru = rot(ROLL) * vec2(1.0, 0.0);
-  vec3 r2 = right * ru.x + up * ru.y, u2 = -right * ru.y + up * ru.x;
-  gRight = r2; gUp = u2; gBack = back;
+  // camera: orbit around the target (its frame comes in as uniforms); FRAME keeps the sheet the same size whatever the lens
   float dist = 2.0 * FRAME * FOCAL;
   vec3 target = vec3(TX, TY, 0.0);
-  vec3 ro = target + back * dist - back * FLY;
-  vec3 rd = normalize(r2 * uv.x + u2 * uv.y - back * FOCAL);
+  vec3 ro = target + gBack * (dist - FLY);
+  vec3 rd = normalize(gRight * uv.x + gUp * uv.y - gBack * FOCAL);
   // never under the sheet: in a low shot a loud crest (or a figure) can rise past the camera, and from
   // inside the fabric the whole screen would flash one solid color. Spaces you fly through are exempt.
   if (GYRO + SPONGE + KIFS + HALL < 0.5) {
@@ -532,15 +527,15 @@ void main() {
     ro.z = max(ro.z, floorZ);
   }
   if (BALL > 0.001) gBallH = heightField(vec2(BALLX, BALLY));
-  if (FIG > 0.001 || FTON > 0.001) figSetup();
+  if (FIG > 0.001 || FTON > 0.001) gFigNear = figNear(ro, rd);
 
   float t = 0.0, d = 1.0;
   float far = dist * 3.0 + 14.0;
-  bool hit = false;
+  bool hit = false, exact = false;
   for (int i = 0; i < 140; i++) {
     vec3 p = ro + rd * t;
     d = map(p);
-    if (d < 0.0005 * t + 0.0003) { hit = true; break; }
+    if (d < 0.0005 * t + 0.0003) { hit = true; exact = true; break; }
     t += d;
     if (t > far) break;
   }
@@ -552,6 +547,14 @@ void main() {
   vec3 col = fog;
   if (hit) {
     vec3 p = ro + rd * t;
+    // the figures at the hit, as the march's last step saw them (the normal's own looks would overwrite
+    // them); beyond their reach, neither the normal nor the shading needs to ask about them again
+    float fdH = gFD, hH = gFHole, sH = gFS;
+    vec3 qH = gFQ, cH = gFC;
+    if (gFigNear) {
+      if (!exact) { fdH = figuresSDF(p); hH = gFHole; sH = gFS; qH = gFQ; cH = gFC; }
+      if (fdH > 1.4 * FIGSOFT + 0.06 * sH + 0.01) gFigNear = false;
+    }
     vec3 n = calcNormal(p, t);
     bool onBall = BALL > 0.001 && ballSDF(p) < 0.004 + 0.001 * t;
     if (MEDIACALM > 0.0) gCalm = 1.0 - MEDIACALM * mediaMaskSoft(p.xy, 1.5);
@@ -560,11 +563,11 @@ void main() {
     // (so the side facing you is never lost in shadow), and its hollows dim as they go in
     // (figM: on it and the fabric clinging to it; figL: on it, give or take)
     float figM = 0.0, figL = 0.0, deep = 0.0;
-    if (FIG > 0.001 || FTON > 0.001) {
-      float fd = figuresSDF(p), s = gFS, on = max(FIG, FTON);
-      figM = on * (1.0 - smoothstep(0.0, FIGSOFT + 0.04 * s, max(min(fd, abs(gFHole)), 0.0)));
+    if ((FIG > 0.001 || FTON > 0.001) && gFigNear) {
+      float fd = fdH, s = sH, on = max(FIG, FTON);
+      figM = on * (1.0 - smoothstep(0.0, FIGSOFT + 0.04 * s, max(min(fd, abs(hH)), 0.0)));
       figL = on * (1.0 - smoothstep(0.0, 0.05 * s, max(fd, 0.0)));   // (within its bounding ball's margin, so no seam)
-      deep = (1.0 - smoothstep(0.0, 0.012 * s, abs(gFHole))) * smoothstep(0.05, -0.35, gFQ.z);
+      deep = (1.0 - smoothstep(0.0, 0.012 * s, abs(hH))) * smoothstep(0.05, -0.35, qH.z);
     }
     float rr = 1.0;
     vec2 qw = p.xy;
@@ -582,8 +585,8 @@ void main() {
       vec2 sq0 = p.xy, nn = n.xy;
       if (figM > 0.001) {
         vec2 Rh = normalize(gRight.xy + vec2(1e-5, 0.0)), Uh = vec2(-Rh.y, Rh.x);
-        vec3 d = p - gFC;
-        sq0 = mix(sq0, gFC.xy + Rh * dot(d, gRight) + Uh * dot(d, gUp), figM);
+        vec3 d = p - cH;
+        sq0 = mix(sq0, cH.xy + Rh * dot(d, gRight) + Uh * dot(d, gUp), figM);
         nn = mix(nn, Rh * dot(n, gRight) + Uh * dot(n, gUp), figM);
       }
       sq0 = ballFlow(sq0 + nn * REFRACT * 0.12);

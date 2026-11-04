@@ -3,7 +3,9 @@
 import { VERT, DISP_FRAG, COMP_FRAG, BLUR_FRAG } from './passes.js';
 import { worldFrag } from '../engine/shader.js';
 import { SOUND_W, SOUND_ROWS, WAVE_ROWS } from '../audio.js';
-import { hexToRgb } from '../engine/params.js';
+import { hexToRgb, SHADER_SLOTS } from '../engine/params.js';
+
+const SLOT = Object.fromEntries(SHADER_SLOTS.filter(s => s.channel == null).map((s, i) => [s.name, SHADER_SLOTS.indexOf(s)]));
 
 export const MAX_RIPPLES = 16;
 
@@ -34,6 +36,9 @@ export class Renderer {
     this.frames = []; this.fi = 0;       // ping-pong, so echo trails can read the last frame
     this.disps = []; this.di = 0;
     this.clearDisp = true;
+    this.dispIdle = 0;
+    this.camFrame = new Float32Array(9);  // right, up, back
+    this.figFrames = new Float32Array(27);
     this.zeroTex = this.makeTexture(1, 1, false);
     this.mediaTex = this.makeTexture(1, 1, false, true);
     this.mediaRaw = this.makeTexture(1, 1, false, true);
@@ -214,10 +219,28 @@ export class Renderer {
     this.mediaTex = C.tex;
   }
 
+  // the camera's frame and the way each figure faces, from the shader values: worked out here once a
+  // frame instead of in every pixel, and sent as uniforms, so the shader keeps its registers for marching
+  setFrames(P) {
+    const cp = Math.cos(P[SLOT.pitch]), sp = Math.sin(P[SLOT.pitch]), cy = Math.cos(P[SLOT.yaw]), sy = Math.sin(P[SLOT.yaw]);
+    const cr = Math.cos(P[SLOT.roll]), sr = Math.sin(P[SLOT.roll]);
+    const right = [cy, sy, 0], up = [-sy * cp, cy * cp, sp], back = [sy * sp, -cy * sp, cp];
+    const F = this.camFrame;
+    for (let i = 0; i < 3; i++) { F[i] = right[i] * cr + up[i] * sr; F[3 + i] = up[i] * cr - right[i] * sr; F[6 + i] = back[i]; }
+    // a figure faces the camera's (eased) turn and tilt, tipped upright by its stand: a, b, then the tool
+    const G = this.figFrames, fy = P[SLOT.figCY], fp = P[SLOT.figCP], c = Math.cos(fy), s = Math.sin(fy);
+    [P[SLOT.figStA], P[SLOT.figStB], P[SLOT.ftSt]].forEach((stand, k) => {
+      const ph = fp + (1.5708 - fp) * stand, cph = Math.cos(ph), sph = Math.sin(ph);
+      G.set([c, s, 0, -s * cph, c * cph, sph, s * sph, -c * sph, cph], k * 9);
+    });
+  }
+
   // the brushes' distortion map. brush = { x, y, vx, vy, size, strength, mode, relax }
   updateDisp(b) {
     const gl = this.gl;
     if (!this.floatDisp) return;
+    // nothing painting, and the map long since sprung back flat: leave it be
+    if (b.mode === 0 && !this.clearDisp) { if (++this.dispIdle > 2400) return; } else this.dispIdle = 0;
     const src = this.disps[this.di], dst = this.disps[1 - this.di], P = this.dispProg;
     gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fb);
     gl.viewport(0, 0, dst.w, dst.h);
@@ -260,6 +283,13 @@ export class Renderer {
     gl.uniform4fv(u('uTwists'), rt.twists);
     gl.uniform2f(u('uRes'), this.w, this.h);
     gl.uniform1fv(u('uP'), P);
+    this.setFrames(P);
+    const F = this.camFrame;
+    gl.uniform3f(u('gRight'), F[0], F[1], F[2]);
+    gl.uniform3f(u('gUp'), F[3], F[4], F[5]);
+    gl.uniform3f(u('gBack'), F[6], F[7], F[8]);
+    gl.uniformMatrix3fv(u('uFigFrame'), false, this.figFrames);
+    gl.uniform2f(u('uFigSpin'), Math.cos(P[SLOT.figRot]), Math.sin(P[SLOT.figRot]));
     gl.uniform4fv(u('uRipples'), rt.ripples);
     let ripples = 0;
     for (let i = 0; i < rt.ripples.length; i += 4) if (rt.ripples[i + 3] > 0 && rt.realTime - rt.ripples[i + 2] < 5) ripples = 1;
@@ -268,7 +298,7 @@ export class Renderer {
     gl.uniform1f(u('uRealTime'), rt.realTime);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindTexture(gl.TEXTURE_2D, out.tex);
-    gl.generateMipmap(gl.TEXTURE_2D);           // feeds the glow
+    if ((post.glow ?? 0) > 0.001) gl.generateMipmap(gl.TEXTURE_2D);   // feeds the glow (the levels exist from the start, so skipping is safe)
     this.fi = 1 - this.fi;
 
     const C = this.compProg, c = n => C.loc(n);

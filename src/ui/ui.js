@@ -180,6 +180,8 @@ export function createUI(app) {
     viewMenu.replaceChildren(
       h('b', {}, 'Show on screen'),
       ...VIEW_ITEMS.map(([k, label]) => toggle(label, () => view[k], v => setView(k, v))),
+      h('b', { class: 'menu-gap' }, 'Easy on the computer'),
+      toggle('60 frames a second', () => app.perf.cap60, v => app.setCap60(v), 'on a 120 Hz screen, drawing every refresh works the GPU twice as hard for motion this slow. Off: every refresh.'),
       h('button', { class: 'btn wide', onclick: () => { viewMenu.hidden = true; app.toggleUI(); } }, 'Hide everything (H)'));
     const r = anchor.getBoundingClientRect();
     viewMenu.style.top = `${r.bottom + 8}px`;

@@ -975,9 +975,20 @@ function adapt(dt) {
   } else smoothSecs = 0;
 }
 
-let last = performance.now();
+// 60 frames a second is all this needs. On a 120 Hz screen, drawing every refresh doubles the GPU's work
+// (heat, fans, battery) for motion this slow, so by default every other refresh is skipped there.
+const PERF_KEY = 'trippy.perf.v1';
+app.perf = { cap60: true };
+try { Object.assign(app.perf, JSON.parse(localStorage.getItem(PERF_KEY) || '{}')); } catch {}
+app.setCap60 = on => { app.perf.cap60 = !!on; try { localStorage.setItem(PERF_KEY, JSON.stringify(app.perf)); } catch {} };
+
+let last = performance.now(), lastRaw = last, refresh = 16.7;
 const t0 = last;
 function frame(now) {
+  const raw = now - lastRaw;
+  lastRaw = now;
+  if (raw > 2 && raw < 40) refresh += (raw - refresh) * 0.1;                                                 // how often the screen refreshes (a smoothed guess)
+  if (app.perf.cap60 && now - last < 1000 / 60 - refresh * 0.5) { requestAnimationFrame(frame); return; }   // skip this refresh: the next lands nearer 60 a second
   const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
   last = now;
   rt.realTime = (now - t0) / 1000;
@@ -1031,4 +1042,4 @@ function boot() {
 }
 boot();
 
-window.trippy = Object.assign(app, { rt, _pointer: pointer, _twists: twists, _frame: frame });   // handy for poking around in the console
+window.trippy = Object.assign(app, { rt, _pointer: pointer, _twists: twists, _frame: frame, _renderer: renderer });   // handy for poking around in the console

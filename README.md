@@ -67,6 +67,8 @@ The side panel has four tabs.
 
 **Top bar:** Surprise and Explore (breed 8 variations of what you're looking at; pick one, repeat), then pause, picture, record (with the song), link, fullscreen and what's on screen. `H` hides everything.
 
+**Easy on the computer:** under "what's on screen", trippi draws 60 frames a second by default. On a 120 Hz screen that halves the GPU's work (heat, fans, battery) for motion this slow; switch it off to draw every refresh. On top of that, the shader is built with only the figures on screen, nothing is re-blurred or re-drawn that hasn't changed, and the resolution eases down on its own if a frame can't keep up, creeping back when it can.
+
 ## Run it locally
 
 ES modules need a web server. From this folder, run either of these:
@@ -111,7 +113,7 @@ Import the GitHub repo in Vercel and keep the defaults: Framework Preset **Other
 | `src/engine/world.js` | Gliding between looks, speeds, the music applied every frame |
 | `src/engine/feel.js` | The three feel knobs and breeding (Explore) |
 | `src/adds.js` | Add-ons: the ball's motion, the pair of hands, figures, the face, orbs |
-| `src/engine/figures.js` | The figure library: each one a 3D shape in GLSL. The world's shader is built with just the groups on screen, in the background |
+| `src/engine/figures.js` | The figure library: each one a 3D shape in GLSL. The world's shader is built with just the figures on screen, in the background |
 | `src/director.js` | The cinematic camera: shots, glides on the bar, drift |
 | `src/media.js`, `src/tracking.js` | The camera, pictures, video and words; face / hand / body / motion tracking (MediaPipe) |
 | `src/audio.js`, `src/analysis.js`, `src/songs.js` | Live audio (levels, beat, waveform, spectrum); tempo from a song; your song library |

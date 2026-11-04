@@ -13,7 +13,7 @@
 // `lift` brings a figure further out of the sheet; `veil` is how much the fabric clings to it
 // (1: draped like a ghost; small: it comes clean through).
 // The order here is the id the shader switches on; `call` is how the shader draws it, `uses` the other
-// figures' code it needs. The shader is built with only the groups on screen (see figureBank): all of
+// figures' code it needs. The shader is built with only the figures on screen (see figureBank): all of
 // them in one shader would make the GPU compiler give up and slow every look down, figures or not.
 
 export const FIGURES = [
@@ -55,10 +55,9 @@ export const FIGURE_GROUPS = [...new Set(FIGURES.map(f => f.group))];
 // a shader is built with whole groups (a group costs a frame very little; all of them at once, a lot),
 // so a figure can re-form into any other in its group without a new shader: these are the figures that
 // come along with ids
-export const figureBank = ids => {
-  const groups = new Set(ids.filter(id => id in FIGURE_INDEX).map(id => FIGURES[FIGURE_INDEX[id]].group));
-  return FIGURES.filter(f => groups.has(f.group)).map(f => f.id);
-};
+// the figures a shader should be built with: just the ones showing (every figure compiled in makes the
+// whole shader slower, even the pixels nowhere near a figure, so the shader holds the fewest it can)
+export const figureBank = ids => [...new Set(ids.filter(id => id in FIGURE_INDEX))];
 
 // needs from the shader: smin, rot, sdCapsule, sdBox, sdRoundBox, faceH, handSDF, PI/TAU, uStepK, and the
 // figure values: FIGT (its clock), FIGLX/FIGLY (where eyes look), FIGSING (the music), FIGCY/FIGCP (the
@@ -513,14 +512,11 @@ vec2 figFlow(vec2 q) {
   return q;
 }
 
-// which way a figure faces: the camera's turn and tilt (eased), tipped upright by its stand.
-// Columns: its right, its up, its front.
-mat3 figFrame(float stand) {
-  float ph = mix(FIGCP, 1.5708, stand), cy = cos(FIGCY), sy = sin(FIGCY), cp = cos(ph), sp = sin(ph);
-  return mat3(cy, sy, 0.0, -sy * cp, cy * cp, sp, sy * sp, -cy * sp, cp);
-}
-mat3 gFrameA, gFrameB, gFrameT;
-void figSetup() { gFrameA = figFrame(FIGSTA); gFrameB = figFrame(FIGSTB); gFrameT = figFrame(FTST); }
+// which way each figure faces (the add-on's a and b, then the tool): the camera's turn and tilt, tipped
+// upright by its stand. Worked out on the CPU (renderer.js), so it costs the shader no registers.
+// Columns: its right, its up, its front. uFigSpin: cos and sin of the add-on's turn.
+uniform mat3 uFigFrame[3];
+uniform vec2 uFigSpin;
 
 // the nearest figure's: the point in its own frame, where it is, its size, and its hollows (world units,
 // < 0 inside)
@@ -530,51 +526,62 @@ float gFS = 1.0, gFHole = 1e3;
 // one figure, placed: at pos (it comes up from far below as it comes on), size S, facing by M,
 // turned by spin, maybe repeated across the sheet. Returns its distance (figure units) and fills in
 // its hollows, the point in its frame, and where it is (the copy nearest, when repeated).
-float figPlaced(vec3 p, int id, vec3 pos, float S, mat3 M, float spin, float rep, out float h, out vec3 q, out vec3 c) {
+float figPlaced(vec3 p, int id, vec3 pos, float S, mat3 M, vec2 spin, float rep, out float h, out vec3 q, out vec3 c) {
   q = p - pos;
   if (rep > 0.5) { float sp = 1.15 * S; q.xy = mod(q.xy + sp * 0.5, sp) - sp * 0.5; }
   c = p - q;
   q = (q * M) / S;
-  q.xz = rot(spin) * q.xz;
+  q.xz = mat2(spin.x, spin.y, -spin.y, spin.x) * q.xz;
   float bound = length(q) - 0.72;
   h = 1.0;
-  if (bound > 0.06 + FIGSOFT / S) return bound;                                              // far off (beyond the fabric's softness): its bounding ball will do
-  gH = 1.0;
-  float d = figure3D(id, q);
-  h = max(gH, bound);                                                                        // hollows stay inside the figure
+  float d = bound;                                                                           // far off (beyond the fabric's softness): its bounding ball will do
+  if (bound <= 0.06 + FIGSOFT / S) {
+    gH = 1.0;
+    d = figure3D(id, q);
+    h = max(gH, bound);                                                                      // hollows stay inside the figure
+  }
   return d;
 }
 
-// the Figures add-on (a, re-forming into b) and the figure under your cursor when one is the tool.
-// One loop the compiler can't unroll, so the whole library is compiled once here, not three times.
-float figuresSDF(vec3 p) {
-  float dA = 1e3, hA = 1.0, dB = 1e3, hB = 1.0, dT = 1e3, hT = 1.0;
-  vec3 qA = vec3(0.0), qB = vec3(0.0), qT = vec3(0.0), cA = vec3(0.0), cT = vec3(0.0);
+// does this ray come anywhere near a figure? Decided once per pixel, so the march along a ray that
+// passes nowhere near one never evaluates them at all (beyond the fabric's reach, they change nothing).
+// A figure repeated across the sheet is everywhere, so it always counts as near.
+bool gFigNear = true;
+bool figNear(vec3 ro, vec3 rd) {
   int n = 3 + int(min(uStepK, 0.0));
   for (int k = 0; k < n; k++) {
     if (k < 2 ? FIG < 0.001 || (k == 1 && FIGMIX < 0.001) : FTON < 0.001) continue;
-    float h;
-    vec3 q, c;
     bool tool = k == 2;
-    float d = figPlaced(p, int((tool ? FTID : k == 0 ? FIGA : FIGB) + 0.5), tool ? vec3(FTX, FTY, mix(-0.75 * FTS, FTZ, FTON)) : vec3(FIGX, FIGY, mix(-0.75 * FIGS, FIGZ, FIG)),
-                        tool ? FTS : FIGS, tool ? gFrameT : k == 0 ? gFrameA : gFrameB, tool ? 0.0 : FIGROT, tool ? 0.0 : FIGREP, h, q, c);
-    if (k == 0) { dA = d; hA = h; qA = q; cA = c; }
-    else if (k == 1) { dB = d; hB = h; qB = q; }
-    else { dT = d; hT = h; qT = q; cT = c; }
+    if (!tool && FIGREP > 0.5) return true;
+    float S = tool ? FTS : FIGS;
+    vec3 pos = tool ? vec3(FTX, FTY, mix(-0.75 * FTS, FTZ, FTON)) : vec3(FIGX, FIGY, mix(-0.75 * FIGS, FIGZ, FIG));
+    vec3 oc = pos - ro;
+    float tc = max(dot(oc, rd), 0.0);                                                        // the nearest point of the ray (not behind the camera)
+    float D = length(oc - rd * tc) - 0.72 * S;                                               // how close it passes to the figure's bounding ball
+    if (D < 1.4 * FIGSOFT + 0.06 * S) return true;
   }
-  float d = 1e3;
-  gFHole = 1e3;
-  if (FIG > 0.001) {
-    float w = FIGMIX;
-    d = mix(dA, dB, w) * FIGS;
-    gFHole = mix(hA, hB, w) * FIGS;
-    gFQ = w > 0.5 ? qB : qA; gFC = cA; gFS = FIGS;
+  return false;
+}
+
+// the Figures add-on (a, re-forming into b) and the figure under your cursor when one is the tool.
+// One loop the compiler can't unroll, so the whole library is compiled once here, not three times;
+// each one is folded in as it comes, so little is carried from one to the next.
+float figuresSDF(vec3 p) {
+  float d = 1e3, hole = 1e3;
+  int n = 3 + int(min(uStepK, 0.0));
+  for (int k = 0; k < n; k++) {
+    if (k < 2 ? FIG < 0.001 || (k == 1 && FIGMIX < 0.001) : FTON < 0.001) continue;
+    bool tool = k == 2;
+    float S = tool ? FTS : FIGS, h;
+    vec3 q, c;
+    float dk = S * figPlaced(p, int((tool ? FTID : k == 0 ? FIGA : FIGB) + 0.5), tool ? vec3(FTX, FTY, mix(-0.75 * FTS, FTZ, FTON)) : vec3(FIGX, FIGY, mix(-0.75 * FIGS, FIGZ, FIG)),
+                             S, uFigFrame[k], tool ? vec2(1.0, 0.0) : uFigSpin, tool ? 0.0 : FIGREP, h, q, c);
+    h *= S;
+    if (k == 0) { d = dk; hole = h; gFQ = q; gFC = c; gFS = S; }
+    else if (k == 1) { d = mix(d, dk, FIGMIX); hole = mix(hole, h, FIGMIX); if (FIGMIX > 0.5) gFQ = q; }   // a re-forming into b
+    else { hole = min(hole, h); if (dk < d) { d = dk; gFQ = q; gFC = c; gFS = S; } }                     // the tool: whichever is nearer
   }
-  if (FTON > 0.001) {
-    float d2 = dT * FTS;
-    gFHole = min(gFHole, hT * FTS);
-    if (d2 < d) { d = d2; gFQ = qT; gFC = cT; gFS = FTS; }
-  }
+  gFHole = hole;
   return d;
 }
 `;

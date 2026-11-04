@@ -366,6 +366,7 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.15); }
 .view-menu { position: fixed; z-index: 30; width: 230px; padding: 12px 14px; border-radius: 14px; display: flex; flex-direction: column; gap: 2px; }
 .view-menu[hidden] { display: none; }
 .view-menu > b { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 4px; }
+.view-menu > b.menu-gap { margin-top: 10px; }
 
 .hint {
   position: fixed; z-index: 3; bottom: calc(var(--gap) + 72px + env(safe-area-inset-bottom));

@@ -3,7 +3,6 @@
 // screen. Each scene is a look, colors, maybe a figure placed off-centre, a camera. Same song, same seed, same
 // film, so it can be rewound. Everything you might want to change is one of the options.
 import { LOOKS, PALETTES, NEUTRAL, COLOR_KEYS, camKind } from './engine/looks.js';
-import { FIGURES } from './engine/figures.js';
 import { mulberry32 } from './engine/world.js';
 
 export const defaultOptions = () => ({
@@ -18,19 +17,19 @@ export const defaultOptions = () => ({
 
 // the look pools for each character of section
 const POOLS = {
-  hush: { flat: ['moire', 'sand', 'agate', 'living', 'spiral', 'dottunnel', 'quasi'], world: ['silk', 'landscape'] },
-  flow: { flat: ['stripes', 'whirlpool', 'trivortex', 'spirals', 'cymatics', 'julia', 'tank', 'twins', 'agate', 'dipole', 'living', 'blaze'], world: ['silk', 'chrome', 'landscape', 'origami', 'ringtunnel', 'lattice'] },
-  swell: { flat: ['spirals', 'trivortex', 'tunnel', 'quasi', 'mandala', 'circlelimit', 'twins'], world: ['checkerhills', 'hallway', 'trifloor', 'hobnail'] },
-  pulse: { flat: ['maze', 'blocks', 'squeeze', 'vasarely', 'diamonds', 'squares', 'cymatics', 'dipole'], world: ['trifloor', 'road', 'dots', 'hobnail', 'origami'] },
-  peak: { flat: ['circlelimit', 'stargate', 'tunnel', 'mandala', 'trivortex', 'blaze', 'lightning', 'julia'], world: ['shaft', 'sponge', 'checkerhills', 'colonnade'] },
+  hush: { flat: ['ink', 'moire', 'sand', 'agate', 'living', 'seigaiha', 'lace', 'ouchi'], world: ['silk', 'landscape'] },
+  flow: { flat: ['ink', 'metamorph', 'weave', 'seigaiha', 'khatam', 'crystal', 'stripes', 'whirlpool', 'trivortex', 'spirals', 'tank', 'blaze'], world: ['silk', 'chrome', 'landscape', 'origami', 'ringtunnel', 'lattice'] },
+  swell: { flat: ['crystal', 'rosette', 'planets', 'lace', 'spirals', 'trivortex', 'tunnel', 'mandala', 'circlelimit', 'twins'], world: ['pulsar', 'checkerhills', 'hallway', 'trifloor', 'pinart'] },
+  pulse: { flat: ['crystal', 'shards', 'planets', 'weave', 'maze', 'blocks', 'squeeze', 'vasarely', 'diamonds', 'cymatics', 'dipole'], world: ['pulsar', 'pinart', 'trifloor', 'road', 'dots', 'origami'] },
+  peak: { flat: ['crystal', 'shards', 'rosette', 'planets', 'circlelimit', 'stargate', 'tunnel', 'mandala', 'trivortex', 'blaze', 'lightning'], world: ['pulsar', 'pinart', 'shaft', 'sponge', 'checkerhills', 'colonnade'] },
 };
 // and the figures that suit it
 const CAST = {
-  hush: ['eye', 'monolith', 'singer', 'manta'],
-  flow: ['manta', 'serpent', 'fluke', 'hand', 'arm', 'singer', 'wings'],
-  swell: ['wings', 'arm', 'kraken', 'fluke', 'singer'],
-  pulse: ['skull', 'icarus', 'kraken', 'serpent'],
-  peak: ['skull', 'wings', 'kraken', 'arm', 'singer'],
+  hush: ['sleeper', 'eye', 'veil', 'ammonite', 'lovers'],
+  flow: ['sleeper', 'manta', 'lovers', 'kraken', 'hand', 'moth', 'ammonite'],
+  swell: ['cry', 'ribs', 'kraken', 'heart', 'veil'],
+  pulse: ['heart', 'skull', 'kraken', 'ribs', 'moth'],
+  peak: ['skull', 'cry', 'heart', 'kraken'],
 };
 const ACCENTS = ['#d80146', '#ff5a1f', '#2d5bff', '#c9f73a', '#e8c547', '#19c3b2', '#ff4fa3'];
 const FULL = PALETTES.filter(p => !['Black & white', 'White on black'].includes(p.name));
@@ -77,29 +76,27 @@ export function buildScore(songId, an, opts) {
       prevFlat = !world;
       const palette = i === 0 || r() < 0.5 ? paletteFor(opts, r, accent, k) : scenes[scenes.length - 1].palette;
       // a figure?
-      let figure = null, style = 'contour', home = null;
-      const chance = { none: 0, some: 0.38, lots: 0.8 }[opts.figures] ?? 0.38;
+      let figure = null, home = null;
+      const chance = { none: 0, some: 0.6, lots: 0.9 }[opts.figures] ?? 0.6;
       const kindCam = camKind(lookId);
       if (kindCam !== 'fly' && kindCam !== 'object' && r() < chance) {
         const cast = (CAST[k] || CAST.flow).filter(id => !recentFig.includes(id));
         figure = pick(cast.length ? cast : CAST[k] || CAST.flow);
         recentFig.push(figure); if (recentFig.length > 5) recentFig.shift();
         const tilted = (LOOKS[lookId].set.pitch || 0) > 0.6;
-        const f = FIGURES.find(x => x.id === figure);
-        style = f?.style || (tilted ? 'draped' : pick(['draped', 'draped', 'draped', 'silhouette']));
         // off-centre: thirds of the screen, and low if it's looking along the ground
         const side = r() < 0.5 ? -1 : 1;
-        home = [side * (0.12 + r() * 0.28), tilted ? -0.2 : -0.08 + r() * 0.1];
+        home = [side * (0.04 + r() * 0.2), tilted ? -0.14 : -0.04 + r() * 0.08];
       }
       // now and then, when it's big and it's a place: not one figure but a whole sea of them
       let crowd = false;
-      if (figure && world && (k === 'peak' || k === 'swell') && kindCam === 'open' && r() < 0.3) { figure = pick(['arm', 'arm', 'kraken', 'wings']); crowd = true; style = 'draped'; }
+      if (figure && world && (k === 'peak' || k === 'swell') && kindCam === 'open' && r() < 0.3) { figure = pick(['sleeper', 'skull', 'heart', 'moth']); crowd = true; }
       // most of a scene is the morph into it: a slow change that fills the time, quicker when a big section lands
       const length = t1 - t0, landing = i === 0 && (k === 'peak' || k === 'pulse');
       const glide = landing ? Math.min(6, length * 0.5) : Math.max(4, Math.min(16, length * (k === 'hush' ? 0.85 : 0.72)));
       const paceK = { slow: 0.75, normal: 1, fast: 1.25 }[opts.pace] || 1;
       const cineSpeed = (k === 'peak' ? 0.72 : k === 'hush' ? 0.3 : k === 'flow' ? 0.46 : 0.58) * paceK;
-      scenes.push({ t0, t1, look: lookId, palette, figure, style, home, crowd, kind: k, cineSpeed, glide, first: i === 0 });
+      scenes.push({ t0, t1, look: lookId, palette, figure, home, crowd, kind: k, cineSpeed, glide, first: i === 0 });
     }
   }
   return { scenes, accent };

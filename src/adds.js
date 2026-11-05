@@ -3,13 +3,13 @@
 // The camera and the picture go through media.js / tracking.js; the rest are written straight into the
 // world's values every frame (after the look and the music), so they ride along with whatever look is on.
 
-import { FIGURES, FIGURE_INDEX, figureFrame } from './engine/figures.js';
+import { FIGURES, FIGURE_INDEX } from './engine/figures.js';
 import { rayOnSheet, rayAt, noSheet, camDist, camHeight } from './engine/camera.js';
 
 export const ADDS = [
   { id: 'camera', name: 'You', icon: 'camera', blurb: 'your camera, inside the lines' },
   { id: 'hands', name: 'Hands', icon: 'hand', blurb: 'a pair of hands pressing through' },
-  { id: 'figures', name: 'Figures', icon: 'figure', blurb: 'a skull, a serpent, a face, tentacles… coming up out of the sheet' },
+  { id: 'figures', name: 'Figures', icon: 'figure', blurb: 'a face, a skull, a heart, tentacles… pressing up through the sheet' },
   { id: 'face', name: 'Ghost face', icon: 'face', blurb: 'a face in the lines — or yours, from the camera' },
   { id: 'ball', name: 'Ball', icon: 'ball', blurb: 'a chrome ball the lines flow around' },
   { id: 'orbs', name: 'Orbs', icon: 'orbs', blurb: 'spheres rising through the sheet' },
@@ -19,7 +19,7 @@ export const ADDS = [
 export const defaultAdds = () => ({
   camera: { on: false, pinned: false },
   hands: { on: false, pinned: false, size: 1, push: 0.35, open: 0.55, apart: 0.55, copy: false },
-  figures: { on: false, pinned: false, pick: 'hand', style: 'draped', size: 1, depth: 1, fabric: 0.5, cycle: false, every: 8, repeat: false, follow: true },
+  figures: { on: false, pinned: false, pick: 'hand', burst: 0.25, size: 1, depth: 1, melt: 3.5, cycle: false, every: 8, repeat: false, follow: true },
   face: { on: false, pinned: false, size: 1, depth: 1, copy: false },
   ball: { on: false, pinned: false, size: 0.13, speed: 0.45, wake: 0.7, flow: 1, follow: false },
   orbs: { on: false, pinned: false, amount: 1, grid: 5 },
@@ -186,54 +186,36 @@ export class CursorHand {
   }
 }
 
-// how a figure is drawn: in its own contour lines, like a sounding chart; a solid shape with a line of paper
-// round it; or just the look's pattern poured over it, like the hand. (The monolith is always solid.)
-const FIG_STYLES = {
-  contour: f => ({ figInk: f.ink ?? 0, figCont: f.ink ? 0 : 55, figHalo: 0.013, figLens: 0 }),
-  silhouette: () => ({ figInk: 1, figCont: 0, figHalo: 0.02, figLens: 0.4 }),
-  draped: f => ({ figInk: f.ink ?? 0, figCont: 0, figHalo: 0, figLens: 0 }),
-};
-
-// how much the fabric clings to a figure (its veil), as a soft-union radius
-export const figureSoft = (cfg, veil, S) => (0.012 + 0.09 * cfg.fabric * veil) * S;
-
-// ---------------------------------------------------------------- the figure going under
-// One at a time. It rises out of the sheet, holds its pose with the sheet cutting across it, and heaves a
-// little like something floating. With the mouse on it, it follows your cursor exactly (whatever the
-// camera's doing) and leans into the move; hold and it comes further out. Picking another: this one goes
-// under, then the next comes up.
+// ---------------------------------------------------------------- what's lying under the sheet
+// One at a time. It rises out of the flat sheet, and when you pick another this one melts into it. With the
+// mouse on it, it follows your cursor, whatever the camera's doing, and the lines drag behind it. Hold and it
+// comes further up. It stays turned the way it is: move the camera and you see it from another side.
+const mixN = (a, b, t) => a + (b - a) * t;
+const up = (x, want, rate, dt) => x + (want - x) * (1 - Math.exp(-dt * rate));
 export class Figures {
   constructor() {
-    this.trail = new Float32Array(48);        // a rope-bodied swimmer, for the shader
-    this.rope = null;
-    this.a = FIGURE_INDEX.skull;              // showing
-    this.swap = null;                         // the one waiting for this one to go under
+    this.a = FIGURE_INDEX.sleeper;            // showing
+    this.b = null;                            // turning into
+    this.mix = 0; this.mixDur = 3;
     this.t = 0;                               // its own clock
-    this.look = [0, 0];
-    this.sing = 0;
     this.x = 0; this.y = 0; this.placed = false;
     this.vx = 0; this.vy = 0;
-    this.press = 0;
-    this.cy = null; this.cp = 0;              // which way it faces: after the camera, unhurried
-    this.heave = 0;
-    this.frame = new Float32Array(9);
+    this.press = 0; this.sing = 0; this.lub = 0; this.fl = 0; this.shut = 0; this.blinkAt = 3;
+    this.lx = 0; this.ly = 0; this.spin = 0; this.heading = 0; this.facing = 0; this.thru = 0; this.orbit = 0; this.idle = 1;
+    this.w = new Float32Array(4);
+    this.size = 1;
     this.nextBar = null; this.nextTime = 0;
   }
 
-  get current() { return FIGURES[this.swap ?? this.a].id; }
-
-  pick(id) {
-    const i = FIGURE_INDEX[id] ?? 0;
-    this.swap = i === this.a ? null : i;
-  }
+  get current() { return FIGURES[this.b ?? this.a].id; }
 
   nextId(cur) {
     const pool = FIGURES.filter(f => f.id !== cur && !f.special);
     return pool[Math.floor(Math.random() * pool.length)].id;
   }
 
-  // cfg: the add's settings; m: the music; aim: a function giving where a point on the figure's y axis has
-  // to be for it to sit under your cursor (or null: it stays at home), home: where it stays; held: mouse down
+  // cfg: the add's settings; m: the music; aim: where your cursor lands on the sheet (or null: it stays at
+  // home), home: where it stays; held: mouse down
   step(dt, cfg, m, aim, home, held, v) {
     let changed = null;
     if (cfg.on && cfg.cycle) {
@@ -244,159 +226,90 @@ export class Figures {
         this.nextTime -= dt;
         if (this.nextTime <= 0) { this.nextTime = cfg.every * 1.8; changed = this.nextId(this.current); }
       }
-      if (changed) { cfg.pick = changed; this.pick(changed); }
+      if (changed) cfg.pick = changed;
     } else this.nextBar = null;
     this.t += dt * (0.6 + (m.on ? m.loud : 0.4));
-    this.press += ((held ? 1 : 0) - this.press) * (1 - Math.exp(-dt * 5));
+    this.press = up(this.press, held ? 1 : 0, 5, dt);
     const f = FIGURES[this.a];
-    // it comes up facing the camera, then keeps that orientation: turn the camera and you see it from another side
-    if (this.cy == null) { this.cy = v.yaw; this.cp = v.pitch; }
-    if (f.swim) { this.swim(dt, cfg, m, aim, home, v, f); return changed; }
-    this.rope = null;
-    // it heaves on the water, leans into a move, and tips with the melody
-    const heaveA = 0.05 * Math.sin(this.t * 0.55), heaveB = 0.035 * Math.sin(this.t * 0.37 + 1.3);
-    const sp = v.frame / 0.6;
-    const lean = [clamp(-this.vx / sp * 0.16, -0.5, 0.5) + heaveA, clamp(-this.vx / sp * 0.22, -0.55, 0.55) + heaveB + (m.tilt || 0) * 0.22];
-    figureFrame(f, this.cy, this.cp, lean, this.frame);
-    const S = this.size = cfg.size * 1.06 * sp * (f.scale ?? 1) * (1 - 0.28 * Math.sin(clamp(this.cp, 0, 1.5))) * (cfg.repeat ? 0.72 : 1);
-    const Uz = this.frame[5];
-    // where it wants to be: with the point it's held by under your cursor, or at home
-    const hg = (f.grab ?? 0);
-    const lift = this.lift(cfg, m);
-    this.z = S * Uz * (lift - (f.water ?? 0));
+    this.size = cfg.size * v.frame * (f.scale ?? 1) * (cfg.repeat ? 0.55 : 1);
+    // it comes up the right way round for the camera that's looking at it, and then keeps that way however the camera turns
+    if (!this.placed) this.facing = f.glide ? 0 : v.yaw + v.roll;
     let tx = home[0], ty = home[1];
-    if (aim) {
-      const on = aim(this.z + S * Uz * hg);
-      tx = on[0] - S * this.frame[3] * hg;
-      ty = on[1] - S * this.frame[4] * hg;
-      if (on.length > 2) this.z = on[2] - S * Uz * hg;   // flying through a world, there's no sheet to sit in
+    const hx = this.x, hy = this.y;
+    if (aim) { const on = aim(0); tx = on[0]; ty = on[1]; }
+    if (f.glide) {
+      // it won't sit still: left alone it roams, and when you stop it circles you
+      if (!aim) { tx += Math.sin(this.t * 0.31) * 0.72 * v.frame; ty += Math.sin(this.t * 0.23 + 1) * 0.52 * v.frame; }
+      const moved = this.lastTx === undefined ? 0 : Math.hypot(tx - this.lastTx, ty - this.lastTy) / Math.max(dt, 1e-3) / v.frame;
+      this.lastTx = tx; this.lastTy = ty;
+      this.idle = up(this.idle, moved > 0.25 ? 0 : 1, moved > 0.25 ? 8 : 1.4, dt);
+      this.orbit += dt * (0.8 + 0.5 * (m.on ? m.loud : 0.3));
+      const R = 0.34 * this.size * this.idle;
+      tx += Math.cos(this.orbit) * R; ty += Math.sin(this.orbit) * R;
     }
     if (!this.placed) { this.x = tx; this.y = ty; this.placed = true; this.vx = this.vy = 0; }
-    const k = 1 - Math.exp(-dt * (aim ? 26 : 3));
+    const k = 1 - Math.exp(-dt * (f.glide ? 5 : aim ? 18 : 2.5));
     const nx = this.x + (tx - this.x) * k, ny = this.y + (ty - this.y) * k;
     const idt = 1 / Math.max(dt, 1e-3), kv = 1 - Math.exp(-dt * 7);
     this.vx += ((nx - this.x) * idt - this.vx) * kv;
     this.vy += ((ny - this.y) * idt - this.vy) * kv;
     this.x = nx; this.y = ny;
-    // eyes: on your pointer, or wandering
-    let lx = Math.sin(this.t * 0.7) * 0.6, ly = Math.sin(this.t * 0.53 + 1) * 0.4;
-    if (this.pointer) { lx = clamp((this.pointer[0] - this.x) / sp * 2.2, -1, 1); ly = clamp((this.pointer[1] - this.y) / sp * 2.2, -1, 1); }
-    this.look[0] += (lx - this.look[0]) * (1 - Math.exp(-dt * 6));
-    this.look[1] += (ly - this.look[1]) * (1 - Math.exp(-dt * 6));
-    const sing = m.on ? clamp((m.voice ?? m.mid) * 1.1 + m.bass * 0.2 - 0.1, 0, 1) : 0.15 + 0.15 * Math.sin(this.t * 1.3);
-    this.sing += (sing - this.sing) * (1 - Math.exp(-dt * 14));
+    if (f.glide) {
+      const sp = Math.hypot(this.vx, this.vy) / Math.max(this.size, 1e-3);
+      if (sp > 0.05) {
+        const want = Math.atan2(this.vy, this.vx) - Math.PI / 2, dh = Math.atan2(Math.sin(want - this.heading), Math.cos(want - this.heading));
+        this.heading += dh * (1 - Math.exp(-dt * 3));
+      }
+    } else this.heading = 0;
+    // what the music does to it
+    // a mouth opens on each note and closes between them; holding a long one keeps it a little open
+    this.syll = Math.max((this.syll ?? 0) * Math.exp(-dt * 5.5), m.on && m.note ? 0.45 + 0.55 * (m.voice ?? 0) : 0);
+    const sing = m.on ? clamp((m.voice ?? m.mid) * 0.3 + this.syll * 0.8, 0, 1) : 0.06 + 0.06 * Math.sin(this.t * 1.3);
+    this.sing = up(this.sing, sing, 16, dt);
+    const breath = (0.5 + 0.5 * Math.sin(this.t * 1.15)) * (m.on ? 0.5 + 0.7 * m.loud : 0.75);
+    const kick = m.on ? m.kick ?? 0 : Math.max(0, Math.sin(this.t * 3.4)) ** 12;
+    this.lub = Math.max(this.lub * Math.exp(-dt * 6), up(this.lub, kick, 40, dt));
+    this.fl = up(this.fl, (m.on ? clamp((m.high ?? 0) * 1.2 + (m.hat ?? 0) * 0.5, 0, 1) : 0.15) * (0.55 + 0.45 * Math.sin(this.t * 19)), 22, dt);
+    // an eye blinks now and then, on a beat if there is one, and shuts while you hold
+    this.blinkAt -= dt;
+    if (this.blinkAt < 0 && (!m.on || m.beat)) { this.blinkAt = 3 + Math.random() * 5; this.blinkT = 0; }
+    if (this.blinkT !== undefined) { this.blinkT += dt; if (this.blinkT > 0.34) this.blinkT = undefined; }
+    const blink = this.blinkT !== undefined ? Math.sin((this.blinkT / 0.34) * Math.PI) : 0;
+    this.shut = up(this.shut, Math.max(blink, this.press), 26, dt);
+    const drive = {
+      voice: this.sing, press: this.press, breath, kick: Math.max(this.lub * 0.9, this.press * 0.7),
+      cry: Math.max(this.sing * 0.85, this.press), flutter: Math.max(this.fl * 0.7, this.press), blink: this.shut,
+      beat: Math.max(0.35 + 0.35 * Math.sin(this.t * 2.1), this.press) * (0.8 + this.press * 0.6),
+    };
+    (f.shapes || []).forEach((s, i) => { this.w[i] = drive[s] ?? 0; });
+    // where it's looking
+    let lx = m.on ? clamp(m.sway ?? 0, -1, 1) : Math.sin(this.t * 0.31) * 0.7, ly = m.on ? clamp((m.height ?? 0) * 0.5, -1, 1) : Math.sin(this.t * 0.23 + 1) * 0.4;
+    if (f.lookAt === 'cursor' && this.pointer) { lx = clamp((this.pointer[0] - this.x) / (this.size * 0.7), -1, 1); ly = clamp((this.pointer[1] - this.y) / (this.size * 0.7), -1, 1); }
+    const lr = f.lookAt === 'cursor' ? 9 : 2.2;
+    this.lx = up(this.lx, lx, lr, dt); this.ly = up(this.ly, ly, lr, dt);
+    this.spin += dt * (f.spin ?? 0) * (0.5 + (m.on ? m.loud * 1.3 : 0.3));
+    // how far through the sheet it has come: the song's arc brings it through, your mouse tears it open
+    const arcT = m.on ? clamp((m.swell ?? 0.4) - 0.35, 0, 0.65) : 0;
+    const thru = clamp((cfg.burst ?? 0.25) * (1 + arcT) + arcT * 0.22 + this.press * 0.6, 0, 0.85);
+    this.thru = up(this.thru, thru, held ? 5 : 1.1, dt);
     return changed;
   }
 
-  // something that swims: it goes after your cursor, and when you stop it circles there, so it never quite
-  // stops moving. Left alone (a song's running the show) it goes round the screen by itself.
-  swim(dt, cfg, m, aim, home, v, f) {
-    const sp = v.frame / 0.6, cp = clamp(this.cp, 0, 1.5);
-    const S = this.size = cfg.size * sp * (f.scale ?? 1) * (1 - 0.28 * Math.sin(cp));
-    let tx, ty;
-    if (aim) { const on = aim(S * 0.1); tx = on[0]; ty = on[1]; }
-    else { tx = home[0] + Math.sin(this.t * 0.31) * 0.62 * v.frame * 1.3; ty = home[1] + Math.sin(this.t * 0.23 + 1) * 0.5 * v.frame; }
-    const moved = this.lastTx === undefined ? 0 : Math.hypot(tx - this.lastTx, ty - this.lastTy) / Math.max(dt, 1e-3) / sp;
-    this.lastTx = tx; this.lastTy = ty;
-    this.idle = (this.idle ?? 1) + (((moved > 0.25 ? 0 : 1)) - (this.idle ?? 1)) * (1 - Math.exp(-dt * (moved > 0.25 ? 8 : 1.4)));
-    this.orbit = (this.orbit ?? 0) + dt * (0.8 + 0.5 * (m.on ? m.loud : 0.3));
-    const R = (f.swim === 'trail' ? 0.2 : 0.3) * S * this.idle;
-    tx += Math.cos(this.orbit) * R; ty += Math.sin(this.orbit) * R;
-    if (!this.placed || this.swimmer !== f.id) { this.hx = tx; this.hy = ty; this.placed = true; this.vx = this.vy = 0; this.rope = null; this.swimmer = f.id; this.heading = 1.2; }
-    const kh = 1 - Math.exp(-dt * (f.swim === 'trail' ? 20 : 10));
-    const nx = this.hx + (tx - this.hx) * kh, ny = this.hy + (ty - this.hy) * kh;
-    const idt = 1 / Math.max(dt, 1e-3), kv = 1 - Math.exp(-dt * 5);
-    this.vx += ((nx - this.hx) * idt - this.vx) * kv;
-    this.vy += ((ny - this.hy) * idt - this.vy) * kv;
-    this.hx = nx; this.hy = ny;
-    const sing = m.on ? clamp((m.voice ?? m.mid) * 1.1 - 0.1, 0, 1) : 0.15 + 0.15 * Math.sin(this.t * 1.3);
-    this.sing += (sing - this.sing) * (1 - Math.exp(-dt * 10));
-    if (f.swim === 'trail') this.swimRope(dt, m, S);
-    else this.swimGlide(dt, m, S, f, v);
-  }
-
-  // the body is a rope: each link is pulled along by the one in front, so it follows round corners by itself
-  swimRope(dt, m, S) {
-    const N = 16, L = 0.17 * S;
-    if (!this.rope || this.rope.length !== N * 2) {
-      this.rope = new Float32Array(N * 2);
-      for (let i = 0; i < N; i++) { this.rope[i * 2] = this.hx - i * L * 0.9; this.rope[i * 2 + 1] = this.hy - i * L * 0.42; }
-    }
-    const P = this.rope;
-    P[0] = this.hx; P[1] = this.hy;
-    for (let i = 1; i < N; i++) {
-      const dx = P[i * 2] - P[i * 2 - 2], dy = P[i * 2 + 1] - P[i * 2 - 1], l = Math.hypot(dx, dy) || 1;
-      P[i * 2] = P[i * 2 - 2] + dx / l * L; P[i * 2 + 1] = P[i * 2 - 1] + dy / l * L;
-    }
-    // on top of that it slithers, and humps travel down it; the neck rises with the tune and when you hold
-    const T = this.trail, tune = m.on && m.known ? (m.height ?? 0.5) * (m.voice ?? 0) : 0;
-    this.rear = (this.rear ?? 0) + (tune * 0.18 + this.press * 0.2 - (this.rear ?? 0)) * (1 - Math.exp(-dt * 5));
-    let cx = 0, cy = 0;
-    for (let i = 0; i < N; i++) {
-      const s = i / (N - 1);
-      const a = Math.max(i - 1, 0), b = Math.min(i + 1, N - 1);
-      const dx = P[b * 2] - P[a * 2], dy = P[b * 2 + 1] - P[a * 2 + 1], l = Math.hypot(dx, dy) || 1;
-      const w = (0.05 + 0.03 * (m.sway ?? 0)) * Math.sin(s * 9 + this.t * 2.2) * Math.min(s * 4, 1);
-      const z = (0.3 + this.rear) * Math.exp(-((s / 0.13) ** 2)) + (0.13 + 0.03 * Math.sin(this.t * 0.5)) * Math.sin(s * 15.5 - this.t * 1.8) * Math.min(s * 3.5, 1) * (1 - 0.45 * s) - 0.05 * s;
-      T[i * 3] = P[i * 2] - dy / l * w * S; T[i * 3 + 1] = P[i * 2 + 1] + dx / l * w * S; T[i * 3 + 2] = z;
-      cx += T[i * 3]; cy += T[i * 3 + 1];
-    }
-    cx /= N; cy /= N;
-    let R = 0;
-    for (let i = 0; i < N; i++) {
-      T[i * 3] = (T[i * 3] - cx) / S; T[i * 3 + 1] = (T[i * 3 + 1] - cy) / S;
-      R = Math.max(R, Math.hypot(T[i * 3], T[i * 3 + 1], T[i * 3 + 2]));
-    }
-    this.boundR = R + 0.32;
-    this.x = cx; this.y = cy; this.z = 0;
-    this.frame.set([1, 0, 0, 0, 1, 0, 0, 0, 1]);
-    this.wakeless = true;
-  }
-
-  // a flat thing: it faces the way it's going, and banks into the turn
-  swimGlide(dt, m, S, f, v) {
-    const sp = Math.hypot(this.vx, this.vy) / (S || 1);
-    const want = sp > 0.05 ? Math.atan2(this.vy, this.vx) : this.heading;
-    const dh = Math.atan2(Math.sin(want - this.heading), Math.cos(want - this.heading));
-    const turn = dh * (1 - Math.exp(-dt * 3.5));
-    this.heading += turn;
-    this.bank = (this.bank ?? 0) + (clamp(turn / Math.max(dt, 1e-3) * 0.35, -0.5, 0.5) - (this.bank ?? 0)) * (1 - Math.exp(-dt * 4));
-    const hx = Math.cos(this.heading), hy = Math.sin(this.heading);
-    const cb = Math.cos(this.bank), sb = Math.sin(this.bank);
-    // right = up x forward; up tips over by the bank
-    const R0 = [-hy * cb, hx * cb, sb], U0 = [hy * sb, -hx * sb, cb], B0 = [hx, hy, 0];
-    // and it tips its back toward a low camera, so it breaches instead of lying flat and unseen
-    const tip = 0.72 * Math.sin(clamp(this.cp, 0, 1.4));
-    const cy = Math.cos(this.cy), sy = Math.sin(this.cy);
-    const to = [sy * Math.sin(tip), -cy * Math.sin(tip), Math.cos(tip)];      // up, leaning to the camera
-    const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    const nrm = a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
-    const U = nrm([U0[0] + to[0] - 0 * 1, U0[1] + to[1], U0[2] + to[2] - 1]);
-    const B = nrm(B0.map((k, i) => k - U[i] * dot3(B0, U)));
-    const R = [U[1] * B[2] - U[2] * B[1], U[2] * B[0] - U[0] * B[2], U[0] * B[1] - U[1] * B[0]];
-    this.frame.set([...R, ...U, ...B]);
-    this.x = this.hx; this.y = this.hy;
-    this.z = S * (0.035 + 0.3 * Math.sin(tip) + 0.05 * this.press + (m.swell || 0) * 0.03 + 0.012 * Math.sin(this.t * 0.8));
-    this.boundR = f.r ?? 1.3;
-    this.wakeless = false;
-  }
-
-  // how far out of the water, in figure units: the mouse, the slow heave, the depth slider and the song
-  lift(cfg, m) {
-    const f = FIGURES[this.a];
-    return (cfg.depth - 1) * 0.3 + this.press * (f.rise ?? 0.15) + 0.018 * Math.sin(this.t * 0.8) + (m.swell || 0) * 0.1;
-  }
-
-  apply(v, cfg, pres) {
-    if (pres < 0.01) return;
-    const f = FIGURES[this.a], S = this.size, sp = v.frame / 0.6;
-    const still = f.swim === 'trail';                                                // a body all over the sheet has no one point for the water to whirl round
+  apply(v, cfg, pres, m, A, B) {
+    const f = FIGURES[this.a], slope = Math.max(A?.meta.slope ?? 3, B?.meta.slope ?? 0);
+    const arc = m.on ? clamp((m.swell ?? 0.4) - 0.3, 0, 1) : 0;
+    const amp = cfg.depth * (f.tall ?? 1) * (1 + this.press * (f.rise ?? 0.25) + arc * (f.ride ?? 0.2) + 0.02 * Math.sin(this.t * 0.8) + (m.on ? (f.pulse ?? 0) * this.lub : 0));
+    const sm = this.mix * this.mix * (3 - 2 * this.mix);
+    const [la, lk] = f.look || [0, 1.6];
     Object.assign(v, {
-      fig: pres, figA: this.a, figS: S, figX: this.x, figY: this.y, figZ: this.z,
-      figSoft: figureSoft(cfg, f.veil ?? 0.4, S), figBY: f.swim ? 0 : f.cy ?? 0, figBR: f.swim ? this.boundR : (f.r ?? 0.8) + 0.04, figSink: f.swim ? 0.5 : Math.max((f.r ?? 0.8) + Math.abs(f.cy ?? 0), 0.6),
-      figVX: still ? 0 : clamp(this.vx / sp, -6, 6) * 0.6, figVY: still ? 0 : clamp(this.vy / sp, -6, 6) * 0.6,
-      figT: this.t, figLX: this.look[0], figLY: this.look[1], figSing: this.sing, figRep: cfg.repeat && !f.swim ? 1 : 0, figSp: cfg.spacing || 1.15, figP: this.press,
-      figMelt: 3.2, figDip: f.swim ? 0 : 0.05, figRing: f.swim ? 0 : 1, figSwirl: f.swim ? 0 : 1, figEdge: 0, ...FIG_STYLES[f.style || cfg.style || 'draped'](f, v),
+      fig: pres, figS: this.size, figX: this.x, figY: this.y, figT: this.t,
+      figVX: clamp(this.vx / v.frame, -6, 6) * 0.6, figVY: clamp(this.vy / v.frame, -6, 6) * 0.6,
+      figRep: cfg.repeat ? 1 : 0, figSp: cfg.spacing || 2, figRot: this.spin + this.heading + this.facing, figMix: sm, figAmp: amp,
+      figTop: mixN(A?.meta.top ?? 0.4, B?.meta.top ?? A?.meta.top ?? 0.4, sm) * amp, figBurst: this.thru,
+      figStep: Math.min(1, 1.15 / Math.sqrt(1 + (0.55 * slope * amp) ** 2)),
+      figShapes: A?.shapes ? 1 : 0, figLookX: la * this.lx * (1 - sm), figLookY: la * this.ly * (1 - sm), figLookK: lk,
+      figWrithe: (f.writhe?.[0] ?? 0) * (0.7 + (m.on ? m.loud * 0.6 : 0.3) + this.press * 0.7), figWF: f.writhe?.[1] ?? 6, figWT: this.t * (f.writhe?.[2] ?? 0) * 2,
     });
+    for (let i = 0; i < 4; i++) this.w[i] *= 1 - sm;
   }
 }

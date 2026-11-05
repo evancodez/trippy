@@ -14,6 +14,7 @@ export const NEUTRAL = {
   focal: 8, frame: 0.6, pitch: 0, yaw: 0, roll: 0, tx: 0, ty: 0,
   freq: 18, thick: 0, frot: 0, linA: 0, wLin: 1, wRad: 0, radLog: 0, radInv: 0, square: 0, wAng: 0, spokes: 6,
   check: 0, checkA: H, checkPolar: 0, tri: 0, moire: 0, contour: 0, wrap: 0, refract: 0.6, blaze: 0, blazeN: 24,
+  crys: 0, crysN: 5, crysT: 0, sumi: 0, lock: 0, lockA: 1, cells: 0, cellSq: 0, star: 0, starA: 0.6, starB: 8, starHex: 0, lace: 0, laceK: 1.2, laceB: 3, weave: 0, seig: 0, ouchi: 0, pins: 0, pinF: 34,
   hyper: 0, hyperP: 8, hyperQ: 3, hyperS: 0.56, cube: 0, cubeShift: 0.5, truchet: 0, truchetLine: 0, quasi: 0, quasiN: 7,
   cym: 0, cymN: 3, cymM: 5, cymRound: 0, cymSand: 0, julia: 0, juliaA: 0.7, juliaR: 0.76, agate: 0, wells: 0, wellN: 3, wellR: 0.35, living: 0,
   conf: 0, confA: 0, confP: 0, confX: 0.28, planes: 0, ori: 0, oriF: 5, stud: 0,
@@ -52,12 +53,12 @@ export const LOOKS = {
   },
   lightning: {
     group: 'strange', name: 'Lightning', blurb: 'thin white zigzags cracking across the dark',
-    set: { ...PURE, paper: NIGHT, ink: CHALK, freq: 5, thick: 0.82, wave: 1.7, waveF: 7, zig: 1, warpN: 0.25, pitch: 0.85, focal: 1.7, flow: 0.35, hitFlash: 0.4, glow: 0.2 },
+    set: { ...PURE, paper: NIGHT, ink: CHALK, freq: 5, thick: 0.82, wave: 1.7, waveF: 7, zig: 1, warpN: 0.25, pitch: 0.85, focal: 1.7, flow: 0.35, hitFlash: 0.4, glow: 0.2, glowColor: CHALK },
     tweaks: ['wave', 'zig', 'waveF', 'warpN'],
   },
   moire: {
     group: 'strange', name: 'Ghost Rings', blurb: 'two sets of rings drifting through each other',
-    set: { wLin: 0, wRad: 1, freq: 46, moire: 1, moireOff: 0.3, thick: 0.45, paper: NIGHT, ink: CHALK, glow: 0.55, flow: 0.08, sway: 0.15, react: 0.3 },
+    set: { wLin: 0, wRad: 1, freq: 46, moire: 1, moireOff: 0.3, thick: 0.45, paper: NIGHT, ink: CHALK, glow: 0.55, glowColor: CHALK, flow: 0.08, sway: 0.15, react: 0.3 },
     tweaks: ['moire', 'moireOff'],
   },
   // ---------------------------------------------------------------- rings & tunnels
@@ -192,7 +193,7 @@ export const LOOKS = {
   },
   chrome: {
     group: 'worlds', name: 'Chrome Silk', blurb: 'white lines on black, heavy liquid folds',
-    set: { pitch: 0.25, focal: 2.2, freq: 24, folds: 1.6, foldF: 4.5, refract: 1.6, light: 1, engrave: 0.75, paper: NIGHT, ink: CHALK, glow: 0.25, react: 1.2, sway: 0.55, flow: 0.35 },
+    set: { pitch: 0.25, focal: 2.2, freq: 24, folds: 1.6, foldF: 4.5, refract: 1.6, light: 1, engrave: 0.75, paper: NIGHT, ink: CHALK, glow: 0.25, glowColor: CHALK, react: 1.2, sway: 0.55, flow: 0.35 },
     tweaks: ['folds', 'foldF', 'light', 'refract'],
   },
   landscape: {
@@ -220,20 +221,10 @@ export const LOOKS = {
     set: { ...PURE, freq: 13, check: 1, thick: 0.5, folds: 0.9, foldF: 2.4, refract: 1.4, pitch: 0.5, focal: 2.2, flow: 0.3, react: 0.9 },
     tweaks: ['folds', 'foldF', 'refract', 'pitch'],
   },
-  orbs: {
-    group: 'worlds', name: 'Orb Field', blurb: 'a grid of spheres rising through the lines, a wave at a time',
-    set: { pitch: 0.55, focal: 2.4, frame: 0.7, linA: 0.785, freq: 26, orbs: 1, orbN: 5, light: 0.65, engrave: 0.6, fogD: 0.3, react: 0.9, flow: 0.6, orbitRate: 0.03 },
-    tweaks: ['orbs', 'orbN', 'pitch', 'engrave'],
-  },
   origami: {
     group: 'worlds', name: 'Origami', blurb: 'a sheet pleated into hard zigzags, the lines breaking at every fold',
     set: { ...PURE, pitch: 0.8, focal: 2.0, frame: 0.55, linA: H, freq: 16, ori: 1, oriF: 4, refract: 1.1, light: 0.35, flow: 0.4, orbitRate: 0.015, fogD: 0.25 },
     tweaks: ['ori', 'oriF', 'refract', 'pitch'], ride: { height: 0.4 },
-  },
-  hobnail: {
-    group: 'worlds', name: 'Hobnail', blurb: 'a floor of hard little pyramids, a checkerboard bent over them',
-    set: { ...PURE, pitch: 0.95, focal: 1.8, frame: 0.5, ty: 0.4, freq: 8, check: 1, stud: 1, oriF: 5, refract: 0.9, flow: -0.8, fogD: 0.3 },
-    tweaks: ['stud', 'oriF', 'refract', 'pitch'], ride: { height: 0.5 },
   },
   // ---------------------------------------------------------------- fly through
   hallway: {
@@ -253,7 +244,7 @@ export const LOOKS = {
   },
   lattice: {
     group: 'worlds', name: 'Lattice', blurb: 'the sheet melts into an endless 3D lattice you fly through',
-    set: { gyro: 1, gyroS: 3.5, gyroType: 1, focal: 1.15, frame: 0.6, wLin: 0.25, contour: 0.85, freq: 16, light: 0.85, engrave: 0.55, fogD: 0.35, flyRate: 0.25, spinRate: 0.02, react: 0.9, glow: 0.3 },
+    set: { gyro: 1, gyroS: 3.5, gyroType: 1, focal: 1.15, frame: 0.6, wLin: 0.25, contour: 0.85, freq: 16, light: 0.85, engrave: 0.55, fogD: 0.35, flyRate: 0.25, spinRate: 0.02, react: 0.9, glow: 0.3, glowColor: CHALK },
     tweaks: ['gyroS', 'gyroType', 'contour', 'light'],
   },
   sponge: {
@@ -277,6 +268,71 @@ export const LOOKS = {
     set: { freq: 34, linA: H, penrose: 1, objX: 0, objY: 0, objZ: 1.0, objS: 0.75, objSoft: 0.02, reveal: 0, light: 0.85, engrave: 0.85, refract: 0.3, focal: 7, frame: 0.65, sway: 0.1 },
     tweaks: ['reveal', 'objS', 'engrave', 'freq'],
   },
+  crystal: {
+    group: 'strange', name: 'Crystal', blurb: 'five sets of straight lines, each sliding to its own part of the sound; it keeps re-forming into stars',
+    set: { ...PURE, crys: 1, crysN: 5, freq: 13, flow: 0.25 }, melody: 'crys',
+    tweaks: ['crysN', 'freq', 'crysT', 'bulge'], ride: { crysT: 0.05, bulge: 0.18 },
+  },
+  shards: {
+    group: 'strange', name: 'Shards', blurb: 'three sets of lines: triangles and hexagons that open and shut',
+    set: { ...PURE, crys: 1, crysN: 3, freq: 11, twist: 1.1, vortex: 0.5 }, melody: 'crys',
+    tweaks: ['freq', 'twist', 'vortex', 'crysT'], ride: { twist: 0.5, frot: 0.1 },
+  },
+  ink: {
+    group: 'strange', name: 'Ink', blurb: 'marbling: every kick and note drops ink on the water, pushing everything before it out of the way',
+    set: { ...PURE, sumi: 1, freq: 18 }, melody: 'sumi',
+    tweaks: ['twist', 'bulge', 'warpN', 'thick'], ride: { twist: 0.25 },
+  },
+  metamorph: {
+    group: 'strange', name: 'Metamorphosis', blurb: 'a checkerboard whose squares melt into interlocking creatures, and back',
+    set: { ...PURE, lock: 1, lockA: 1.15, freq: 22, flow: 0.2, spinRate: 0.008 },
+    tweaks: ['lockA', 'freq', 'twist', 'bulge'], ride: { lockA: 0.5, bulge: 0.12 },
+  },
+  planets: {
+    group: 'strange', name: 'Planets', blurb: 'a grid of dots and their negatives, swelling outward with the sound',
+    set: { ...PURE, cells: 1, freq: 40, flow: 0.45, bulge: 0.55 },
+    tweaks: ['freq', 'cellSq', 'bulge', 'twist'], ride: { cellSq: 0.5, bulge: 0.25 },
+  },
+  khatam: {
+    group: 'strange', name: 'Khatam', blurb: 'eight-pointed stars, ring inside ring; the tune sharpens and blunts them',
+    set: { ...PURE, star: 1, starA: 0.72, starB: 9, freq: 24, flow: 0.5, spinRate: 0.01 },
+    tweaks: ['starA', 'starB', 'freq', 'starHex'], ride: { starA: 0.22, frot: 0.08 },
+  },
+  rosette: {
+    group: 'strange', name: 'Rosette', blurb: 'six-fold stars, packed tight, opening and closing',
+    set: { ...PURE, star: 1, starHex: 1, starA: 0.45, starB: 7, freq: 20, flow: -0.5, bulge: 0.35 },
+    tweaks: ['starA', 'starB', 'freq', 'bulge'], ride: { starA: 0.2, bulge: 0.2 },
+  },
+  lace: {
+    group: 'strange', name: 'Lace', blurb: 'circles inside circles inside circles, its whole shape on the melody',
+    set: { ...PURE, lace: 1, laceK: 1.22, laceB: 5, flow: 0.4, frame: 0.9, spinRate: 0.012 },
+    tweaks: ['laceK', 'laceB', 'frame', 'twist'], ride: { laceK: 0.06, frot: 0.1 },
+  },
+  weave: {
+    group: 'solid', name: 'Basket', blurb: 'ribbons of fine lines going over and under; it ripples like cloth',
+    set: { ...PURE, weave: 1, freq: 24, wave: 0.8, waveF: 2.2, warpN: 0.3, flow: 0.15, sway: 0.2 },
+    tweaks: ['freq', 'wave', 'warpN', 'bulge'], ride: { wave: 0.5, bulge: 0.15 },
+  },
+  seigaiha: {
+    group: 'solid', name: 'Scales', blurb: 'rows of waves over waves, each ringing outward',
+    set: { ...PURE, seig: 1, freq: 32, flow: 0.8, wave: 0.35, waveF: 1.6, sway: 0.2 },
+    tweaks: ['freq', 'wave', 'twist', 'bulge'], ride: { wave: 0.3, bulge: 0.15 },
+  },
+  ouchi: {
+    group: 'solid', name: 'Floating Discs', blurb: 'bricks one way, discs of bricks the other, and the discs seem to float loose',
+    set: { ...PURE, ouchi: 1, freq: 26, flow: 0.12, wave: 0.2, waveF: 2 }, melody: 'ouchi',
+    tweaks: ['freq', 'wave', 'twist', 'bulge'], ride: { bulge: 0.12 },
+  },
+  pulsar: {
+    group: 'worlds', name: 'Pulsar', blurb: 'thin lines on black, the sound rising through them and rolling away into the distance',
+    set: { pitch: 1.0, focal: 2.2, frame: 0.72, ty: 0.18, linA: H, freq: 46, thick: 0.62, sland: 1.1, folds: 0.35, foldF: 3, light: 0, engrave: 0, refract: 0, paper: NIGHT, ink: CHALK, fog: '#000000', fogD: 0.28, vignette: 0.25, grain: 0.04, sway: 0.1 }, spectral: true,
+    tweaks: ['freq', 'thick', 'pitch', 'height'],
+  },
+  pinart: {
+    group: 'worlds', name: 'Pin Art', blurb: 'a bed of pins, pushed up from below by the sound and whatever is lying under them',
+    set: { ...PURE, pitch: 0.82, focal: 2.4, frame: 0.68, pins: 1, pinF: 30, freq: 15, check: 1, sland: 0.9, folds: 1.5, foldF: 2.2, light: 0.45, flow: 0.2, orbitRate: 0.015 }, spectral: true,
+    tweaks: ['pinF', 'freq', 'folds', 'pitch'],
+  },
   mobius: {
     group: 'worlds', name: 'Möbius', blurb: 'a one-sided strip turning slowly under the lines',
     set: { freq: 30, linA: 0.5, mobius: 1, objX: 0, objY: 0, objZ: 0.32, objS: 0.62, objTilt: 1.0, objSpin: 0.2, objSoft: 0.1, light: 0.75, engrave: 0.7, refract: 1, focal: 3, sway: 0.25 },
@@ -286,7 +342,7 @@ export const LOOKS = {
 
 // how the cinematic camera treats a look
 const CAM = {
-  open: ['stripes', 'squeeze', 'lightning', 'blocks', 'maze', 'quasi', 'agate', 'living', 'silk', 'chrome', 'landscape', 'checkerhills', 'trifloor', 'road', 'dots', 'orbs', 'origami', 'hobnail', 'colonnade'],
+  open: ['crystal', 'ink', 'metamorph', 'weave', 'seigaiha', 'ouchi', 'pulsar', 'pinart', 'stripes', 'squeeze', 'lightning', 'blocks', 'maze', 'quasi', 'agate', 'living', 'silk', 'chrome', 'landscape', 'checkerhills', 'trifloor', 'road', 'dots', 'origami', 'colonnade'],
   fly: ['hallway', 'shaft', 'ringtunnel', 'lattice', 'sponge', 'stargate'],
   object: ['ball', 'impossible', 'mobius'],
 };

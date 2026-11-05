@@ -7,8 +7,9 @@ import { World, defaultValues, cloneValues, stepFactor, mulberry32 } from './eng
 import { LOOKS, GROUPS, NEUTRAL, look, PALETTES, COLOR_KEYS, camKind } from './engine/looks.js';
 import { PARAM_BY_NAME, hexToRgb, rgbToHex, isColorParam, DEFAULTS } from './engine/params.js';
 import { applyFeel, defaultFeel, breed } from './engine/feel.js';
+import { Ink } from './ink.js';
 import { ADDS, defaultAdds, Ball, Figures, CursorHand, applyHands, applyFace, applyOrbs } from './adds.js';
-import { FIGURES, FIGURE_INDEX, figureBank } from './engine/figures.js';
+import { FIGURES, FIGURE_INDEX, loadRelief } from './engine/figures.js';
 import { rayOnSheet, rayAt, noSheet, camDist } from './engine/camera.js';
 import { Director } from './director.js';
 import { AudioEngine } from './audio.js';
@@ -87,6 +88,8 @@ let ui = null;
 
 // everything that moves every frame
 const rt = {
+  figW: new Float32Array(4),
+  crys: new Float32Array(7), drops: new Float32Array(32 * 4), dropN: 0, rings: new Float32Array(16), ringsOn: 0,
   realTime: 0, stepK: 0.6,
   ripples: new Float32Array(MAX_RIPPLES * 4),
   twists: new Float32Array(16),
@@ -225,7 +228,9 @@ function still(set, w = 320, h = 200) {
   const stillRt = { realTime: 0, ripples: new Float32Array(MAX_RIPPLES * 4), twists: new Float32Array(16), fingers: new Float32Array(15), handMirror: rt.handMirror, stepK: 0.6, livingSteps: 900 };
   const { P, post } = W.frame(1, quietMusic);
   stillRt.stepK = stepFactor(W.current);
+  if (W.current.sumi > 0.5) { stillRt.drops = new Float32Array(32 * 4); new Ink().step(0, quietMusic, W.current, stillRt); }
   stillR.clearEcho();
+  stillRt.sw = W.sw; stillRt.morph = 1;
   stillR.render(P, stillRt, { ...post, grain: 0.03 });
   return stillR.canvas.toDataURL('image/jpeg', 0.82);
 }
@@ -275,6 +280,27 @@ app.setTie = (key, src, amt) => {
   if (!src) delete app.ties[key];
   else app.ties[key] = { src, amt: amt ?? app.ties[key]?.amt ?? 0.4 };
 };
+// a kick sends a wave out through the pattern, from whatever's lying under it if something is. It starts from
+// nothing and passes through, so it's a swell going by rather than a hit.
+const rings = [];
+function stepRings(dt, m, v, x, y) {
+  const amt = app.sound.amount * Math.max(m.D, 0.5 * m.M) * (m.on ? 1 : 0);
+  if (m.on && (m.kick ?? 0) > 0.45 && m.beat && amt > 0.02) { rings.push({ x, y, age: 0, k: amt * Math.min(m.kick * 1.2, 1) }); if (rings.length > 4) rings.shift(); }
+  const R = rt.rings;
+  rt.ringsOn = 0;
+  for (let i = 3; i >= 0; i--) {
+    const g = rings[i];
+    if (g) {
+      g.age += dt;
+      if (g.age > 1.6) { rings.splice(i, 1); R[i * 4 + 3] = 0; continue; }
+      const a = g.age / 1.6;
+      R[i * 4] = g.x; R[i * 4 + 1] = g.y; R[i * 4 + 2] = g.age * 1.15 * v.frame * (1 + a * 0.6);
+      R[i * 4 + 3] = g.k * Math.min(g.age * 8, 1) * (1 - a) * (1 - a);
+      rt.ringsOn = 1;
+    } else R[i * 4 + 3] = 0;
+  }
+}
+
 // before speeds add up, so a speed tied to the music really speeds up with it
 function applySound(v, m) {
   const S = app.sound, k = S.amount * Math.max(m.M, m.D * 0.8), on = m.on ? 1 : 0;
@@ -311,6 +337,17 @@ function applySound(v, m) {
     v.juliaA += (m.sway * 1.4 + m.chordRoot * 0.52) * M; v.juliaR = clamp(v.juliaR + m.height * 0.035 * M, 0.3, 1);
   } else if (mel === 'wells') {
     v.wellT = (app.film.wellT = (app.film.wellT || 0) + track.dt * (0.1 + m.glide * 1.5 * M)); v.wellR = clamp(v.wellR + m.height * 0.1 * M, 0, 1.2);
+  }
+  else if (mel === 'ouchi') v.ouchiT = (app.film.ouchiT = (app.film.ouchiT || 0) + track.dt * (0.09 + 0.24 * m.voice * M + Math.abs(m.glide) * 0.4 * M));
+  // the crystal's families of lines: each slides to its own part of the sound, half one way, half the other
+  {
+    const B = [m.bass, m.mid, m.high], dt = track.dt;
+    for (let k = 0; k < 7; k++) rt.crys[k] += dt * (k % 2 ? 1 : -1) * (0.05 + (0.04 + 0.5 * (B[k % 3] ?? 0) * (k % 3 === 0 ? 1 : 0.8)) * Math.max(M, D * 0.8) + (k === 4 ? m.glide * 0.5 * M : 0));
+  }
+  // the lines go forward in surges, one to a beat: never stopping, but you can feel where the beat falls
+  if (m.known && on) {
+    const beat = m.bar * (app.tempo?.beatsPerBar || 4);
+    v.flow *= (1 + 0.4 * M) * (1 + 0.55 * Math.cos(beat * Math.PI * 2) * Math.max(M, D));
   }
   v.truchetT = (app.film.tru = (app.film.tru || 0) + (m.note ? 0.12 * M : 0) + (m.beat ? 0.3 * D : 0) + track.dt * 0.03);
   // the drums: a soft swell, a ripple, a shimmer on the thinnest lines. They never move the camera.
@@ -371,8 +408,8 @@ function goToScene(i, glide) {
   app.world.morphTo(lookValues(S.look), glide);
   const A = app.adds.figures;
   if (S.figure) {
-    A.style = S.style;
-    A.size = S.figure === 'monolith' ? 1 : 1.15;
+    A.size = 1;
+    A.melt = Math.max(3, S.glide * 0.7);
     A.repeat = !!S.crowd;
     app.figures.home = S.home;
     app.figures.parked = null;
@@ -536,13 +573,14 @@ app.stopAudio = () => app.audio.stop();
 // ------------------------------------------------------------------ add-ons
 const pres = { hands: 0, face: 0, orbs: 0, figures: 0 };
 app.figures = new Figures();
+app.ink = new Ink();
+const reliefs = new Map();
 app.hand = new CursorHand();
 // pick a figure: the one showing goes under, then this one comes up, and your mouse has it
 app.pickFigure = (id, { drive = true } = {}) => {
   app.adds.figures.pick = id;
-  if (id !== 'hand') app.figures.pick(id);
-  if (pres.figures < 0.01 && id !== 'hand') { app.figures.a = FIGURE_INDEX[id] ?? 0; app.figures.swap = null; app.figures.placed = false; app.figures.cy = null; }   // nothing showing yet: straight up
   app.adds.figures.on = true;
+  if (id !== 'hand' && camKind(app.lookId) === 'fly' && drive) ui?.toast('There’s no sheet in here for it to press through. Pick a pattern and it comes up.');
   if (drive) { app.tool = 'figure'; app.adds.figures.follow = true; app.adds.figures.size = 1; app.figures.home = null; app.figures.parked = null; updateRing(); }
   ui?.renderDock();
   ui?.addsChanged();
@@ -753,15 +791,28 @@ function applyAdds(v, m, dt) {
   v.pitch = clamp(v.pitch + V.pitch, -0.35, 1.42);
   // tilted back, a long lens would push the camera miles away: widen it as it tilts
   if (v.focal > 2) v.focal = 2 + (v.focal - 2) * (1 - clamp((v.pitch - 0.12) / 0.7, 0, 1));
-  // the figure on screen: the world's shader is rebuilt with just it (in the background, the first time),
-  // and it comes up once that's in. The hand is its own thing, always in the shader.
+  // the figure on screen. Its relief is fetched the first time; it comes up once that's in. If one's already
+  // up, it melts into the next: the same sheet, slowly becoming something else.
   const F = app.figures, pickHand = A.figures.pick === 'hand';
-  const drawn = FIGURES[F.a].id;
-  renderer.useFigures(figureBank(A.figures.on || pres.figures > 0.01 ? [F.swap != null && pres.figures < 0.02 ? FIGURES[F.swap].id : drawn] : []));
-  if (F.swap != null && pres.figures < 0.02 && renderer.hasFigure(FIGURES[F.swap].id)) { F.a = F.swap; F.cy = null; F.swap = null; }   // the old one has gone: the next one comes up
+  const relief = id => {
+    let r = reliefs.get(id);
+    if (!r) { r = { data: null }; reliefs.set(id, r); loadRelief(id).then(d => { r.data = d; r.tex = renderer.reliefTextures(d); }).catch(e => console.error(e)); }
+    return r.tex ? r : null;
+  };
+  const wantI = pickHand ? F.a : FIGURE_INDEX[A.figures.pick] ?? F.a;
+  const shown = !pickHand && A.figures.on && !!relief(FIGURES[wantI].id);
+  if (F.b == null && wantI !== F.a && relief(FIGURES[wantI].id)) {
+    if (pres.figures < 0.02) { F.a = wantI; F.placed = F.placed && !!F.parked; }
+    else { F.b = wantI; F.mix = 0; F.mixDur = A.figures.melt ?? 3.5; }
+  }
+  if (pres.figures < 0.02 && !shown && !F.parked) F.placed = false;
+  if (F.b != null) {
+    F.mix += dt / F.mixDur;
+    if (F.mix >= 1) { F.a = F.b; F.b = null; F.mix = 0; F.w.fill(0); }
+  }
   for (const k of ['hands', 'face', 'orbs', 'figures']) {
-    const on = A[k].on && (k !== 'figures' || (!pickHand && F.swap == null && renderer.hasFigure(FIGURES[F.a].id)));
-    pres[k] = ease(pres[k], on ? 1 : 0, k === 'figures' ? (on ? 1.5 : 2.6) : 3, dt);
+    const on = k === 'figures' ? shown : A[k].on;
+    pres[k] = ease(pres[k], on ? 1 : 0, k === 'figures' ? (on ? 1.1 : 2.2) : 3, dt);
   }
   const copying = A.hands.copy && tracker.on && tracker.hands.length;
   if (!copying) { rt.handMirror[0] = 1; rt.handMirror[1] = -1; rt.fingers.fill(0); }
@@ -774,13 +825,15 @@ function applyAdds(v, m, dt) {
     F.pointer = pointer.inside ? [...rayOnSheet(v, pointer.x, pointer.y, 0, reach)] : null;
     if (driving) { F.parked = [pointer.x, pointer.y]; }
     // under your cursor, or (the cursor's gone) still where you left it on the screen, whatever the camera does
-    const aim = F.parked ? z => noSheet(v) ? rayAt(v, F.parked[0], F.parked[1], 1.5 * (F.size || 1)) : rayOnSheet(v, F.parked[0], F.parked[1], z, reach) : null;
+    const aim = F.parked ? z => rayOnSheet(v, F.parked[0], F.parked[1], z, reach) : null;
     const home = F.home ? rayOnSheet(v, F.home[0], F.home[1], 0, reach) : rayOnSheet(v, 0, -0.2 * Math.sin(Math.max(v.pitch, 0)), 0, reach);
     if (F.step(dt, A.figures, m, aim, home, pointer.down && app.tool === 'figure', v)) ui.addsChanged();
-    F.apply(v, A.figures, pres.figures);
-    rt.figFrame = F.frame;
-    rt.figTrail = F.trail;
+    const ra = relief(FIGURES[F.a].id), rb = F.b != null ? relief(FIGURES[F.b].id) : null;
+    F.apply(v, A.figures, pres.figures, m, ra?.data && { meta: ra.data.meta, shapes: ra.tex.shapes }, rb?.data && { meta: rb.data.meta });
+    rt.reliefA = ra?.tex; rt.reliefB = rb?.tex; rt.figW = F.w;
   }
+  app.ink.step(dt, m, v, rt);
+  stepRings(dt, m, v, shown || pres.figures > 0.3 ? F.x : v.tx, shown || pres.figures > 0.3 ? F.y : v.ty);
   app.ball.apply(v, A.ball);
   // the hand: your cursor is its wrist, wherever the camera is
   const wantHand = A.figures.on && pickHand;
@@ -788,14 +841,11 @@ function applyAdds(v, m, dt) {
   if (app.hand.step(dt, A.figures, m, v, onHand && pointer.inside && A.figures.follow ? [pointer.x, pointer.y] : null, wantHand, pointer.down && onHand, rt.fingers)) {
     app.hand.apply(v);
   }
-  // no ring around the cursor means none in the water round a figure either
-  if (!app.perf.ring) v.figRing = v.figDip = 0;
   // seen from above, a shape would hardly show: the lines lean over it by its height
   const shapes = Math.max(pres.figures, app.hand.on);
-  v.relief = shapes * (pickHand ? 0.6 : 0.8) * (1 - clamp((v.pitch - 0.08) / 0.75, 0, 1));
-  // and to keep its outline on a busy pattern, the pattern flips inside it
-  v.figNeg = (!pickHand && A.figures.style === 'draped' ? 1 : 0) * (1 - clamp((v.pitch - 0.2) / 0.5, 0, 1));
-  if (v.figSwirl > 0) v.figSwirl = 0.4 + 0.6 * clamp((v.pitch - 0.2) / 0.5, 0, 1);
+  v.relief = shapes * (pickHand ? 0.6 : 0.4) * (1 - clamp((v.pitch - 0.08) / 0.75, 0, 1));
+  // and they crowd in, so a form under them is drawn in enough lines to be seen
+  if (shapes > 0) v.freq += Math.max(Math.min(17 / v.frame, v.freq * (v.vortex > 1 || v.conf > 0.5 ? 1.25 : pickHand ? 1.5 : 2.4)) - v.freq, 0) * shapes;
   applyInputs(v, m);
   // never a screen of one solid color, whatever the music, the ties or the cinematic camera do:
   // keep at least a few lines in view however far it zooms in, and never let the ink flood the frame
@@ -1065,12 +1115,26 @@ const WANDER_AFTER = 18;
 const touched = { any: 0, used: 0 };
 addEventListener('pointermove', () => { touched.any = performance.now() / 1000; }, { passive: true });
 for (const ev of ['pointerdown', 'wheel', 'keydown']) addEventListener(ev, () => { touched.any = touched.used = performance.now() / 1000; }, { passive: true, capture: true });
+const F_home = () => { const F = app.figures; F.parked = null; F.home = [(Math.random() < 0.5 ? -1 : 1) * (0.04 + Math.random() * 0.18), -0.06 + Math.random() * 0.1]; };
 function wander() {
   const C = app.cine, W = app.wandering, now = performance.now() / 1000;
   const shaping = app.tool === 'figure' && pointer.inside && app.adds.figures.on && now - touched.any < 1;
   if (W) {
     if (touched.used > W || shaping || app.film.driving || !app.perf.wander) {
       app.wandering = 0; C.on = false; C.keep = true; C.kind = null; ui.cinemaChanged();
+      if (app.wanderFigure) { app.wanderFigure = false; app.adds.figures.on = false; ui.addsChanged(); }
+      return;
+    }
+    // and now and then something comes up under the sheet, stays a while, and goes back down or turns into something else
+    const A = app.adds.figures;
+    if (now > (app.nextFigure || 0) && (!A.on || app.wanderFigure)) {
+      app.nextFigure = now + 20 + Math.random() * 16;
+      if (camKind(app.lookId) !== 'fly' && Math.random() < 0.65) {
+        const cast = FIGURES.filter(f => !f.special && f.id !== A.pick);
+        app.wanderFigure = true;
+        A.repeat = false; A.follow = false; A.melt = 6; A.size = 1;
+        F_home(); app.pickFigure(cast[Math.floor(Math.random() * cast.length)].id, { drive: false });
+      } else if (app.wanderFigure) { app.wanderFigure = false; A.on = false; ui.addsChanged(); }
     }
     return;
   }
@@ -1148,6 +1212,7 @@ function frame(now) {
   const rippling = rt.ripples.some((x, i) => i % 4 === 3 && x > 0 && rt.realTime - rt.ripples[i - 1] < 5);
   rt.stepK = stepFactor(w.current) * (rippling ? 0.7 : 1);
   renderer.updateDisp(rt.brush);
+  rt.sw = app.world.sw; rt.morph = app.world.k;
   renderer.render(P, rt, post);
   if (afterRender.length) { const fns = afterRender; afterRender = []; fns.forEach(f => f()); }
   ui.tick(dt);

@@ -1,6 +1,6 @@
 // The world, live: where every value is, the glide from one look to the next, speeds added up over time,
 // and the music applied every frame.
-import { PARAMS, PARAM_BY_NAME, RATE_TARGETS, SHADER_SLOTS, isColorParam, hexToRgb, rgbToHex } from './params.js';
+import { PARAMS, PARAM_BY_NAME, RATE_TARGETS, SHADER_SLOTS, SWITCH_KEYS, isColorParam, hexToRgb, rgbToHex } from './params.js';
 
 const TAU = Math.PI * 2;
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -35,7 +35,9 @@ export class World {
     this.to = defaultValues();
     this.t = 1; this.dur = 1;            // glide progress, seconds
     this.acc = Object.fromEntries(Object.keys(RATE_TARGETS).map(r => [r, 0]));
-    this.P = new Float32Array(SHADER_SLOTS.length);
+    this.P = new Float32Array(Math.ceil(SHADER_SLOTS.length / 4) * 4);
+    this.sw = new Float32Array(SWITCH_KEYS.length * 2);   // for the shader: each of these, where from and where to
+    this.k = 1;
     this.current = null;                 // the values last drawn (after music and add-ons)
   }
 
@@ -68,7 +70,7 @@ export class World {
   }
 
   values() {
-    const x = Math.min(1, this.t / this.dur), k = this.dur > 3 ? gentle(x) : inOut(x);
+    const x = Math.min(1, this.t / this.dur), k = this.k = this.dur > 3 ? gentle(x) : inOut(x);
     const v = {};
     for (const name of Object.keys(this.to)) {
       const a = this.from[name], b = this.to[name];
@@ -88,10 +90,16 @@ export class World {
       this.acc[rate] = settle(rate, this.acc[rate] + v[rate] * dBars, v[rate], dBars, v);
       v[target] += this.acc[rate];
     }
+    // leaving a place you fly through, the camera backs out of it as its walls go: it mustn't be left down
+    // past where the sheet is about to be
+    const inWorld = clamp((v.gyro + v.sponge + v.hall - 0.5) * 2, 0, 1);
+    v.fly *= inWorld * inWorld * (3 - 2 * inWorld);
+    if (inWorld <= 0) this.acc.flyRate = 0;
     applyMusic(v, music);
     hooks.post?.(v);
     this.current = v;
     toShader(v, this.P);
+    SWITCH_KEYS.forEach((key, i) => { this.sw[i * 2] = this.from[key]; this.sw[i * 2 + 1] = this.to[key]; });
     return { P: this.P, post: toPost(v) };
   }
 }

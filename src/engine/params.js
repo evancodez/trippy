@@ -63,6 +63,27 @@ export const PARAMS = [
   P('truchet', 0, 0, 1, 'strange', 'Truchet maze'),
   P('truchetLine', 0, 0, 1, 'strange', 'Maze: solid ↔ lines'),
   P('truchetT', 0, 0, 0),
+  P('crys', 0, 0, 1, 'strange', 'Crystal: families of lines'),
+  P('crysN', 5, 2, 7, 'strange', 'Crystal: how many families'),
+  P('crysT', 0, -3.14, 3.14, 'strange', 'Crystal: turn'),
+  P('sumi', 0, 0, 1, 'strange', 'Marbled ink, dropped by the music'),
+  P('lock', 0, 0, 1, 'strange', 'Squares turning into interlocking shapes'),
+  P('lockA', 1, 0, 2, 'strange', 'Interlock: how far gone'),
+  P('cells', 0, 0, 1, 'strange', 'Cells: dots in a grid, swelling with the sound'),
+  P('cellSq', 0, 0, 1, 'strange', 'Cells: round ↔ square'),
+  P('star', 0, 0, 1, 'strange', 'Star lattice'),
+  P('starA', 0.6, 0.05, 1.5, 'strange', 'Star: how sharp'),
+  P('starB', 8, 1, 24, 'strange', 'Star: rings in each'),
+  P('starHex', 0, 0, 1, 'strange', 'Star: fours ↔ sixes'),
+  P('lace', 0, 0, 1, 'strange', 'Circle lace'),
+  P('laceK', 1.2, 0.8, 1.6, 'strange', 'Lace: its shape'),
+  P('laceB', 3, 0.5, 12, 'strange', 'Lace: bands'),
+  P('weave', 0, 0, 1, 'strange', 'Woven ribbons'),
+  P('seig', 0, 0, 1, 'strange', 'Wave scales'),
+  P('ouchi', 0, 0, 1, 'strange', 'Discs floating on bricks'),
+  P('ouchiT', 0, 0, 0),
+  P('pins', 0, 0, 1, 'shape', 'A bed of pins'),
+  P('pinF', 34, 6, 90, 'shape', 'Pins across'),
   P('quasi', 0, 0, 1, 'strange', 'Quasicrystal'),
   P('quasiN', 7, 3, 13, 'strange', 'Quasicrystal: folds'),
   P('cym', 0, 0, 1, 'strange', 'Cymatics'),
@@ -144,11 +165,9 @@ export const PARAMS = [
   P('faceRoll', 0, -1.5, 1.5), P('faceTurn', 0, -1.5, 1.5), P('mouth', 0, 0, 1), P('eyes', 1, 0, 1),
   P('handSoft', 0.15, 0.01, 0.45),
   // the figure going under (set by the app): which one, where, how it looks about, how the sheet meets it
-  P('fig', 0, 0, 1), P('figA', 0, 0, 64), P('figS', 0.5, 0.05, 4),
-  P('figX', 0, -9, 9), P('figY', 0, -9, 9), P('figZ', 0, -3, 3), P('figT', 0, 0, 0), P('figVX', 0, -6, 6), P('figVY', 0, -6, 6),
-  P('figLX', 0, -1, 1), P('figLY', 0, -1, 1), P('figSing', 0, 0, 1), P('figRep', 0, 0, 1), P('figSp', 1.15, 0.2, 3), P('figSoft', 0.06, 0.005, 1),
-  P('figBY', 0, -1, 1), P('figBR', 0.8, 0, 5), P('figSink', 1, 0, 3), P('figInk', 0, 0, 1),
-  P('figMelt', 3, 1, 10), P('figDip', 0.05, 0, 1), P('figRing', 1, 0, 3), P('relief', 0, 0, 4), P('figNeg', 0, 0, 1), P('figP', 0, 0, 1), P('figSwirl', 1, 0, 1), P('figLens', 1, 0, 5), P('figEdge', 0, 0, 3), P('figHalo', 0, 0, 0.2), P('figCont', 0, 0, 200),
+  P('fig', 0, 0, 1), P('figS', 0.5, 0.05, 6), P('figX', 0, -9, 9), P('figY', 0, -9, 9), P('figT', 0, 0, 0), P('figVX', 0, -6, 6), P('figVY', 0, -6, 6),
+  P('figRep', 0, 0, 1), P('figSp', 2, 0.2, 4), P('figRot', 0, 0, 0), P('figMix', 0, 0, 1), P('figAmp', 1, 0, 3), P('figStep', 1, 0.05, 1), P('figShapes', 0, 0, 1),
+  P('figPull', 0.8, 0, 3), P('figShade', 0.3, 0, 4), P('figLens', 1, 0, 4), P('figBurst', 0, 0, 1), P('figTop', 0.4, 0, 2), P('figLit', 1.5, 0, 4), P('figRim', 0.35, 0, 4), P('figLookX', 0, -1, 1), P('figLookY', 0, -1, 1), P('figLookK', 1.6, 0, 20), P('figWrithe', 0, 0, 2), P('figWF', 6, 0, 30), P('figWT', 0, 0, 0), P('relief', 0, 0, 4),
   ...HANDS,
   P('ball', 0, 0, 1), P('ballX', 0, -4, 4), P('ballY', 0, -4, 4), P('ballZ', 0, -1, 2), P('ballR', 0.12, 0.02, 1),
   P('ballVX', 1, -1, 1), P('ballVY', 0, -1, 1), P('ballWake', 0.5, 0, 2), P('ballFlow', 1, 0, 2),
@@ -205,15 +224,20 @@ export const DEFAULTS = Object.fromEntries(PARAMS.map(p => [p.name, p.def]));
 export const isColorParam = name => typeof DEFAULTS[name] === 'string';
 
 // shader slots: one float per shader param, three per shader color
+// the patterns that aren't lines: one replaces another not by fading across it but by opening out through it
+export const SWITCH_KEYS = ['conf', 'hyper', 'cube', 'truchet', 'cym', 'julia', 'agate', 'wells', 'quasi', 'living', 'crys', 'sumi', 'lock', 'cells', 'star', 'lace', 'weave', 'seig', 'ouchi'];
+
 export const SHADER_SLOTS = [];
 for (const p of PARAMS) {
   if (p.kind === 'shader') SHADER_SLOTS.push({ name: p.name });
   else if (p.kind === 'color') ['r', 'g', 'b'].forEach((c, i) => SHADER_SLOTS.push({ name: p.name, channel: i, macro: `${p.name}_${c}` }));
 }
 export const SHADER_COUNT = SHADER_SLOTS.length;
+export const SHADER_VEC4S = Math.ceil(SHADER_COUNT / 4);
 
 export function shaderDefines() {
-  return SHADER_SLOTS.map((s, i) => `#define ${(s.macro || s.name).toUpperCase()} uP[${i}]`).join('\n');
+  // four to a slot: some phones only give a shader 224 slots, and a lone float takes up a whole one
+  return SHADER_SLOTS.map((s, i) => `#define ${(s.macro || s.name).toUpperCase()} uV[${i >> 2}].${'xyzw'[i & 3]}`).join('\n') + '\n#define UP(i) uV[(i) >> 2][(i) & 3]';
 }
 
 export function hexToRgb(hex) {

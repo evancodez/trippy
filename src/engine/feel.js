@@ -53,10 +53,11 @@ const FEATURES = [
   { check: 1 }, { check: 1, tri: 1 }, { wAng: 1, wRad: 1, wLin: 0 }, { kaleido: 1 }, { moire: 1, wRad: 1, wLin: 0 },
   { radInv: 1, wRad: 1, wLin: 0 }, { square: 1, wRad: 1, wLin: 0 }, { vortex: 1.6 }, { pinch: 1 }, { wave: 1.2, zig: 1 },
   { pitch: 1.1, focal: 1.8 }, { folds: 1.2 }, { orbs: 1 }, { twist: 2 },
+  { crys: 1, crysN: 5 }, { crys: 1, crysN: 3 }, { star: 1, starA: 0.7 }, { star: 1, starHex: 1, starA: 0.45 }, { lock: 1 }, { cells: 1, freq: 40 }, { seig: 1, freq: 32 }, { weave: 1 }, { lace: 1, frame: 0.9 },
   { conf: 1, spokes: 12, confA: 4, check: 1, tri: 1 }, { truchet: 1, freq: 20 }, { quasi: 1 }, { agate: 1 }, { blaze: 1, wRad: 1, wLin: 0 }, { ori: 1, pitch: 0.8, focal: 2 },
 ];
 // switches only come on whole (a 5% corridor is just a mess)
-const SWITCHES = new Set(['gyro', 'sponge', 'hall', 'columns', 'penrose', 'mobius', 'blob', 'drop', 'wrap', 'hyper', 'cube', 'truchet', 'cym', 'julia', 'agate', 'wells', 'quasi', 'living', 'conf', 'planes']);
+const SWITCHES = new Set(['crys', 'sumi', 'lock', 'cells', 'star', 'lace', 'weave', 'seig', 'ouchi', 'pins', 'gyro', 'sponge', 'hall', 'columns', 'penrose', 'mobius', 'blob', 'drop', 'wrap', 'hyper', 'cube', 'truchet', 'cym', 'julia', 'agate', 'wells', 'quasi', 'living', 'conf', 'planes']);
 
 // parent: full values (colors as rgb arrays) → a child set, ready for world.morphTo()
 export function breed(parent, strength = 0.5, locks = {}, seed = Math.random() * 1e9) {

@@ -9,6 +9,7 @@ import { cameraFrame } from '../engine/camera.js';
 const SLOT = Object.fromEntries(SHADER_SLOTS.filter(s => s.channel == null).map((s, i) => [s.name, SHADER_SLOTS.indexOf(s)]));
 
 export const MAX_RIPPLES = 16;
+const NONE = new Float32Array(32 * 4);
 
 export class Renderer {
   constructor(canvas, { preserve = false } = {}) {
@@ -28,18 +29,13 @@ export class Renderer {
 
     this.dispProg = this.program(DISP_FRAG);
     this.compProg = this.program(COMP_FRAG);
-    // the world's shader is built with just the figures on screen: one per set, compiled in the background
-    this.parallel = gl.getExtension('KHR_parallel_shader_compile');
     this.worldProg = this.program(worldFrag());
-    this.worldKey = '';
-    this.worldProgs = new Map([['', this.worldProg]]);
     this.w = 0; this.h = 0;
     this.frames = []; this.fi = 0;       // ping-pong, so echo trails can read the last frame
     this.disps = []; this.di = 0;
     this.clearDisp = true;
     this.dispIdle = 0;
     this.camFrame = new Float32Array(9);  // right, up, back
-    this.noFrame = new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]);
     this.zeroTex = this.makeTexture(1, 1, false);
     this.mediaTex = this.makeTexture(1, 1, false, true);
     this.mediaRaw = this.makeTexture(1, 1, false, true);
@@ -81,31 +77,24 @@ export class Renderer {
     return P;
   }
 
-  // draw with a shader that has these figures in it (ids). The first time, it's compiled in the
-  // background and the one before carries on meanwhile; says whether the switch has happened.
-  useFigures(ids) {
-    const key = [...new Set(ids)].sort().join(',');
-    if (key === this.worldKey) return true;
-    let P = this.worldProgs.get(key);
-    // the one drawing can already show all of these: only move to the leaner one if it's already built
-    if (key && ids.every(id => this.hasFigure(id)) && !(P && P.ok && P.done())) return true;
-    if (!P) {
-      P = this.program(worldFrag(key ? key.split(',') : []), true);
-      this.worldProgs.set(key, P);
-      if (this.worldProgs.size > 8) {                         // forget the oldest (never the one drawing)
-        const [old, Q] = [...this.worldProgs].find(([k]) => k !== this.worldKey && k !== '' && k !== key) || [];
-        if (Q) { this.gl.deleteProgram(Q.prog); this.worldProgs.delete(old); }
-      }
-    }
-    if (!P.done()) return false;
-    if (!P.ok) { if (!P.logged) { console.error(P.error); P.logged = true; } return false; }
-    this.worldProgs.delete(key); this.worldProgs.set(key, P);   // most recently used last
-    this.worldProg = P; this.worldKey = key;
-    return true;
+  // a figure's relief, as textures: height, pull x, pull y, shade; and up to four blend shapes
+  reliefTextures(rel) {
+    const gl = this.gl, N = rel.N, P = rel.planes;
+    const tex = (a, b, c, d) => {
+      const data = new Float32Array(N * N * 4);
+      for (let i = 0; i < N * N; i++) { data[i * 4] = a ? a[i] : 0; data[i * 4 + 1] = b ? b[i] : 0; data[i * 4 + 2] = c ? c[i] : 0; data[i * 4 + 3] = d ? d[i] : 0; }
+      const t = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, N, N, 0, gl.RGBA, gl.FLOAT, data);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      return t;
+    };
+    return { base: tex(P[0], P[1], P[2], P[3]), shapes: P.length > 4 ? tex(P[4], P[5], P[6], P[7]) : null };
   }
-
-  // can what's drawing now show this figure?
-  hasFigure(id) { return this.worldKey.split(',').includes(id); }
 
   makeTexture(w, h, float, mip = false) {
     const gl = this.gl;
@@ -313,14 +302,24 @@ export class Renderer {
     gl.uniform1fv(u('uHandMirror'), rt.handMirror);
     gl.uniform4fv(u('uTwists'), rt.twists);
     gl.uniform2f(u('uRes'), this.w, this.h);
-    gl.uniform1fv(u('uP'), P);
+    gl.uniform4fv(u('uV'), P);
     this.setFrames(P);
     const F = this.camFrame;
     gl.uniform3f(u('gRight'), F[0], F[1], F[2]);
     gl.uniform3f(u('gUp'), F[3], F[4], F[5]);
     gl.uniform3f(u('gBack'), F[6], F[7], F[8]);
-    gl.uniformMatrix3fv(u('uFigFrame'), false, rt.figFrame || this.noFrame);
-    if (rt.figTrail) gl.uniform3fv(u('uFigTrail'), rt.figTrail);
+    bind(6, rt.reliefA?.base || this.zeroTex, 'uRelief');
+    bind(7, rt.reliefB?.base || this.zeroTex, 'uReliefB');
+    bind(8, rt.reliefA?.shapes || this.zeroTex, 'uReliefX');
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform4fv(u('uFigW'), rt.figW || NONE.subarray(0, 4));
+    gl.uniform2fv(u('uSw'), rt.sw);
+    gl.uniform1f(u('uMorph'), rt.morph ?? 1);
+    gl.uniform1fv(u('uCrys'), rt.crys || NONE.subarray(0, 7));
+    gl.uniform4fv(u('uDrops'), rt.drops || NONE);
+    gl.uniform1f(u('uDropN'), rt.dropN || 0);
+    gl.uniform4fv(u('uRings'), rt.rings || NONE.subarray(0, 16));
+    gl.uniform1f(u('uRingsOn'), rt.ringsOn || 0);
     gl.uniform4fv(u('uRipples'), rt.ripples);
     let ripples = 0;
     for (let i = 0; i < rt.ripples.length; i += 4) if (rt.ripples[i + 3] > 0 && rt.realTime - rt.ripples[i + 2] < 5) ripples = 1;

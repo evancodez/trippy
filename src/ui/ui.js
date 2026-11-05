@@ -338,7 +338,6 @@ export function createUI(app) {
   }
 
   // ---------------------------------------------------------------- Figures
-  const STYLES = [['draped', 'Draped'], ['contour', 'Contours'], ['silhouette', 'Silhouette']];
   function figCard(f) {
     const A = app.adds.figures, on = A.on && A.pick === f.id;
     return h('button', {
@@ -432,12 +431,12 @@ export function createUI(app) {
       toggle('', () => A[a.id].on, on => app.setAdd(a.id, on)));
     return [
       F.on ? h('div', { class: 'fig-controls' },
-        chips(STYLES, id => F.style === id, id => { F.style = id; renderBody(); }, 'seg'),
         addSlider('figures', 'size', 'Size', 0.4, 2.5),
-        addSlider('figures', 'depth', 'Under ↔ out', 0.3, 1.7),
+        addSlider('figures', 'depth', 'How far it stands up', 0.3, 1.7),
+        addSlider('figures', 'burst', 'Under the sheet ↔ through it', 0, 0.8),
         toggle('It follows my mouse', () => F.follow, x => { app.setAddOption('figures', 'follow', x); if (x) app.setTool('figure'); }),
         toggle('A crowd of them', () => F.repeat, x => app.setAddOption('figures', 'repeat', x)),
-      ) : h('p', { class: 'lead' }, 'Pick one and it comes up out of the pattern under your cursor. Each does something when you hold the mouse: the hand makes a fist, the skull drops its jaw, the eye blinks.'),
+      ) : h('p', { class: 'lead' }, 'Pick one and it presses up through the sheet under your cursor, the pattern pulled tight over it. Hold the mouse and it tears through. Pick another and the first melts into it.'),
       FIGURE_GROUPS.map(g => h('div', { class: 'group' },
         h('div', { class: 'group-head' }, h('b', {}, g)),
         h('div', { class: 'fig-grid' }, FIGURES.filter(f => f.group === g).map(figCard)))),

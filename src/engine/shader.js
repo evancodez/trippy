@@ -8,17 +8,17 @@
 //   · one line equation painted on every surface: straight lines + rings + tunnel + spiral + checkers +
 //     triangles + moiré + contours, all weighted, so one look re-forms into the next
 // Lighting can thin the ink where it's bright (engraving), so 3D form is drawn with lines alone.
-import { shaderDefines, SHADER_COUNT, SHADER_SLOTS } from './params.js';
-import { figuresGLSL } from './figures.js';
+import { shaderDefines, SHADER_VEC4S, SHADER_SLOTS, SWITCH_KEYS } from './params.js';
+import { FIGURE_GLSL } from './figures.js';
 
 const HAND_BASE = SHADER_SLOTS.findIndex(s => s.name === 'h0on');
 
-// the world's shader, able to draw these figures (only the ones on screen are compiled in)
-export const worldFrag = (figures = []) => `#version 300 es
+// the world's shader
+export const worldFrag = () => `#version 300 es
 precision highp float;
 out vec4 outColor;
 uniform vec2 uRes;
-uniform float uP[${SHADER_COUNT}];
+uniform vec4 uV[${SHADER_VEC4S}];
 uniform sampler2D uPrev;
 uniform sampler2D uDisp;
 uniform sampler2D uMedia;      // relief source, blurred: rgb = picture, a = mask (body / face / hands / a box)
@@ -33,9 +33,17 @@ uniform float uRealTime;
 uniform float uFinger[15];     // per-finger curl offsets, 5 per hand (thumb, index, middle, ring, pinky)
 uniform float uHandMirror[3];  // 1 or -1: left or right hand
 uniform vec4 uTwists[4];       // the endless twist: centre (screen), angle (keeps growing while held), radius
+uniform vec2 uSw[${SWITCH_KEYS.length}];        // the patterns that aren't lines: where each is coming from and going to
+uniform float uMorph;          // how far the world has got between them
+uniform float uCrys[7];        // the crystal: how far each family of lines has slid
+uniform vec4 uDrops[32];       // the marbling, oldest first: x, y, radius, what (0 a drop; 1… a stroke through it, its angle; 3… a comb, its angle)
+uniform float uDropN;
+uniform vec4 uRings[4];        // waves going out from the drum: x, y, how far they've got, how strong
+uniform float uRingsOn;
 
 ${shaderDefines()}
 #define HAND_BASE ${HAND_BASE}
+${SWITCH_KEYS.map((k, i) => `#define SW_${k.toUpperCase()} ${i}`).join('\n')}
 #define PI 3.14159265359
 #define TAU 6.28318530718
 
@@ -46,7 +54,6 @@ float gBand = 0.0;             // 0 / 1: which ink this line gets (every other l
 float gBallH = 0.0;            // the sheet's height under the ball (once per pixel)
 bool gFigNear = true;          // does this ray come anywhere near the figure? (once per pixel)
 float gConf = 0.0;             // the conformal warp: on or off (between looks, the two patterns crossfade: a partial warp would show its seam)
-bool gFigFar = false;          // it did, but it landed out of the figure's reach: the normal needn't ask
 
 mat2 rot(float a) { float c = cos(a), s = sin(a); return mat2(c, s, -s, c); }
 float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
@@ -128,20 +135,12 @@ float mediaMaskSoft(vec2 q, float lod) {
   return mix(1.0, textureLod(uMedia, uv, lod).a, MEDIAMASK) * mediaEdge(uv, 0.08);
 }
 
-// the sheet dips into a trough round a figure's waterline and sends a slow swell out of it. (Only close
-// by, and only on rays that go near it: this runs at every step.)
-float figSea(vec2 q) {
-  if (FIG < 0.001 || FIGREP > 0.5 || !gFigNear) return 0.0;
-  vec2 o = (q - vec2(FIGX, FIGY)) / FIGS;
-  float r2 = dot(o, o) / (FIGBR * FIGBR * 1.7);
-  if (r2 >= 1.0) return 0.0;
-  float fall = (1.0 - r2) * (1.0 - r2);
-  return FIG * FIGS * fall * (-FIGDIP * exp(-r2 * 7.0) + 0.012 * FIGRING * sin(sqrt(r2) * 18.0 - FIGT * 1.5));
-}
+${FIGURE_GLSL}
 
 // ---------------------------------------------------------------- the membrane's height
 float heightField(vec2 q) {
-  float h = figSea(q);
+  if (PINS > 0.0) q = mix(q, (floor(q * PINF) + 0.5) / PINF, PINS);   // a bed of pins: the height of one point holds across a whole pin
+  float h = 0.0;
   float calm = MEDIACALM > 0.0 ? 1.0 - MEDIACALM * mediaMaskSoft(q, 1.5) : 1.0;
   if (SWELL > 0.0) {                         // long waves rolling across the sheet
     float env = 1.0 + 2.2 * soundSpec(0.15, clamp(dot(q - vec2(TX, TY), vec2(0.8, 0.6)) / (FRAME * 2.4) + 0.5, 0.0, 1.0));   // louder → bigger
@@ -190,7 +189,7 @@ float heightField(vec2 q) {
     float rm = length(q - vec2(TX, TY)) / (FRAME * 2.2);
     h += calm * MLAND * 0.1 * FRAME * swellAt(rm);
   }
-  return h * HEIGHT;
+  return h * HEIGHT + reliefH(q);
 }
 
 // ---------------------------------------------------------------- hands, reaching (fingers: pinky → index, then the thumb)
@@ -229,22 +228,20 @@ float hands(vec3 p) {
   float d = 1e3;
   for (int i = 0; i < 3; i++) {
     int b = HAND_BASE + i * 8;
-    float on = uP[b];
+    float on = UP(b);
     if (on <= 0.001) continue;
-    float s = uP[b + 4];
-    vec3 pos = vec3(uP[b + 1], uP[b + 2], mix(-0.75 * s, uP[b + 3], on));
+    float s = UP(b + 4);
+    vec3 pos = vec3(UP(b + 1), UP(b + 2), mix(-0.75 * s, UP(b + 3), on));
     vec3 q = (p - pos) / s;
     float bound = length(q - vec3(0.0, 0.03, -0.12)) - 0.42;
     if (bound * s > HANDSOFT + 0.06 * s) { d = min(d, bound * s); continue; }   // far away: the cheap bound is enough
-    q.xy = rot(-uP[b + 5]) * q.xy;
+    q.xy = rot(-UP(b + 5)) * q.xy;
     q.yz = rot(-0.3) * q.yz;
     q.x *= uHandMirror[i];
-    d = smin(d, handSDF(q, uP[b + 6], uP[b + 7], i * 5) * s, 0.06 * s);   // soft, so a pair never creases where they meet
+    d = smin(d, handSDF(q, UP(b + 6), UP(b + 7), i * 5) * s, 0.06 * s);   // soft, so a pair never creases where they meet
   }
   return d;
 }
-
-${figuresGLSL(figures)}
 
 // ---------------------------------------------------------------- orbs, columns
 float orbsSDF(vec3 p) {
@@ -379,10 +376,11 @@ vec2 ballFlow(vec2 q) {
   return c + rel;
 }
 
-float gFD = 1e3;               // the figure's distance the last time map() looked (the march's last look is at the hit)
-float gFMin = 1e3;             // how close the ray came to the figure on the way (the outline)
 float map(vec3 p) {
-  float d = (p.z - heightField(p.xy) + DROP * DROP * 40.0) * uStepK;
+  float he = p.z - heightField(p.xy) + DROP * DROP * 40.0, d = he * uStepK;
+  // the sheet's steeper over a figure: smaller steps on the rays that go near one, but only once they're down
+  // among it; above its highest point, the way is clear
+  if (gFigNear && FIG > 0.001) d = max(d * FIGSTEP, min(he, p.z - FIGTOP * FIGS * FIG - 0.01 * FIGS) * uStepK);
   float sw = GYRO + SPONGE + HALL;
   if (sw > 0.001) {
     float ds = 0.0;
@@ -395,21 +393,13 @@ float map(vec3 p) {
   if (COLUMNS > 0.001) d = smin(d, columnsSDF(p), 0.03);
   d = smin(d, objects(p), OBJSOFT);
   if (BALL > 0.001) d = smin(d, ballSDF(p), 0.02);
-  if (FIG > 0.001 && gFigNear && !gFigFar) {
-    // the figure, joined to the sheet like the hands: the fabric melts into it at the waterline and lets go
-    // higher up, so it comes out of the sheet rather than sitting on it. Its hollows go through both.
-    float fd = figuresSDF(p);
-    gFD = fd;
-    gFMin = min(gFMin, fd);
-    d = smin(d, fd, FIGSOFT * mix(FIGMELT, 1.0, smoothstep(0.0, 0.3 * FIGS, p.z)));
-    if (gFHole < 0.3 * gFS) d = smaxF(d, -gFHole, 0.01 * gFS);
-  }
   return smin(d, hands(p), HANDSOFT);
 }
 
 vec3 calcNormal(vec3 p, float t) {
   // a picture relief comes in 8-bit steps: look a little wider so the steps don't read as noise
   float h = (0.0006 * max(1.0, t) + (MEDIA > 0.0 ? 0.006 * MEDIAS : 0.0)) * 1.732;
+  if (FIG > 0.001 && gFigNear) h = max(h, 0.007 * FIGS);        // a relief is sampled from a grid: look across a texel or so
   vec3 n = vec3(0.0);
   int m = 4 + int(min(uStepK, 0.0));        // a loop the compiler can't unroll: map() is compiled in once here, not four times
   for (int i = 0; i < m; i++) {
@@ -527,6 +517,144 @@ float wellField(vec2 q) {
   return s;
 }
 
+// a few families of parallel lines: each point is one color or the other by how many it has crossed. All
+// straight edges, nothing repeating, and as each family slides the whole thing re-forms.
+float crystalField(vec2 q) {
+  int n = int(CRYSN + 0.5);
+  float s = 1.0;
+  for (int k = 0; k < n; k++) {
+    float a = float(k) * PI / float(n) + CRYST;
+    s *= sin((dot(q, vec2(cos(a), sin(a))) * FREQ * 0.5 + uCrys[k]) * PI);
+  }
+  return sign(s) * pow(abs(s), 1.0 / float(n)) * 1.5;
+}
+
+// marbling, by the true formula: a drop pushes everything before it outward, so a point today is traced back
+// through every drop since, newest first, until it lands inside one. Strokes and combs drag what's there.
+float sumiField(vec2 q) {
+  vec2 p = q;
+  int n = int(uDropN + 0.5);
+  for (int i = n - 1; i >= 0; i--) {
+    vec4 d = uDrops[i];
+    if (d.w < 0.5) {
+      vec2 c = p - d.xy;
+      float l2 = dot(c, c), r2 = d.z * d.z;
+      if (l2 < r2) return d.w > 0.1 ? 1.0 : -1.0;
+      if (r2 > 0.0) p = d.xy + c * sqrt(1.0 - r2 / l2);
+    } else if (d.w < 2.5) {
+      float a = (d.w - 1.0) * PI;                                                   // one stroke through the ink
+      vec2 m = vec2(cos(a), sin(a));
+      p -= m * d.z * exp(-abs(dot(p - d.xy, vec2(-m.y, m.x))) * 9.0);
+    } else {
+      float a = (d.w - 3.0) * PI;                                                   // a comb: strokes side by side, alternating
+      vec2 m = vec2(cos(a), sin(a));
+      p -= m * d.z * sin(dot(p - d.xy, vec2(-m.y, m.x)) * 15.0);
+    }
+  }
+  return sin(dot(p, vec2(cos(LINA), sin(LINA))) * FREQ * PI - PHASE) * 1.3;           // and the water has lines in it, which all this pushes about
+}
+
+// a checkerboard with its edges bent the same way on both sides: what one square loses the next one gains, so
+// they go on fitting together however far it goes. The bend comes and goes across the sheet.
+float lockField(vec2 q) {
+  vec2 p = q * FREQ * 0.28;
+  float a = LOCKA * (0.55 + 0.45 * sin(dot(q, vec2(1.5, 0.9)) * 1.2 - PHASE * 0.15));
+  p.x += a * (0.26 * sin(TAU * p.y) + 0.09 * sin(2.0 * TAU * p.y + 1.1));
+  p.y += a * (0.26 * sin(TAU * p.x + 0.7) + 0.09 * sin(2.0 * TAU * p.x + 2.3));
+  return sin(PI * p.x) * sin(PI * p.y) * 1.8;
+}
+
+// a grid where every dot is the opposite of its neighbours, and how big each is comes from a wave going out
+// and from the sound: low notes in the middle, the past further out
+float cellField(vec2 q) {
+  float F = FREQ * 0.2;
+  vec2 g = q * F, id = floor(g), f = g - id - 0.5;
+  float par = mod(id.x + id.y, 2.0) * 2.0 - 1.0;
+  float d = mix(length(f), max(abs(f.x), abs(f.y)) * 0.94, CELLSQ);
+  float l = length((id + 0.5) / F) / FRAME;
+  float R = 0.08 + 0.36 * (0.5 + 0.5 * sin(l * 4.6 - PHASE * 0.8)) + 0.3 * soundSpec(clamp(l * 0.45, 0.0, 1.0), clamp(l * 0.3, 0.0, 1.0));
+  return par * (R - d) * 6.0;
+}
+
+// the star lattice: every cell folded down to a wedge, a line from the middle of the cell's edge at this angle,
+// and rings of that line's distance. Sharpen the angle and every star in the sheet sharpens.
+float starField(vec2 q) {
+  vec2 g = q * FREQ * 0.1, p;
+  if (STARHEX > 0.5) {
+    vec2 s = vec2(1.0, 1.7320508);
+    vec4 hc = floor(vec4(g, g - vec2(0.5, 1.0)) / s.xyxy) + 0.5;
+    vec4 rz = vec4(g - hc.xy * s, g - (hc.zw + 0.5) * s);
+    p = dot(rz.xy, rz.xy) < dot(rz.zw, rz.zw) ? rz.xy : rz.zw;
+    float a = abs(mod(atan(p.y, p.x) + PI / 6.0, PI / 3.0) - PI / 6.0), r = length(p);
+    p = r * vec2(cos(a), sin(a));
+  } else {
+    p = abs(fract(g) - 0.5);
+    if (p.y > p.x) p = p.yx;
+  }
+  float d = dot(p - vec2(0.5, 0.0), vec2(sin(STARA), cos(STARA)));
+  return sin(PI * (d * STARB * 2.0 - PHASE * 0.25)) * 1.3;
+}
+
+// circles folded into circles (an Apollonian gasket): bands of how deep each point has fallen
+float laceField(vec2 q) {
+  vec2 p = q * 2.1 + vec2(0.31, 0.17);
+  float sc = 1.0;
+  for (int i = 0; i < 7; i++) {
+    p = -1.0 + 2.0 * fract(0.5 * p + 0.5);
+    float k = LACEK / max(dot(p, p), 1e-3);
+    p *= k; sc *= k;
+  }
+  float d = abs(p.y) / sc + 0.0006;
+  return sin(log(d) * LACEB - PHASE * 0.5) * 1.4;
+}
+
+// ribbons of fine lines going over and under
+float weaveField(vec2 q) {
+  vec2 g = q * FREQ * 0.11, id = floor(g), f = g - id - 0.5;
+  bool across = mod(id.x + id.y, 2.0) > 0.5;
+  float a = across ? f.y : f.x, b = across ? f.x : f.y;                             // a: across the ribbon on top; b: along it
+  const float W = 0.43;
+  if (abs(a) < W) return sin(a * 56.0 + (across ? PHASE : -PHASE) * 0.0) * 1.2 + 0.35 * smoothstep(0.34, 0.5, abs(b));   // it darkens going under
+  if (abs(b) < W) return 1.0;                                                       // the shadow beside it
+  return -1.0;
+}
+
+// rows of waves, each row lying over the one behind
+float seigField(vec2 q) {
+  vec2 g = q * FREQ * 0.075;
+  const float R = 0.62;
+  float r0 = ceil((g.y - R) * 2.0);
+  for (int i = 0; i < 6; i++) {
+    float row = r0 + float(i), cy = row * 0.5;
+    float off = mod(row, 2.0) * 0.5;
+    float cx = floor(g.x - off + 0.5) + off;
+    float l = length(g - vec2(cx, cy));
+    if (l < R) return sin(l * 24.0 - PHASE * 1.1) * 1.2 + (l > R - 0.05 ? 1.2 : 0.0);
+  }
+  return 1.0;
+}
+
+// bricks, and over them discs of the same bricks turned a quarter: they seem to come loose and float
+float ouchiBricks(vec2 p) {
+  vec2 g = p * FREQ * vec2(0.26, 0.78);
+  g.x += floor(g.y) * 0.5;
+  return sin(PI * g.x) * sin(PI * g.y) * 1.8;
+}
+float ouchiField(vec2 q) {
+  for (int i = 0; i < 3; i++) {
+    float t = OUCHIT * (0.5 + float(i) * 0.21) + float(i) * 2.1;
+    vec2 c = FRAME * vec2(0.62 * cos(t) * (1.0 + 0.5 * float(i)), 0.48 * sin(t * 1.3 + 0.7));
+    float R = FRAME * (0.42 - float(i) * 0.09);
+    if (length(q - c) < R) return ouchiBricks((q - c).yx * vec2(1.0, -1.0));
+  }
+  return ouchiBricks(q);
+}
+
+// a new pattern doesn't fade in over the old one (two patterns half-mixed are just blotches): it opens out from
+// the middle of the view with a wandering edge, the old one giving way in front of it. gMk: how far that's got here.
+float gMk = 1.0;
+#define SWK(i) mix(uSw[i].x, uSw[i].y, gMk)
+
 // ---------------------------------------------------------------- the line equation
 // qw returns the warped coordinates, so a picture can be bent by the same warps as the lines
 float lines(vec2 q, float z, out float rr, out vec2 qw) {
@@ -623,23 +751,34 @@ float lines(vec2 q, float z, out float rr, out vec2 qw) {
     vec2 o = MOIREOFF * 0.5 * vec2(cos(PHASE * 0.15), sin(PHASE * 0.15));
     v *= mix(1.0, sin(length(q - o) * FREQ * PI), MOIRE);
   }
-  if (HYPER > 0.0) v = mix(v, hyperField(q / HYPERS), HYPER);
-  if (CUBE > 0.0) v = mix(v, cubeField(q), CUBE);
-  if (TRUCHET > 0.0) v = mix(v, truchetField(q), TRUCHET);
-  if (CYM > 0.0) v = mix(v, cymField(q, r, ang), CYM);
-  if (JULIA > 0.0) v = mix(v, juliaField(q), JULIA);
-  if (AGATE > 0.0) v = mix(v, agateField(q), AGATE);
-  if (WELLS > 0.0) v = mix(v, wellField(q), WELLS);
-  if (QUASI > 0.0) {                                         // a quasicrystal: plane waves that never quite repeat
+  float kk;
+  kk = SWK(SW_HYPER); if (kk > 0.0) v = mix(v, hyperField(q / HYPERS), kk);
+  kk = SWK(SW_CUBE); if (kk > 0.0) v = mix(v, cubeField(q), kk);
+  kk = SWK(SW_TRUCHET); if (kk > 0.0) v = mix(v, truchetField(q), kk);
+  kk = SWK(SW_CYM); if (kk > 0.0) v = mix(v, cymField(q, r, ang), kk);
+  kk = SWK(SW_JULIA); if (kk > 0.0) v = mix(v, juliaField(q), kk);
+  kk = SWK(SW_AGATE); if (kk > 0.0) v = mix(v, agateField(q), kk);
+  kk = SWK(SW_WELLS); if (kk > 0.0) v = mix(v, wellField(q), kk);
+  kk = SWK(SW_CRYS); if (kk > 0.0) v = mix(v, crystalField(q), kk);
+  kk = SWK(SW_SUMI); if (kk > 0.0) v = mix(v, sumiField(q), kk);
+  kk = SWK(SW_LOCK); if (kk > 0.0) v = mix(v, lockField(q), kk);
+  kk = SWK(SW_CELLS); if (kk > 0.0) v = mix(v, cellField(q), kk);
+  kk = SWK(SW_STAR); if (kk > 0.0) v = mix(v, starField(q), kk);
+  kk = SWK(SW_LACE); if (kk > 0.0) v = mix(v, laceField(q), kk);
+  kk = SWK(SW_WEAVE); if (kk > 0.0) v = mix(v, weaveField(q), kk);
+  kk = SWK(SW_SEIG); if (kk > 0.0) v = mix(v, seigField(q), kk);
+  kk = SWK(SW_OUCHI); if (kk > 0.0) v = mix(v, ouchiField(q), kk);
+  kk = SWK(SW_QUASI);
+  if (kk > 0.0) {                                            // a quasicrystal: plane waves that never quite repeat
     float s = 0.0;
     int n = int(QUASIN + 0.5);
     for (int k = 0; k < n; k++) {
       float a = float(k) * PI / float(n);
       s += cos(dot(q, vec2(cos(a), sin(a))) * FREQ * PI + (mod(float(k), 2.0) * 2.0 - 1.0) * PHASE * 0.5);
     }
-    v = mix(v, s, QUASI);
+    v = mix(v, s, kk);
   }
-  if (LIVING > 0.0) v = mix(v, (texture(uLiving, q * 0.45 + 0.5).g - 0.2) * 8.0, LIVING);
+  kk = SWK(SW_LIVING); if (kk > 0.0) v = mix(v, (texture(uLiving, q * 0.45 + 0.5).g - 0.2) * 8.0, kk);
   return v;
 }
 
@@ -676,6 +815,11 @@ void main() {
     uv = tw.xy + rot(tw.z * exp(-dot(dd, dd) / (tw.w * tw.w))) * dd;
   }
 
+  if (uMorph > 0.0 && uMorph < 1.0) {
+    float front = clamp(length(uv) * 0.82 + 0.26 * fbm(uv * 2.4 + 3.7), 0.0, 1.0);
+    gMk = smoothstep(front - 0.06, front + 0.06, uMorph * 1.12 - 0.06);
+  }
+
   // camera: orbit around the target (its frame comes in as uniforms); FRAME keeps the sheet the same size whatever the lens
   float dist = 2.0 * FRAME * FOCAL;
   vec3 target = vec3(TX, TY, 0.0);
@@ -692,11 +836,21 @@ void main() {
 
   float t = 0.0, d = 1.0;
   float far = dist * 3.0 + 14.0;
-  bool hit = false, exact = false;
+  bool hit = false;
+  float tLast = 0.0;
   for (int i = 0; i < 140; i++) {
     vec3 p = ro + rd * t;
     d = map(p);
-    if (d < 0.0005 * t + 0.0003) { hit = true; exact = true; break; }
+    if (d < 0.0005 * t + 0.0003) {
+      hit = true;
+      if (d < -0.002) {                                      // it stepped through: go back and find where
+        float a = tLast, b = t;
+        for (int j = 0; j < 5; j++) { float c = 0.5 * (a + b); if (map(ro + rd * c) < 0.0) b = c; else a = c; }
+        t = b;
+      }
+      break;
+    }
+    tLast = t;
     t += d;
     if (t > far) break;
   }
@@ -708,25 +862,14 @@ void main() {
   vec3 col = fog;
   if (hit) {
     vec3 p = ro + rd * t;
-    // the figures at the hit, as the march's last step saw them (the normal's own looks would overwrite
-    // them); beyond their reach, neither the normal nor the shading needs to ask about them again
-    float fdH = gFD, hH = gFHole, sH = gFS, fMin = gFMin;
-    if (gFigNear && FIG > 0.001) {
-      if (!exact) { fdH = figuresSDF(p); hH = gFHole; sH = gFS; }
-      if (fdH > 1.4 * FIGMELT * FIGSOFT + 0.06 * sH + 0.01) gFigFar = true;
-    }
     vec3 n = calcNormal(p, t);
     bool onBall = BALL > 0.001 && ballSDF(p) < 0.004 + 0.001 * t;
     if (MEDIACALM > 0.0) gCalm = 1.0 - MEDIACALM * mediaMaskSoft(p.xy, 1.5);
     if (AURA > 0.0) gAura = AURA * 2.0 * mediaMaskSoft(p.xy, log2(float(textureSize(uMedia, 0).y) / 22.0));
-    // the figure is drawn by the sheet's own pattern, poured over it like the hands: nothing is lit. Its
-    // hollows are solid dark. figL: on it; figO: the gap just outside its outline
-    float figL = 0.0, deep = 0.0, figO = 0.0;
-    if (FIG > 0.001 && gFigNear) {
-      figL = FIG * (1.0 - smoothstep(0.008 * sH, 0.016 * sH, fdH));
-      deep = FIG * (1.0 - smoothstep(0.006 * sH, 0.012 * sH, hH));
-    }
-    if (FIG > 0.001 && FIGHALO > 0.0) figO = FIG * (1.0 - smoothstep(FIGHALO * 0.7 * gFS, FIGHALO * gFS, fMin)) * (1.0 - figL);
+    // what's under the sheet at this point: where its pattern was drawn from, and how shut-in it is
+    vec4 rel = FIG > 0.001 && gFigNear ? reliefAt(p.xy) : vec4(0.0);
+    float formK = smoothstep(0.0, 0.04, rel.w);               // on a form: drawn the same way whether it's a figure or a hand
+    if (UP(HAND_BASE) + UP(HAND_BASE + 8) + UP(HAND_BASE + 16) > 0.0) formK = max(formK, 1.0 - smoothstep(0.004, 0.03 * FRAME, hands(p)));
     float rr = 1.0;
     vec2 qw = p.xy;
     float v = 0.0;
@@ -737,19 +880,29 @@ void main() {
       v = lines(ballFlow(p.xy + rf.xy * BALLR * 3.0 / (0.35 + abs(rf.z))), 0.0, rr, qw);
       rr = 1.0;
     } else {
-      vec2 sq0 = p.xy, nn = n.xy * (REFRACT + figL * FIGLENS);
+      // over a form the lines also bend the way the surface leans, like lines seen through thick glass
+      vec2 sq0 = p.xy + rel.xy * FIGPULL + n.xy * FRAME * 0.12 * FIGLENS * formK, nn = n.xy * REFRACT;
       // seen from straight above, a shape under the sheet would hardly show: lean the pattern over it by its
       // height, the way lines lie over a form on a tilted page (a low camera does this by itself)
       if (RELIEF > 0.0) sq0 -= rot(YAW) * vec2(0.62, 0.78) * p.z * RELIEF;
+      if (uRingsOn > 0.5) for (int i = 0; i < 4; i++) {               // waves going out from the drum, through the pattern
+        vec4 g = uRings[i];
+        if (g.w <= 0.0) continue;
+        vec2 o = sq0 - g.xy;
+        float r = max(length(o), 1e-3), e = (r - g.z) / (FRAME * 0.2);
+        sq0 += o / r * g.w * FRAME * 0.06 * exp(-e * e);
+      }
+      if (PINS > 0.0) sq0 = mix(sq0, (floor(sq0 * PINF) + 0.5) / PINF, PINS * 0.0);
       sq0 = ballFlow(sq0 + nn * 0.12);
       if (FIG > 0.001) sq0 = figFlow(sq0);
       if (WRAP < 0.999) {                                // lines bend over the relief
-        bool fade = CONF > 0.001 && CONF < 0.999;
+        float confK = SWK(SW_CONF);
+        bool fade = confK > 0.001 && confK < 0.999;
         int passes = (fade ? 2 : 1) + int(min(uStepK, 0.0));
         for (int i = 0; i < passes; i++) {
-          gConf = fade ? float(i) : step(0.5, CONF);
+          gConf = fade ? float(i) : step(0.5, confK);
           float vi = lines(sq0, p.z, rr, qw);
-          v = i == 0 ? vi : mix(v, vi, CONF);
+          v = i == 0 ? vi : mix(v, vi, confK);
         }
       }
       if (WRAP > 0.001) {
@@ -778,17 +931,26 @@ void main() {
     float diff = max(dot(n, L), 0.0);
     float amb = 0.5 + 0.5 * n.z;
     if (!onBall) v -= (diff - 0.6) * ENGRAVE * 1.4;          // light thins the ink: form drawn with lines
+    if (PINS > 0.0) v += PINS * (1.0 - n.z) * 3.0;            // the sides of a pin go dark
     v -= THICK;
-    if (figL > 0.0) {
-      if (FIGCONT > 0.0) v = mix(v, sin(p.z / sH * FIGCONT * PI - FIGT * 0.7) + (diff - 0.55) * 0.9, figL);   // drawn in its own contour lines, like a sounding chart
-      if (FIGINK > 0.0) v = mix(v, 1.0, FIGINK * figL);                                  // a solid silhouette
-      v += FIGEDGE * figL * smoothstep(0.42, 0.05, dot(n, -rd));                         // a line round it, where it turns away from you
-      if (deep > 0.0) v = mix(v, FIGINK > 0.5 ? -1.0 : 1.0, deep);                       // hollows: the other color, in a silhouette; ink otherwise
-    }
-    if (figO > 0.0) v = mix(v, -1.0, figO);                                              // and a gap of paper just outside it
-    if (FIGNEG > 0.0) {                                                                  // on a flat pattern: the shape is the pattern, flipped
-      float neg = deep > 0.0 ? figL * (1.0 - deep) : figL;
-      v = mix(v, -v, neg * FIGNEG);
+    if (formK > 0.0 || rel.z != 0.0) {
+      // the hollows go dark and the crests pale: the ink itself thickens, line by line, whatever the pattern
+      float inkDark = dot(ink1, vec3(1.0)) < dot(paper, vec3(1.0)) ? 1.0 : -1.0;
+      float on = formK;
+      // a light that goes where you go, and a little to one side: you never look at a form's unlit half, and
+      // it only goes black where the surface turns away from you
+      vec3 Lf = normalize(gBack + vec3(-0.62, 0.5, 0.15));
+      float lit = dot(n, Lf) - Lf.z, edge = 1.0 - max(dot(n, -rd), 0.0);             // lit: against the flat sheet, so only its slopes change
+      v += inkDark * (1.0 - 2.0 * step(0.5, INVERT)) * (1.0 - 0.5 * CHECK) * (rel.z * FIGSHADE + on * (edge * FIGRIM - lit * FIGLIT));
+      if (FIGBURST > 0.0) {
+        // high enough, it has come through: no pattern on it, just the thing itself, cut like a woodblock
+        vec2 fo = (p.xy - vec2(FIGX, FIGY)) / FIGS;
+        float tear = FIGTOP * (1.0 - FIGBURST) + 0.012 * sin(fo.x * 37.0 + 2.0 * sin(fo.y * 23.0)) + 0.008 * sin(fo.y * 61.0 - fo.x * 13.0);
+        float b = smoothstep(tear - 0.0025, tear + 0.0025, rel.w);
+        float cut = rel.z * 1.6 + edge * 0.9 - lit * 3.0 - 0.28;
+        float lip = smoothstep(tear - 0.022, tear - 0.004, rel.w);                   // the sheet's torn edge, dark against what's coming through
+        v = mix(mix(v, inkDark * (1.0 - 2.0 * step(0.5, INVERT)), lip * 0.9), inkDark * (1.0 - 2.0 * step(0.5, INVERT)) * cut, b);
+      }
     }
     float w = fwidth(v) * 0.8 + 1e-3;
     float k = smoothstep(-w, w, v);
@@ -806,7 +968,6 @@ void main() {
       col = col * (0.55 + 0.45 * diff) * (1.0 - 0.55 * fres) + pow(max(dot(reflect(-L, n), -rd), 0.0), 60.0) * 0.9;
     } else {
       col = mix(col, col * (0.25 + 0.55 * amb + 0.55 * diff) + spec * 0.3, LIGHT);
-      if (FIGINK < 0.5) { vec3 dark = dot(paper, vec3(1.0)) < dot(ink1, vec3(1.0)) ? paper : ink1; col = mix(col, dark, deep); }
     }
     if (MEDIAPHOTO > 0.0) {                                    // shown as a photo: a duotone in the palette, or true color
       bool pd = dot(paper, vec3(1.0)) < dot(ink1, vec3(1.0));

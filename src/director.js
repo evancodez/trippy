@@ -148,7 +148,10 @@ export class Director {
 
   apply(v) {
     if (this.mix < 0.002 || !this.pose) return;
-    const c = this.pose, k = this.mix, out = k * (1 - this.inside);
+    // while the walls of a tunnel are still there, the camera stays pointing down it (tipped over, it would
+    // be staring at one wall, one flat color); it takes up the next pose only as they go
+    const w = clamp((v.gyro + v.sponge + v.hall - 0.3) / 0.35, 0, 1);
+    const c = this.pose, k = this.mix, out = k * (1 - Math.max(this.inside, w * w * (3 - 2 * w)));
     v.pitch = lerp(v.pitch, clamp(c.pitch, -0.3, 1.36), out);
     v.roll = lerp(v.roll, c.roll + this.bankV, k);
     v.yaw += c.yaw * k;

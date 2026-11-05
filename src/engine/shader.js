@@ -391,7 +391,10 @@ float mapSheet(vec3 p) {
   if (BALL > 0.001) d = smin(d, ballSDF(p), 0.02);
   return smin(d, hands(p), HANDSOFT);
 }
-float mapForm(vec3 p) { return smin(mapSheet(p), formD(p), FORMSOFT); }
+float mapForm(vec3 p) {
+  float f = formD(p), d = smin(mapSheet(p), f, FORMSOFT);
+  return gPit < 1e2 ? smaxF(d, min(-gPit, f), 0.035 * FORMS) : d;       // inside a pit there's no sheet, only the form
+}
 
 float normalEps(float t) {
   // a picture relief comes in 8-bit steps: look a little wider so the steps don't read as noise
@@ -853,6 +856,7 @@ void main() {
     }
   }
   if (nearForm) {
+    if (FORMBAKED > 0.0) gFormGround = FORMBAKED * heightField(vec2(FORMX, FORMY));
     for (int i = 0; i < 140; i++) {
       d = mapForm(ro + rd * t);
       if (i == 0 && d < 0.0) { nearForm = false; break; }     // the camera's inside it: look out through it, rather than at a screen of one color

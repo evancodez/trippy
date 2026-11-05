@@ -181,8 +181,8 @@ export class Form {
     const s = this.s = 1.25 * sp * (cfg.size || 1) * baseK;
     if (!this.placed) {
       this.facing = Math.atan2(Math.sin(v.yaw + v.roll), Math.cos(v.yaw + v.roll));
-      // a face comes up looking at you, whichever way the camera was when it came
-      this.lookUp = clamp(v.pitch, 0, 1.2) * 0.8;
+      // a face lies in the sheet, tipped a little toward wherever the camera was when it came
+      this.lookUp = clamp(v.pitch, 0, 1.2) * 0.12;
     }
     // the hand's wrist is on the cursor; anything else, its middle
     const handK = (this.a === 0 ? 1 - this.mix : 0) + (this.b === 0 ? this.mix : 0);

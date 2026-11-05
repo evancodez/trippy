@@ -11,7 +11,7 @@ export const BAKED = { face: 'face' };
 // how big each comes up for the same size setting, how far it reaches from its middle in the hand's units (rays
 // further off than that never read it), and how far its surface bends the pattern (thin parts less, or the
 // pattern gets squeezed to gray)
-export const BASE_WARP = { hand: 0.6, face: 1, coral: 0.3, rope: 0.22, knot: 0.25, bloom: 0.4, star: 0.55, egg: 0.45 };
+export const BASE_WARP = { hand: 0.6, face: 0.85, coral: 0.3, rope: 0.22, knot: 0.25, bloom: 0.4, star: 0.55, egg: 0.45 };
 export const BASE_SCALE = { hand: 1, face: 0.62, coral: 0.6, rope: 0.72, knot: 0.72, bloom: 0.7, star: 0.62, egg: 0.62 };
 export const BASE_REACH = { hand: 0.56, face: 0.72, coral: 0.82, rope: 0.46, knot: 0.46, bloom: 0.56, star: 0.56, egg: 0.5 };
 
@@ -70,7 +70,7 @@ export function surpriseShift(base, rand = Math.random) {
 
 export const FORMS = [
   { id: 'hand', name: 'Hand', base: 'hand', shift: { melt: 0.57 }, blurb: 'your cursor is the wrist. Hold: it makes a fist' },
-  { id: 'face', name: 'The Face', base: 'face', shift: { aura: 0.5 }, blurb: 'a face pressing up through the sheet, like a ghost in the shell. Hold: the mouth opens' },
+  { id: 'face', name: 'The Face', base: 'face', shift: { aura: 0.5 }, blurb: 'a face lying in the sheet, parts of it above and parts sunk below. Hold: the mouth opens' },
   { id: 'wheel', name: 'Hand Wheel', base: 'hand', shift: { fold: 6, spread: 0.16, melt: 0.57 }, blurb: 'one hand folded round itself. Hold: every fist at once' },
   { id: 'handtree', name: 'Hand Tree', base: 'hand', shift: { echo: 2, echoTurn: 0.9, echoSize: 0.72, melt: 0.57 }, blurb: 'each hand grows two smaller hands' },
   { id: 'masks', name: 'Ring of Faces', base: 'face', shift: { fold: 5, spread: 0.36 }, blurb: 'the same face, looking every way' },
@@ -120,6 +120,8 @@ export const FORM_GLSL = `
 uniform highp sampler3D uSolid;   // a baked solid: its distance, and how the distance changes when it moves
 uniform float uSolidBox;
 bool gFormFull = false;           // the shading point wants the real distance, not the cheap bound
+float gFormGround = 0.0;          // how high the sheet is under a face: it lies level with it
+float gPit = 1e3, gPitOff = 0.0;  // where the sheet is cut away so a face can go below it
 
 float sdEll(vec3 p, vec3 r) { float k0 = length(p / r), k1 = length(p / (r * r)); return k1 < 1e-6 ? -min(r.x, min(r.y, r.z)) : k0 * (k0 - 1.0) / k1; }
 float smaxF(float a, float b, float k) { float h = max(k - abs(a - b), 0.0) / k; return max(a, b) + h * h * k * 0.25; }
@@ -231,6 +233,7 @@ float formCopies(int k, float fold, float echo, vec3 q, float open) {
   int gens = int(echo + 0.5);
   for (int i = 0; i <= gens; i++) {
     d = min(d, formBase(k, q, open) * s);
+    if (k == 1) gPit = min(gPit, sdEll(q - vec3(0.0, 0.0, -0.1), vec3(0.34, 0.5, 0.42)) * s + gPitOff);
     q -= from;
     q.x = abs(q.x);
     q.xy = rot(FORMECHOT) * q.xy;
@@ -243,6 +246,7 @@ float formShape(vec3 q) {
   float open = FORMOPEN, dA, dB = 0.0;
   int m = FORMMIX > 0.0 ? 2 : 1;                    // a loop the compiler can't unroll: it's all compiled in once
   for (int i = 0; i < m; i++) {
+    gPitOff = m > 1 ? (i == 0 ? FORMMIX : 1.0 - FORMMIX) * 0.8 : 0.0;      // a face melting away closes up its hole as it goes
     float di = formCopies(int((i == 0 ? FORMA : FORMB) + 0.5), i == 0 ? FORMFA : FORMFB, i == 0 ? FORMEA : FORMEB, q, open);
     if (i == 0) dA = di; else dB = di;
   }
@@ -250,9 +254,10 @@ float formShape(vec3 q) {
 }
 
 float formD(vec3 p) {
+  gPit = 1e3;
   if (FORMON <= 0.001) return 1e3;
   float S = FORMS;
-  vec3 q = (p - vec3(FORMX, FORMY, mix(-1.2 * S, FORMZ, FORMON))) / S;
+  vec3 q = (p - vec3(FORMX, FORMY, mix(-1.2 * S, FORMZ + gFormGround, FORMON))) / S;
   if (FORMFIELD > 0.0) q.xy -= FORMFIELD * floor(q.xy / FORMFIELD + 0.5);
   if (!gFormFull) {
     float b = length(q) - FORMBOUND;
@@ -301,6 +306,7 @@ float formD(vec3 p) {
     float f = FORMSLICEF, h = dot(q, dir) * f + FORMSLICEP;
     d = max(d, (abs(fract(h) - 0.5) - mix(0.5, 0.2, FORMSLICE)) / f);
   }
+  gPit *= S * lip;
   return d * S * lip;
 }
 `;

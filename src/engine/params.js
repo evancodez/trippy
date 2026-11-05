@@ -172,7 +172,7 @@ export const PARAMS = [
   P('formSlice', 0, 0, 1), P('formSliceF', 11, 1, 60), P('formSliceA', 0.5, -4, 4), P('formSliceP', 0, 0, 0), P('formRings', 0, 0, 1), P('formRingT', 0, 0, 0),
   P('formHoles', 0, 0, 1), P('formBumps', 0, 0, 1), P('formBlocks', 0, 0, 1), P('formSwell', 0, -1, 1), P('formBaked', 0, 0, 1),
   P('formNeg', 0, 0, 1), P('formFill', 0, -1, 1), P('formFine', 1, 0.1, 8), P('formContour', 0, 0, 1), P('formStripeA', 0.9, -4, 4), P('formStripeF', 130, 4, 400), P('formStripeW', 0, -1.2, 1.2), P('formAura', 0, 0, 3), P('formAuraT', 0, 0, 0),
-  P('formLens', 0.45, 0, 4), P('formLit', 0.3, 0, 4), P('formRim', 0.12, 0, 4), P('relief', 0, 0, 4),
+  P('formLens', 1, 0, 6), P('formLit', 0, 0, 4), P('formRim', 0, 0, 4), P('formShade', 0, 0, 1), P('relief', 0, 0, 4),
   ...HANDS,
   P('ball', 0, 0, 1), P('ballX', 0, -4, 4), P('ballY', 0, -4, 4), P('ballZ', 0, -1, 2), P('ballR', 0.12, 0.02, 1),
   P('ballVX', 1, -1, 1), P('ballVY', 0, -1, 1), P('ballWake', 0.5, 0, 2), P('ballFlow', 1, 0, 2),

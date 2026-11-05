@@ -902,8 +902,18 @@ void main() {
     if (MEDIACALM > 0.0) gCalm = 1.0 - MEDIACALM * mediaMaskSoft(p.xy, 1.5);
     if (AURA > 0.0) gAura = AURA * 2.0 * mediaMaskSoft(p.xy, log2(float(textureSize(uMedia, 0).y) / 22.0));
     // on a form: the same pattern runs straight across it, its outline cutting against what's behind
-    float dForm = 1e3;
-    if (FORMON > 0.001 && (nearForm || FORMAURA > 0.0)) { gFormFull = true; dForm = formD(p); gFormFull = false; }
+    float dForm = 1e3, shutIn = 1.0;
+    if (FORMON > 0.001 && (nearForm || FORMAURA > 0.0)) {
+      // and how shut in this point is: how far from the form you get, going a little way straight out
+      gFormFull = true;
+      float out_ = 0.11 * FORMS;
+      int m = (FORMSHADE > 0.0 && nearForm ? 2 : 1) + int(min(uStepK, 0.0));
+      for (int j = 0; j < m; j++) {
+        float dj = formD(j == 0 ? p : p + n * out_);
+        if (j == 0) dForm = dj; else shutIn = smoothstep(0.0, 0.55, dj / out_);    // (only a real hollow: on an open surface this is well over that)
+      }
+      gFormFull = false;
+    }
     float dSolid = min(dForm, UP(HAND_BASE) + UP(HAND_BASE + 8) > 0.0 ? hands(p) : 1e3);
     float formK = 1.0 - smoothstep(0.004, 0.03 * FRAME, dSolid);
     float formHard = 1.0 - smoothstep(0.0015 * FRAME, 0.006 * FRAME, dForm);
@@ -918,7 +928,7 @@ void main() {
       rr = 1.0;
     } else {
       // over a form the lines also bend the way the surface leans, like lines seen through thick glass
-      vec2 sq0 = p.xy + n.xy * FRAME * 0.12 * FORMLENS * formK, nn = n.xy * REFRACT;
+      vec2 sq0 = p.xy + n.xy * (FORMON > 0.001 ? FORMS * 0.095 : FRAME * 0.12) * FORMLENS * formK, nn = n.xy * REFRACT;
       // seen from straight above, a shape under the sheet would hardly show: lean the pattern over it by its
       // height, the way lines lie over a form on a tilted page (a low camera does this by itself)
       if (RELIEF > 0.0) sq0 -= rot(YAW) * vec2(0.62, 0.78) * p.z * RELIEF;
@@ -1004,6 +1014,12 @@ void main() {
     }
     k = mix(k, 1.0 - k, flip);
     col = mix(paper, ink, k);
+    if (FORMSHADE > 0.0 && (formK > 0.0 || shutIn < 1.0)) {    // the shape itself: the pattern stays as sharp as it was, and goes into shadow
+      vec3 Ls = normalize(gBack + vec3(-0.62, 0.5, 0.15));
+      float lift = clamp(0.8 + 0.9 * (dot(n, Ls) - Ls.z), 0.0, 1.0);
+      float rim = 1.0 - max(dot(n, -rd), 0.0);
+      col *= 1.0 - FORMSHADE * (1.0 - shutIn * (1.0 - formK * (0.5 * (1.0 - lift) + 0.75 * rim * rim * rim)));   // hollows and round its foot; its sides, more toward the outline
+    }
     float spec = pow(max(dot(reflect(-L, n), -rd), 0.0), 40.0);
     if (onBall) {
       float fres = pow(1.0 - max(dot(n, -rd), 0.0), 2.0);

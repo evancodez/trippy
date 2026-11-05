@@ -820,7 +820,8 @@ function applyAdds(v, m, dt) {
   stepRings(dt, m, v, shows && Fm.on > 0.3 ? Fm.x : v.tx, shows && Fm.on > 0.3 ? Fm.y : v.ty);
   app.ball.apply(v, A.ball);
   // seen from above, a shape would hardly show: the lines lean over it by its height
-  v.relief = Fm.on * 0.6 * (1 - clamp((v.pitch - 0.08) / 0.75, 0, 1));
+  const flat = 1 - clamp((v.pitch - 0.08) / 0.75, 0, 1), handK = (Fm.a === 0 ? 1 - Fm.mix : 0) + (Fm.b === 0 ? Fm.mix : 0);
+  v.relief = Fm.on * (v.formThrow ?? 1) * (0.6 * flat * handK + (0.8 + 1.2 * flat) * (1 - handK));
   // and they crowd in, so a form under them is drawn in enough lines to be seen
   if (Fm.on > 0) v.freq += Math.max(Math.min(17 / v.frame, v.freq * (v.vortex > 1 || v.conf > 0.5 ? 1.25 : 1.5)) - v.freq, 0) * Fm.on * (1 - Fm.val.contour);   // (in its own stripes it doesn't need them)
   applyInputs(v, m);

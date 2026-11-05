@@ -3,7 +3,7 @@
 // The camera and the picture go through media.js / tracking.js; the rest are written straight into the
 // world's values every frame (after the look and the music), so they ride along with whatever look is on.
 
-import { FORMS, FORM_INDEX, BASES, BASE_REACH, BASE_SCALE, BAKED, SHIFT_DEFAULTS } from './engine/forms.js';
+import { FORMS, FORM_INDEX, BASES, BASE_REACH, BASE_SCALE, BASE_WARP, BAKED, SHIFT_DEFAULTS } from './engine/forms.js';
 import { rayOnSheet, rayAt, noSheet, camDist, camHeight } from './engine/camera.js';
 
 export const ADDS = [
@@ -220,10 +220,11 @@ export class Form {
     return of(A, this.fa) * (1 - m) + of(B, this.b != null ? this.fb : this.fa) * m;
   }
 
-  // the hand is drawn with more shading than anything else: it has the fine outline to carry it
-  drawn() {
+  // the hand has the fine outline to carry heavier ink; anything else keeps the pattern as sharp as it is on the sheet
+  drawn(V) {
     const k = (this.a === 0 ? 1 - this.mix : 0) + (this.b === 0 ? this.mix : 0);
-    return { formLit: 0.3 + 1.2 * k, formRim: 0.12 + 0.23 * k, formLens: 0.45 + 0.55 * k };
+    const m = this.b != null ? this.mix : 0, warp = BASE_WARP[BASES[this.a]] * (1 - m) + (this.b != null ? BASE_WARP[BASES[this.b]] * m : 0);
+    return { formLit: 1.5 * k, formRim: 0.35 * k, formLens: V.warp * warp, formShade: V.shade * (1 - k) };
   }
 
   apply(v, cfg, m) {
@@ -248,13 +249,13 @@ export class Form {
       formYaw: this.facing + V.turn + this.yawOf(A, B), formLean: V.lean,
       formA: this.a, formB: this.b ?? this.a, formMix: this.b != null ? this.mix * this.mix * (3 - 2 * this.mix) : 0,
       formFA: this.fa, formFB: this.b != null ? this.fb : this.fa, formEA: this.ea, formEB: this.b != null ? this.eb : this.ea,
-      formOpen: open, formSoft: (V.blocks > 0.004 ? 0.012 : 0.015 + V.melt * V.melt * 0.42) * v.frame / 0.6, formBound: bound,
+      formOpen: open, formSoft: (V.blocks > 0.02 ? 0.012 : 0.015 + V.melt * V.melt * 0.42) * v.frame / 0.6, formBound: bound,
       formSpread: V.spread, formSpin: V.spin + this.spinT * (fold > 1 ? 1 : 0), formEchoS: V.echoSize, formEchoT: V.echoTurn + w(0.17, 2) * 0.25,
       formField: field, formTwist: twist, formBend: bend, formWave: waveA > 0.004 ? waveA : 0, formWaveT: this.wave, formRopeT: this.rope,
       formSlice: V.slice, formSliceF: V.layers, formSliceA: V.sliceTilt + w(0.11, 0.7) * 0.5, formSliceP: this.sliceT, formRings: V.rings, formRingT: this.ring,
-      formHoles: V.holes, formBumps: V.bumps, formBlocks: V.blocks > 0.004 ? 0.012 + V.blocks * 0.09 : 0, formSwell: swell,
-      formBaked: BAKED[A] || BAKED[B] ? 1 : 0,
-      ...this.drawn(),
+      formHoles: V.holes, formBumps: V.bumps, formBlocks: V.blocks > 0.02 ? 0.012 + V.blocks * 0.09 : 0, formSwell: swell,
+      formBaked: BAKED[A] || BAKED[B] ? 1 : 0, formThrow: V.throw,
+      ...this.drawn(V),
       formNeg: V.neg, formFill: V.fill, formFine: V.fine, formContour: V.contour, formStripeA: V.stripeTilt, formStripeF: V.stripes, formStripeW: V.stripeInk, formAura: V.aura + bass * V.aura, formAuraT: this.aura,
     });
   }

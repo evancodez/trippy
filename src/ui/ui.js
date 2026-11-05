@@ -452,7 +452,7 @@ export function createUI(app) {
           h('button', { class: 'btn', html: `${icon('dice')}<span>Shift it for me</span>`, 'data-tip': 'X', onclick: () => app.surpriseForm() }),
           h('button', { class: 'btn', html: `${icon('reset')}<span>Put it back</span>`, 'data-tip': 'Z', onclick: () => app.resetForm() })),
         chips(SKINS, id => skinNow(F.shift) === id, id => { Object.assign(F.shift, SKIN_SET[id]); renderBody(); }, 'small'),
-      ] : h('p', { class: 'lead' }, 'Pick one and it comes up through the sheet under your cursor. Hold the mouse and it reacts. Pick another and the first melts into it.'),
+      ] : h('p', { class: 'lead' }, 'Pick a shape and it comes up through the sheet under your cursor, wearing whatever pattern is showing. Hold the mouse and it reacts. Pick another and the first melts into it.'),
       h('div', { class: 'fig-grid' }, FORMS.map(figCard)),
       F.on ? [
         addSlider('figures', 'size', 'Size', 0.3, 3),

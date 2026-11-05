@@ -1,15 +1,17 @@
-// Forms: solids that come up through the sheet under your cursor, the way the hand does. What makes the hand
-// work is that it's a real solid: its outline cuts hard against the pattern behind it, and the pattern runs
-// straight across it. So every form here is the same kind of thing, and every one can be shifted live: folded
-// round into a wheel, grown into smaller copies of itself, twisted, sliced into plates, eaten into a lattice.
+// Forms: shapes that come up through the sheet under your cursor, the way the hand does. A form is only a shape:
+// what you see on it is whatever pattern is showing, thrown across its surface and bent by it, so it looks
+// different on every pattern. Its outline cuts hard against what's behind it. And every one can be shifted live:
+// folded round into a wheel, grown into smaller copies of itself, twisted, sliced into plates, eaten into a lattice.
 //
 //   base    which solid (BASES); one that's baked comes from assets/solids/
 //   shift   what's done to it, on top of the settings in SHIFT_DEFAULTS
 export const BASES = ['hand', 'face', 'coral', 'rope', 'knot', 'bloom', 'star', 'egg'];
 export const BAKED = { face: 'face' };
 
-// how big each comes up for the same size setting, and how far it reaches from its middle in the hand's units
-// (rays further off than that never read it)
+// how big each comes up for the same size setting, how far it reaches from its middle in the hand's units (rays
+// further off than that never read it), and how far its surface bends the pattern (thin parts less, or the
+// pattern gets squeezed to gray)
+export const BASE_WARP = { hand: 0.6, face: 1, coral: 0.3, rope: 0.22, knot: 0.25, bloom: 0.4, star: 0.55, egg: 0.45 };
 export const BASE_SCALE = { hand: 1, face: 0.62, coral: 0.6, rope: 0.72, knot: 0.72, bloom: 0.7, star: 0.62, egg: 0.62 };
 export const BASE_REACH = { hand: 0.56, face: 0.72, coral: 0.82, rope: 0.46, knot: 0.46, bloom: 0.56, star: 0.56, egg: 0.5 };
 
@@ -21,8 +23,8 @@ export const SHIFT_DEFAULTS = {
   slice: 0, layers: 11, sliceTilt: 0.5,            // cut into plates
   rings: 0,                                        // cut into shells inside each other
   holes: 0, bumps: 0, blocks: 0, swell: 0,
-  rise: 0, turn: 0, lean: 0, melt: 0.5,            // how it sits
-  neg: 0, fill: 0, fine: 1, contour: 0, stripes: 130, stripeTilt: 0.9, stripeInk: 0, aura: 0,   // how it's drawn
+  rise: 0, turn: 0, lean: 0, melt: 0.3,            // how it sits
+  warp: 1, throw: 1, shade: 0.75, neg: 0, fill: 0, fine: 1, contour: 0, stripes: 130, stripeTilt: 0.9, stripeInk: 0, aura: 0,   // how it's drawn
 };
 
 // the controls for all that: [key, label, min, max, step], grouped. The Shift tool can put any of them on your mouse.
@@ -31,7 +33,8 @@ export const SHIFT_GROUPS = [
   ['Bend it', [['twist', 'Twist', -8, 8, 0.01], ['bend', 'Bend', -3.5, 3.5, 0.01], ['wave', 'Sway', 0, 2, 0.01], ['swell', 'Thin ↔ fat', -0.05, 0.1, 0.001]]],
   ['Cut it', [['slice', 'Plates', 0, 1, 0.01], ['layers', 'How many plates', 4, 40, 0.5], ['sliceTilt', 'Which way they’re cut', -1.57, 1.57, 0.01], ['rings', 'Shells inside shells', 0, 1, 0.01], ['holes', 'Eaten through', 0, 1, 0.01], ['blocks', 'Made of cubes', 0, 1, 0.01], ['bumps', 'Bumps', 0, 1, 0.01]]],
   ['How it sits', [['rise', 'Sunk ↔ out of the sheet', -0.7, 0.9, 0.01], ['turn', 'Turn it', -3.14, 3.14, 0.01], ['lean', 'Lean it', -1.4, 1.4, 0.01], ['melt', 'Cut out ↔ melted in', 0, 1, 0.01]]],
-  ['How it’s drawn', [['neg', 'Its pattern’s negative', 0, 1, 0.01], ['fill', 'White ↔ black outline', -1, 1, 0.01], ['contour', 'Its own stripes', 0, 1, 0.01], ['stripes', 'How many stripes', 15, 320, 1], ['stripeTilt', 'Which way they run', -1.57, 1.57, 0.01], ['stripeInk', 'Stripes: pale ↔ dark', -1, 1, 0.01], ['fine', 'Its pattern: finer ↔ bigger', 0.3, 3, 0.01], ['aura', 'Its outline ripples out', 0, 2, 0.01]]],
+  ['How the pattern lies on it', [['warp', 'How far the shape bends the pattern', 0, 3, 0.01], ['throw', 'How far it’s thrown across', 0, 4, 0.01], ['fine', 'The pattern on it: bigger ↔ finer', 0.3, 3, 0.01], ['shade', 'Flat ↔ shadowed', 0, 1, 0.01], ['aura', 'Its outline ripples out', 0, 2, 0.01]]],
+  ['Instead of the pattern', [['neg', 'The pattern’s negative', 0, 1, 0.01], ['fill', 'White ↔ black', -1, 1, 0.01], ['contour', 'Its own stripes', 0, 1, 0.01], ['stripes', 'How many stripes', 15, 320, 1], ['stripeTilt', 'Which way they run', -1.57, 1.57, 0.01], ['stripeInk', 'Stripes: pale ↔ dark', -1, 1, 0.01]]],
 ];
 export const SHIFT_CONTROLS = Object.fromEntries(SHIFT_GROUPS.flatMap(([, c]) => c.map(x => [x[0], x])));
 // the Shift tool's first settings: left-right, then up-down
@@ -54,31 +57,30 @@ export function surpriseShift(base, rand = Math.random) {
   ];
   const n = 1 + Math.floor(rand() * 2.4), used = new Set();
   for (let i = 0; i < n; i++) { let m; do m = pick(moves); while (used.has(m)); used.add(m); m(); }
-  // mostly in its own stripes, since they show off a shape best
+  // nearly always the pattern itself, bent one way or another
+  S.warp = r(0.6, 2.2); S.throw = r(0.5, 2.5);
+  if (rand() < 0.3) S.fine = r(1.3, 2.4);
   const skin = rand();
-  if (skin < 0.15) S.neg = 1;
-  else if (skin < 0.25) S.fill = pick([-1, 1]);
-  else { S.contour = 1; S.stripes = r(150, 260); S.stripeInk = rand() < 0.3 ? r(0.4, 0.85) : 0; S.stripeTilt = r(-1.2, 1.2); }
+  if (skin < 0.1) S.neg = 1;
+  else if (skin < 0.15) S.fill = pick([-1, 1]);
   if (rand() < 0.3) S.aura = r(0.5, 1.4);
   if (rand() < 0.35) S.lean = r(-0.6, 0.6);
   return { ...SHIFT_DEFAULTS, ...S };
 }
 
-const ZEBRA = { contour: 1 };
 export const FORMS = [
-  { id: 'hand', name: 'Hand', base: 'hand', blurb: 'your cursor is the wrist. Hold: it makes a fist' },
-  { id: 'zebra', name: 'Striped Hand', base: 'hand', shift: { ...ZEBRA, stripes: 240, stripeInk: 0.5 }, blurb: 'the same hand in its own stripes, so its outline cuts through anything' },
-  { id: 'face', name: 'The Face', base: 'face', shift: { ...ZEBRA, rise: -0.12, stripes: 200, aura: 0.6 }, blurb: 'on its back, coming up through the sheet. Hold: the mouth opens' },
-  { id: 'wheel', name: 'Hand Wheel', base: 'hand', shift: { ...ZEBRA, fold: 6, spread: 0.16, stripes: 200, stripeInk: 0.3 }, blurb: 'one hand folded round itself. Hold: every fist at once' },
-  { id: 'handtree', name: 'Hand Tree', base: 'hand', shift: { ...ZEBRA, echo: 2, echoTurn: 0.9, echoSize: 0.72, stripes: 240, stripeInk: 0.4 }, blurb: 'each hand grows two smaller hands' },
-  { id: 'masks', name: 'Ring of Faces', base: 'face', shift: { ...ZEBRA, fold: 5, spread: 0.36, stripes: 200 }, blurb: 'the same face, looking every way' },
-  { id: 'plates', name: 'Cut Face', base: 'face', shift: { ...ZEBRA, rise: -0.12, stripes: 200, slice: 0.55, layers: 15, sliceTilt: 1.57 }, blurb: 'cut into plates you can see between' },
-  { id: 'coral', name: 'Coral', base: 'coral', shift: { ...ZEBRA, stripes: 220, stripeInk: 0.85 }, blurb: 'each branch splits in two, six times over. Hold: it closes up' },
-  { id: 'rope', name: 'Rope', base: 'rope', shift: { ...ZEBRA, stripes: 200 }, blurb: 'a rope made of ropes, always twisting. Hold: it loosens' },
-  { id: 'knot', name: 'Knot', base: 'knot', shift: { ...ZEBRA, stripes: 200 }, blurb: 'the same rope, tied. Hold: it loosens' },
-  { id: 'bloom', name: 'Bloom', base: 'bloom', shift: { ...ZEBRA, stripes: 170 }, blurb: 'petals in layers. Hold: it shuts' },
-  { id: 'star', name: 'Star', base: 'star', shift: { ...ZEBRA, stripes: 200 }, blurb: 'twelve points, sharp facets. Hold: the points grow' },
-  { id: 'sponge', name: 'Sponge', base: 'egg', shift: { ...ZEBRA, holes: 0.7, stripes: 170 }, blurb: 'a ball eaten through, the pattern showing in the holes' },
+  { id: 'hand', name: 'Hand', base: 'hand', shift: { melt: 0.57 }, blurb: 'your cursor is the wrist. Hold: it makes a fist' },
+  { id: 'face', name: 'The Face', base: 'face', shift: { rise: -0.12, aura: 0.5 }, blurb: 'on its back, coming up through the sheet. Hold: the mouth opens' },
+  { id: 'wheel', name: 'Hand Wheel', base: 'hand', shift: { fold: 6, spread: 0.16, melt: 0.57 }, blurb: 'one hand folded round itself. Hold: every fist at once' },
+  { id: 'handtree', name: 'Hand Tree', base: 'hand', shift: { echo: 2, echoTurn: 0.9, echoSize: 0.72, melt: 0.57 }, blurb: 'each hand grows two smaller hands' },
+  { id: 'masks', name: 'Ring of Faces', base: 'face', shift: { fold: 5, spread: 0.36 }, blurb: 'the same face, looking every way' },
+  { id: 'plates', name: 'Cut Face', base: 'face', shift: { rise: -0.12, slice: 0.55, layers: 15, sliceTilt: 1.57 }, blurb: 'cut into plates you can see between' },
+  { id: 'coral', name: 'Coral', base: 'coral', blurb: 'each branch splits in two, six times over. Hold: it closes up' },
+  { id: 'rope', name: 'Rope', base: 'rope', blurb: 'a rope made of ropes, always twisting. Hold: it loosens' },
+  { id: 'knot', name: 'Knot', base: 'knot', blurb: 'the same rope, tied. Hold: it loosens' },
+  { id: 'bloom', name: 'Bloom', base: 'bloom', blurb: 'petals in layers. Hold: it shuts' },
+  { id: 'star', name: 'Star', base: 'star', blurb: 'twelve points, sharp facets. Hold: the points grow' },
+  { id: 'sponge', name: 'Sponge', base: 'egg', shift: { holes: 0.7 }, blurb: 'a ball eaten through, the pattern showing in the holes' },
 ];
 export const FORM_INDEX = Object.fromEntries(FORMS.map((f, i) => [f.id, i]));
 

@@ -90,7 +90,7 @@ export function buildScore(songId, an, opts) {
       }
       // now and then, when it's big and it's a place: not one figure but a whole sea of them
       let crowd = false;
-      if (figure && world && (k === 'peak' || k === 'swell') && kindCam === 'open' && r() < 0.3) { figure = pick(['zebra', 'star', 'coral']); crowd = true; }
+      if (figure && world && (k === 'peak' || k === 'swell') && kindCam === 'open' && r() < 0.3) { figure = pick(['hand', 'star', 'coral']); crowd = true; }
       // most of a scene is the morph into it: a slow change that fills the time, quicker when a big section lands
       const length = t1 - t0, landing = i === 0 && (k === 'peak' || k === 'pulse');
       const glide = landing ? Math.min(6, length * 0.5) : Math.max(4, Math.min(16, length * (k === 'hush' ? 0.85 : 0.72)));

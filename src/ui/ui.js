@@ -7,7 +7,7 @@ import { LOOKS, GROUPS, PALETTES, look } from '../engine/looks.js';
 import { PARAMS, PARAM_BY_NAME } from '../engine/params.js';
 import { KNOBS, feelMoved } from '../engine/feel.js';
 import { ADDS } from '../adds.js';
-import { FIGURES, FIGURE_GROUPS } from '../engine/figures.js';
+import { FORMS, SHIFT_GROUPS, SHIFT_CONTROLS } from '../engine/forms.js';
 import { FONTS } from '../media.js';
 
 export const TOOLS = [
@@ -16,7 +16,9 @@ export const TOOLS = [
   { id: 'bulge', icon: 'bulge', name: 'Bulge', tip: 'Bulge: hold to puff it up' },
   { id: 'pinch', icon: 'pinch', name: 'Pinch', tip: 'Pinch: hold to suck it in' },
   { id: 'smear', icon: 'smear', name: 'Smear', tip: 'Smear: drag like wet paint' },
-  { id: 'figure', icon: 'hand', name: 'Figure', tip: 'Your cursor has the hand or figure: hold the mouse and it reacts (6)' },
+  { id: 'figure', icon: 'hand', name: 'Figure', tip: 'Your cursor has the figure: hold and it reacts, scroll to size it' },
+  { id: 'shift', icon: 'shift', name: 'Shift', tip: 'Shift the figure: drag sideways and up and down. Click again to choose what each does' },
+  { id: 'turn', icon: 'turn', name: 'Turn', tip: 'Turn the figure: drag sideways to spin it, up and down to lean it' },
   { id: 'camera', icon: 'orbit', name: 'Camera', tip: 'Camera: drag to turn and tilt, scroll to zoom (right-drag works with any tool)' },
 ];
 
@@ -30,6 +32,13 @@ const LABELS = {
 };
 const flipped = new Set(['thick']);               // shown so that right = more ink
 const labelOf = key => LABELS[key] || PARAM_BY_NAME[key]?.label || key;
+const SKINS = [['pattern', 'The pattern'], ['stripes', 'Stripes'], ['dark', 'Dark stripes'], ['neg', 'Negative'], ['black', 'Black'], ['white', 'White']];
+const SKIN_OFF = { contour: 0, stripeInk: 0, neg: 0, fill: 0 };
+const SKIN_SET = {
+  pattern: SKIN_OFF, stripes: { ...SKIN_OFF, contour: 1 }, dark: { ...SKIN_OFF, contour: 1, stripeInk: 0.8 },
+  neg: { ...SKIN_OFF, neg: 1 }, black: { ...SKIN_OFF, fill: 1 }, white: { ...SKIN_OFF, fill: -1 },
+};
+const skinNow = S => (S.fill > 0.5 ? 'black' : S.fill < -0.5 ? 'white' : S.neg > 0.5 ? 'neg' : S.contour > 0.5 ? (S.stripeInk > 0.65 ? 'dark' : 'stripes') : 'pattern');
 const fmtTime = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const KEYS = ['C', 'C♯', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'A♭', 'A', 'B♭', 'B'];
 
@@ -63,7 +72,7 @@ export function createUI(app) {
   // the name of what's on screen: it shows for a moment when it changes, even with everything else away
   function renderName() {
     const L = LOOKS[app.lookId]?.name || '', F = app.adds.figures;
-    const fig = F.on ? FIGURES.find(f => f.id === F.pick)?.name : '';
+    const fig = F.on ? FORMS.find(f => f.id === F.pick)?.name : '';
     const text = fig ? `${L} · ${fig}` : L;
     if (text !== nameEl.textContent) {
       nameEl.textContent = text;
@@ -166,7 +175,15 @@ export function createUI(app) {
     if (toolPop.parentNode) { toolPop.remove(); return; }
     const b = app.brush;
     const mini = (label, key, min, max) => slider(label, { min, max, get: () => b[key], set: v => { b[key] = v; app.updateRing(); } });
-    toolPop.replaceChildren(
+    if (app.tool === 'shift') {
+      const options = Object.values(SHIFT_CONTROLS).map(c => h('option', { value: c[0] }, c[1]));
+      const pickAxis = (label, i) => {
+        const sel = h('select', { onchange: e => { app.shiftAxes[i] = e.target.value; } }, options.map(o => o.cloneNode(true)));
+        sel.value = app.shiftAxes[i];
+        return h('label', { class: 'axis-pick' }, h('span', {}, label), sel);
+      };
+      toolPop.replaceChildren(pickAxis('Sideways', 0), pickAxis('Up and down', 1));
+    } else toolPop.replaceChildren(
       mini('Size', 'size', 0.04, 0.5), mini('Strength', 'strength', 0.05, 1.5),
       ['twist', 'bulge', 'pinch', 'smear'].includes(app.tool) ? mini('Springs back', 'spring', 0, 1) : null,
       toggle('Ring around the cursor', () => app.perf.ring, v => app.setRing(v)),
@@ -185,7 +202,7 @@ export function createUI(app) {
       h('span', { class: 'sep' }),
       h('div', { class: 'tools' }, TOOLS.map((t, i) => h('button', {
         class: `tool${app.tool === t.id ? ' on' : ''}`, 'data-tip': `${t.tip} (${i + 1})`, 'aria-label': t.name,
-        onclick: e => { if (app.tool === t.id && t.id !== 'figure' && t.id !== 'camera') toggleToolPop(e.currentTarget); else { toolPop.remove(); app.setTool(t.id); } }, html: icon(t.icon),
+        onclick: e => { if (app.tool === t.id && t.id !== 'figure' && t.id !== 'camera' && t.id !== 'turn') toggleToolPop(e.currentTarget); else { toolPop.remove(); app.setTool(t.id); } }, html: icon(t.icon),
       }))),
       h('span', { class: 'sep' }),
       h('button', {
@@ -342,7 +359,7 @@ export function createUI(app) {
     const A = app.adds.figures, on = A.on && A.pick === f.id;
     return h('button', {
       class: `fig-card${on ? ' on' : ''}`, title: f.blurb, onclick: () => { if (on) app.setAdd('figures', false); else app.pickFigure(f.id); },
-    }, h('img', { src: `assets/figures/${f.id}.png`, alt: '' }), h('span', {}, f.name));
+    }, h('img', { src: `assets/figures/${f.id}.png`, alt: '', onerror: e => { e.target.style.visibility = 'hidden'; } }), h('span', {}, f.name));
   }
   const addSlider = (id, key, label, min, max, opts = {}) =>
     slider(label, { min, max, step: opts.step || 0.01, fmt: opts.fmt, get: () => app.adds[id][key], set: x => app.setAddOption(id, key, x) });
@@ -430,16 +447,21 @@ export function createUI(app) {
       h('span', { class: 'add-icon', html: icon(a.icon) }), h('div', { class: 'add-title' }, h('b', {}, a.name), h('small', {}, a.blurb)),
       toggle('', () => A[a.id].on, on => app.setAdd(a.id, on)));
     return [
-      F.on ? h('div', { class: 'fig-controls' },
-        addSlider('figures', 'size', 'Size', 0.4, 2.5),
-        addSlider('figures', 'depth', 'How far it stands up', 0.3, 1.7),
-        addSlider('figures', 'burst', 'Under the sheet ↔ through it', 0, 0.8),
+      F.on ? [
+        h('div', { class: 'run-actions' },
+          h('button', { class: 'btn', html: `${icon('dice')}<span>Shift it for me</span>`, 'data-tip': 'X', onclick: () => app.surpriseForm() }),
+          h('button', { class: 'btn', html: `${icon('reset')}<span>Put it back</span>`, 'data-tip': 'Z', onclick: () => app.resetForm() })),
+        chips(SKINS, id => skinNow(F.shift) === id, id => { Object.assign(F.shift, SKIN_SET[id]); renderBody(); }, 'small'),
+      ] : h('p', { class: 'lead' }, 'Pick one and it comes up through the sheet under your cursor. Hold the mouse and it reacts. Pick another and the first melts into it.'),
+      h('div', { class: 'fig-grid' }, FORMS.map(figCard)),
+      F.on ? [
+        addSlider('figures', 'size', 'Size', 0.3, 3),
+        addSlider('figures', 'drift', 'Keeps changing by itself', 0, 1.5),
+        addSlider('figures', 'music', 'The song moves it', 0, 1.5),
         toggle('It follows my mouse', () => F.follow, x => { app.setAddOption('figures', 'follow', x); if (x) app.setTool('figure'); }),
-        toggle('A crowd of them', () => F.repeat, x => app.setAddOption('figures', 'repeat', x)),
-      ) : h('p', { class: 'lead' }, 'Pick one and it presses up through the sheet under your cursor, the pattern pulled tight over it. Hold the mouse and it tears through. Pick another and the first melts into it.'),
-      FIGURE_GROUPS.map(g => h('div', { class: 'group' },
-        h('div', { class: 'group-head' }, h('b', {}, g)),
-        h('div', { class: 'fig-grid' }, FIGURES.filter(f => f.group === g).map(figCard)))),
+        SHIFT_GROUPS.map(([title, controls], i) => fold(`shift-${i}`, title, null,
+          controls.map(([key, label, min, max, step]) => slider(label, { min, max, step, get: () => F.shift[key], set: x => { F.shift[key] = x; } })))),
+      ] : null,
       fold('more-things', 'Other things to add', null,
         ADDS.filter(a => a.id !== 'figures').map(a => h('div', { class: `add-card${A[a.id].on ? ' on' : ''}` }, addHead(a),
           A[a.id].on ? h('div', { class: 'add-body' }, others[a.id]()) : (a.id === 'camera' || a.id === 'picture') ? h('div', { class: 'add-body' }, others[a.id]()) : null))),
@@ -662,6 +684,7 @@ export function createUI(app) {
     soundChanged() { renderTransport(); if (tab === 'sound') renderBody(); },
     listenProgress() { const el = document.getElementById('listenStatus'); if (el) el.textContent = `Listening… ${Math.round(app.film.listening * 100)}%`; },
     addsChanged() { renderName(); renderDock(); if (tab === 'figures') renderBody(); },
+    syncFigures() { if (tab === 'figures') body.querySelectorAll('.slider').forEach(s => s.sync?.()); },
     cinemaChanged() { renderDock(); if (tab === 'tweak') renderBody(); },
     viewChanged() { if (tab === 'tweak') viewRows.forEach(r => r.isConnected && r.sync()); },
   };

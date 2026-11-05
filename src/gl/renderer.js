@@ -77,23 +77,28 @@ export class Renderer {
     return P;
   }
 
-  // a figure's relief, as textures: height, pull x, pull y, shade; and up to four blend shapes
-  reliefTextures(rel) {
-    const gl = this.gl, N = rel.N, P = rel.planes;
-    const tex = (a, b, c, d) => {
-      const data = new Float32Array(N * N * 4);
-      for (let i = 0; i < N * N; i++) { data[i * 4] = a ? a[i] : 0; data[i * 4 + 1] = b ? b[i] : 0; data[i * 4 + 2] = c ? c[i] : 0; data[i * 4 + 3] = d ? d[i] : 0; }
-      const t = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, t);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, N, N, 0, gl.RGBA, gl.FLOAT, data);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      gl.bindTexture(gl.TEXTURE_2D, null);
-      return t;
-    };
-    return { base: tex(P[0], P[1], P[2], P[3]), shapes: P.length > 4 ? tex(P[4], P[5], P[6], P[7]) : null };
+  // nothing baked is up: far from everything
+  noSolid() {
+    if (this._noSolid) return this._noSolid;
+    const gl = this.gl, t = this._noSolid = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_3D, t);
+    gl.texImage3D(gl.TEXTURE_3D, 0, gl.RG16F, 1, 1, 1, 0, gl.RG, gl.FLOAT, new Float32Array([1, 0]));
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.bindTexture(gl.TEXTURE_3D, null);
+    return t;
+  }
+
+  // a baked solid, as a 3D texture
+  solidTexture(sol) {
+    const gl = this.gl, { nx, n } = sol.meta, t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_3D, t);
+    gl.texImage3D(gl.TEXTURE_3D, 0, gl.RG16F, nx, n, n, 0, gl.RG, gl.FLOAT, sol.data);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    for (const w of [gl.TEXTURE_WRAP_S, gl.TEXTURE_WRAP_T, gl.TEXTURE_WRAP_R]) gl.texParameteri(gl.TEXTURE_3D, w, gl.CLAMP_TO_EDGE);
+    gl.bindTexture(gl.TEXTURE_3D, null);
+    return { tex: t, box: sol.meta.box };
   }
 
   makeTexture(w, h, float, mip = false) {
@@ -308,11 +313,11 @@ export class Renderer {
     gl.uniform3f(u('gRight'), F[0], F[1], F[2]);
     gl.uniform3f(u('gUp'), F[3], F[4], F[5]);
     gl.uniform3f(u('gBack'), F[6], F[7], F[8]);
-    bind(6, rt.reliefA?.base || this.zeroTex, 'uRelief');
-    bind(7, rt.reliefB?.base || this.zeroTex, 'uReliefB');
-    bind(8, rt.reliefA?.shapes || this.zeroTex, 'uReliefX');
+    gl.activeTexture(gl.TEXTURE6);
+    gl.bindTexture(gl.TEXTURE_3D, rt.solid?.tex || this.noSolid());
+    gl.uniform1i(u('uSolid'), 6);
+    gl.uniform1f(u('uSolidBox'), rt.solid?.box || 1);
     gl.activeTexture(gl.TEXTURE0);
-    gl.uniform4fv(u('uFigW'), rt.figW || NONE.subarray(0, 4));
     gl.uniform2fv(u('uSw'), rt.sw);
     gl.uniform1f(u('uMorph'), rt.morph ?? 1);
     gl.uniform1fv(u('uCrys'), rt.crys || NONE.subarray(0, 7));

@@ -8,7 +8,7 @@ import { mulberry32 } from './engine/world.js';
 export const defaultOptions = () => ({
   auto: true,
   color: 'bw',          // 'bw' · 'accent' (one color runs through it) · 'full'
-  figures: 'some',      // 'none' · 'some' · 'lots'
+  figures: 'none',      // 'none' · 'some' · 'lots': a song is the pattern's, unless you ask
   worlds: true,         // 3D looks as well as flat ones
   pace: 'normal',       // 'slow' · 'normal' · 'fast'
   mood: 'flow',         // what the picture follows: 'flow' (the tune) · 'even' · 'hit' (the drums)
@@ -25,11 +25,11 @@ const POOLS = {
 };
 // and the figures that suit it
 const CAST = {
-  hush: ['sleeper', 'eye', 'veil', 'ammonite', 'lovers'],
-  flow: ['sleeper', 'manta', 'lovers', 'kraken', 'hand', 'moth', 'ammonite'],
-  swell: ['cry', 'ribs', 'kraken', 'heart', 'veil'],
-  pulse: ['heart', 'skull', 'kraken', 'ribs', 'moth'],
-  peak: ['skull', 'cry', 'heart', 'kraken'],
+  hush: ['face', 'hand', 'bloom'],
+  flow: ['hand', 'rope', 'knot', 'face', 'wheel'],
+  swell: ['coral', 'bloom', 'masks', 'handtree', 'sponge'],
+  pulse: ['star', 'wheel', 'plates', 'knot'],
+  peak: ['star', 'handtree', 'masks', 'coral'],
 };
 const ACCENTS = ['#d80146', '#ff5a1f', '#2d5bff', '#c9f73a', '#e8c547', '#19c3b2', '#ff4fa3'];
 const FULL = PALETTES.filter(p => !['Black & white', 'White on black'].includes(p.name));
@@ -77,7 +77,7 @@ export function buildScore(songId, an, opts) {
       const palette = i === 0 || r() < 0.5 ? paletteFor(opts, r, accent, k) : scenes[scenes.length - 1].palette;
       // a figure?
       let figure = null, home = null;
-      const chance = { none: 0, some: 0.6, lots: 0.9 }[opts.figures] ?? 0.6;
+      const chance = { none: 0, some: 0.5, lots: 0.9 }[opts.figures] ?? 0;
       const kindCam = camKind(lookId);
       if (kindCam !== 'fly' && kindCam !== 'object' && r() < chance) {
         const cast = (CAST[k] || CAST.flow).filter(id => !recentFig.includes(id));
@@ -90,7 +90,7 @@ export function buildScore(songId, an, opts) {
       }
       // now and then, when it's big and it's a place: not one figure but a whole sea of them
       let crowd = false;
-      if (figure && world && (k === 'peak' || k === 'swell') && kindCam === 'open' && r() < 0.3) { figure = pick(['sleeper', 'skull', 'heart', 'moth']); crowd = true; }
+      if (figure && world && (k === 'peak' || k === 'swell') && kindCam === 'open' && r() < 0.3) { figure = pick(['zebra', 'star', 'coral']); crowd = true; }
       // most of a scene is the morph into it: a slow change that fills the time, quicker when a big section lands
       const length = t1 - t0, landing = i === 0 && (k === 'peak' || k === 'pulse');
       const glide = landing ? Math.min(6, length * 0.5) : Math.max(4, Math.min(16, length * (k === 'hush' ? 0.85 : 0.72)));

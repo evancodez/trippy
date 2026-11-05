@@ -1,6 +1,6 @@
 # trippi
 
-Op-art patterns you can warp, press figures up through, and play music into. Give it a song: it listens to the whole thing and directs it.
+Op-art patterns you can warp, raise figures through, and play music into. Give it a song: it listens to the whole thing and directs it.
 
 No build step and no dependencies: plain HTML, ES modules and WebGL2.
 
@@ -11,8 +11,9 @@ Everything fades away when you stop moving the mouse. At the bottom:
 - **Patterns** (`P`): every look. Click one and the whole equation glides there.
   - **Solid**: flat, hard-edged black and white. Triangle Vortex, Endless Triangles (conformal: tiles keep their shape as they fall in for ever), Two Poles, Twin Whirlpools, Circle Limit (a real hyperbolic tiling, after Escher), Tumbling Blocks, Truchet, Blaze (after Riley), Stargate, Op Stripes, Squeeze, Vasarely…
   - **Strange**: patterns out of mathematics and sound. Cymatics and Chladni Sand (the note decides the figure), Crystal (families of straight lines, each sliding to its own part of the sound), Ink (real marbling: every kick and sung note drops ink on the water and pushes everything aside), Metamorphosis (squares melting into interlocking creatures), Planets, Khatam and Rosette (star lattices the tune sharpens), Lace, Julia (a fractal walking with the tune), Quasicrystal, Agate, Ripple Tank, Living Labyrinth (reaction-diffusion: it grows by itself)…
-  - **Worlds**: the pattern as a place. Triangle Floor, Checker Hills, Line Landscape, Silk, Origami, Pulsar (the sound rolling away through thin lines), Pin Art (a bed of pins, pushed up by the sound and by figures), Hallway, Menger Sponge…
-- **Figures** (`G`): things lying under the sheet, pressing up through it with the pattern pulled tight over them. The lines crowd up the slopes and thicken into the hollows, so a face comes out of any pattern, its eyes sunk. As the song builds, and whenever you hold the mouse, the highest parts tear through and show as solid woodcut. Pick another and the first melts into it. Move the camera and you see it from another side.
+  - **Worlds**: the pattern as a place. Triangle Floor, Checker Hills, Line Landscape, Silk, Origami, Pulsar (the sound rolling away through thin lines), Pin Art (a bed of pins, pushed up by the sound), Hallway, Menger Sponge…
+- **Figures** (`G`): solids that come up through the sheet under your cursor, cut hard against the pattern behind them. The Hand and The Face (it lies straight when you look down on it, and across the view when you look along the ground, so its outline is its profile), and things grown and cut: Coral, Rope, Knot, Bloom, Star, Sponge. Each can wear the pattern, its own stripes, the pattern's negative, or plain black or white. Hold the mouse and it reacts. Pick another and the first melts into it. Move the camera and you see it from another side.
+- **Shifting a figure**: fold it round into a wheel, grow smaller copies out of it, cover the sheet with a field of them, twist and bend it, cut it into plates or shells, eat holes through it, build it out of cubes, send its outline rippling across the sheet. The **Shift** tool puts any two of those on your mouse (click it again to choose which); **Turn** spins and leans it; scroll sizes it; `[` and `]` fold it; `X` shifts it at random, `Z` puts it back. A song leaves figures out unless you ask for them in Sound.
   - *People*: the Hand (your cursor is its wrist; hold for a fist), The Sleeper (lips moving with the tune), The Cry, Skull (it sings; hold and the jaw drops), The Lovers, The Veil (someone laid out, chest rising).
   - *Inside*: The Heart (beats on the kick), Ribs (breathing the song in).
   - *Creatures*: Kraken (arms never quite still), Manta (swims after your cursor and circles when you stop), Moth (wings shivering on the high notes).
@@ -20,13 +21,13 @@ Everything fades away when you stop moving the mouse. At the bottom:
   - **Under the sheet ↔ through it** sets how far it has come through at rest. **A crowd of them** repeats it across the sheet.
   - *Other things to add* (in the same panel): a pair of hands, a ghost face, the chrome ball, orbs, you (the camera), a picture or words.
 - **Sound** (`M`): pick a song (or drop one anywhere). It's listened to once and remembered; nothing is uploaded.
-  - **Direct it for me** keeps the picture travelling with the song: a new scene every eight bars or so, each a slow morph out of the last that peaks on the beat where it lands, and a camera that never stops, turning, tilting from straight down to the horizon and back. Choose the **color** (B&W, one color, full), how many **figures**, **flat or 3D**, the **pace**, or **another take**.
+  - **Direct it for me** keeps the picture travelling with the song: a new scene every eight bars or so, each a slow morph out of the last that peaks on the beat where it lands, and a camera that never stops, turning, tilting from straight down to the horizon and back. Choose the **color** (B&W, one color, full), **figures** (none by default), **flat or 3D**, the **pace**, or **another take**.
   - **It follows**: *Flow* rides the tune (slides, swells, sway) and the drums barely touch it. *Even* mixes them. *Hit* lets the drums lead.
   - **Play live**: a guitar through an interface, or any mic. It tracks the note as you play.
   - The bar above the dock is the song's map: its loudness with the tune's line through it. Click to go there.
 - **Tweak** (`T`): colors, this look's sliders, motion and camera; the rest folded away. Any slider can follow the music (its ∿ button), now including the melody, slides and sustain.
 
-**Tools**, right of those: Ripple, Twist, Bulge, Pinch, Smear, Figure, Camera (`1`–`7`). Click the current one for its size and strength. Right-drag turns the camera with any tool; scroll zooms; double-click puts it back. The film icon (`C`) is the cinematic camera.
+**Tools**, right of those: Ripple, Twist, Bulge, Pinch, Smear, Figure, Shift, Turn, Camera (`1`–`9`). Click the current one for its settings. Right-drag turns the camera with any tool; scroll zooms (with a figure's tools, it sizes the figure); double-click puts it back. The film icon (`C`) is the cinematic camera.
 
 **Top right**: Surprise (`D`), and behind `···`: Breed this look (`E`), pause, picture, record (with the song), link, fullscreen, hide everything (`H`), and three switches: the ring around the cursor, wandering (left alone for a while with no song, the camera sets off and the looks turn slowly into each other), and 60 fps.
 
@@ -52,7 +53,7 @@ Import the GitHub repo in Vercel and keep the defaults: Framework Preset **Other
 
 - **One ray-marched world** (`src/engine/shader.js`): a sheet with a height field, and things joined to it with soft unions so the pattern pours over them. Flat looks are the same world seen straight on.
 - **One equation painted on every surface**: lines, rings, tunnels, spirals, checkers and triangles are weighted terms of one formula, with warps on top (twist, vortex, conformal maps, a floor and ceiling). Patterns that aren't lines (hyperbolic tiles, Truchet, cymatics, Julia, quasicrystal, reaction-diffusion) each give a value that crosses zero at its edges, so one threshold draws them all and they crossfade.
-- **A figure** (`src/engine/figures.js`, `tools/`) is sculpted as a solid out of soft shapes, lying under the sheet, then draped once in the workshop: a stretched skin vacuum-formed over it (an obstacle problem, solved on a pyramid of grids), and a Poisson solve for where the pattern on that skin has been drawn in from. What ships is a small file of height, pull, shade and blend shapes (a mouth opening, a chest rising). In the app it's a few texture reads, so every figure costs the same and swapping them needs no new shader. Over the form the pattern is displaced by the pull, bent by the surface, and thickened by the light and the shade; above a height that rides on the song, it's cut as woodblock instead. `node tools/bake.mjs` rebuilds them.
+- **A figure** (`src/engine/forms.js`) is a real solid, a distance function joined softly to the sheet, so its outline cuts against what's behind it. Most are short formulas where space is folded rather than shapes added: Coral is six capsules, each generation mirroring space, and comes out as a whole tree; Star folds space into one wedge of an icosahedron and has one facet. The Face is sculpted in `tools/` and baked into a 3D distance grid, so it's one texture read per step however many shapes went into it. The shifts are the same trick, done live to any of them. Rays that pass nowhere near the figure use a separate loop without it in, since on a GPU code in a loop costs time on every step whether it runs or not. `node tools/bake.mjs` rebuilds the grid.
 - **New patterns open out through the old one**: a pattern that isn't lines takes over from a wandering front spreading from the middle of the view, instead of fading across it, because two patterns half mixed are only blotches.
 - **Ink** (`src/ink.js`) is marbling by the exact formula: each drop is a list entry, and each pixel is traced back through the list, newest first, until it lands inside one.
 - **Listening to a song** (`src/listen.js`, in a worker):
@@ -68,8 +69,8 @@ Import the GitHub repo in Vercel and keep the defaults: Framework Preset **Other
 | File | What's in it |
 | --- | --- |
 | `src/engine/shader.js` | The world, the line equation, the other patterns, color |
-| `src/engine/figures.js` | The figures, what moves each, and how the sheet reads them |
-| `tools/` | The workshop: `sculpts.mjs` (the solids), `relief.mjs` (draping them), `bake.mjs` |
+| `src/engine/forms.js` | The figures, their shifts, and the shader code for all of it |
+| `tools/` | The workshop: `sculpts.mjs` (the solids), `solid.mjs` (baking a distance grid), `bake.mjs` |
 | `src/ink.js` | The marbling, painted by the song |
 | `src/engine/params.js`, `looks.js`, `world.js`, `feel.js` | Every value; the looks and palettes; gliding between them; breeding |
 | `src/engine/camera.js` | The camera on the CPU; a point on the screen → a point on the sheet |
@@ -83,4 +84,4 @@ Import the GitHub repo in Vercel and keep the defaults: Framework Preset **Other
 | `src/ui/ui.js`, `src/ui/kit.js`, `styles.css` | The interface |
 | `src/main.js` | App state, tools, frame loop, songs, recording, links |
 | `assets/figures/` | The gallery's thumbnails |
-| `assets/reliefs/` | The baked figures |
+| `assets/solids/` | The baked solids |

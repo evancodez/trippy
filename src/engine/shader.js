@@ -9,7 +9,7 @@
 //     triangles + moiré + contours, all weighted, so one look re-forms into the next
 // Lighting can thin the ink where it's bright (engraving), so 3D form is drawn with lines alone.
 import { shaderDefines, SHADER_VEC4S, SHADER_SLOTS, SWITCH_KEYS } from './params.js';
-import { FIGURE_GLSL } from './figures.js';
+import { FORM_GLSL } from './forms.js';
 
 const HAND_BASE = SHADER_SLOTS.findIndex(s => s.name === 'h0on');
 
@@ -52,7 +52,6 @@ float gCalm = 1.0;             // 0 inside you when "keep it still inside" is on
 float gAura = 0.0;             // how far the lines are pushed around you
 float gBand = 0.0;             // 0 / 1: which ink this line gets (every other line in the second ink)
 float gBallH = 0.0;            // the sheet's height under the ball (once per pixel)
-bool gFigNear = true;          // does this ray come anywhere near the figure? (once per pixel)
 float gConf = 0.0;             // the conformal warp: on or off (between looks, the two patterns crossfade: a partial warp would show its seam)
 
 mat2 rot(float a) { float c = cos(a), s = sin(a); return mat2(c, s, -s, c); }
@@ -135,7 +134,6 @@ float mediaMaskSoft(vec2 q, float lod) {
   return mix(1.0, textureLod(uMedia, uv, lod).a, MEDIAMASK) * mediaEdge(uv, 0.08);
 }
 
-${FIGURE_GLSL}
 
 // ---------------------------------------------------------------- the membrane's height
 float heightField(vec2 q) {
@@ -189,7 +187,7 @@ float heightField(vec2 q) {
     float rm = length(q - vec2(TX, TY)) / (FRAME * 2.2);
     h += calm * MLAND * 0.1 * FRAME * swellAt(rm);
   }
-  return h * HEIGHT + reliefH(q);
+  return h * HEIGHT;
 }
 
 // ---------------------------------------------------------------- hands, reaching (fingers: pinky → index, then the thumb)
@@ -226,7 +224,7 @@ float handSDF(vec3 p, float curl, float spread, int hb) {
 
 float hands(vec3 p) {
   float d = 1e3;
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < 2; i++) {
     int b = HAND_BASE + i * 8;
     float on = UP(b);
     if (on <= 0.001) continue;
@@ -243,6 +241,7 @@ float hands(vec3 p) {
   return d;
 }
 
+${FORM_GLSL}
 // ---------------------------------------------------------------- orbs, columns
 float orbsSDF(vec3 p) {
   float n = ORBN;
@@ -376,11 +375,8 @@ vec2 ballFlow(vec2 q) {
   return c + rel;
 }
 
-float map(vec3 p) {
+float mapSheet(vec3 p) {
   float he = p.z - heightField(p.xy) + DROP * DROP * 40.0, d = he * uStepK;
-  // the sheet's steeper over a figure: smaller steps on the rays that go near one, but only once they're down
-  // among it; above its highest point, the way is clear
-  if (gFigNear && FIG > 0.001) d = max(d * FIGSTEP, min(he, p.z - FIGTOP * FIGS * FIG - 0.01 * FIGS) * uStepK);
   float sw = GYRO + SPONGE + HALL;
   if (sw > 0.001) {
     float ds = 0.0;
@@ -395,17 +391,26 @@ float map(vec3 p) {
   if (BALL > 0.001) d = smin(d, ballSDF(p), 0.02);
   return smin(d, hands(p), HANDSOFT);
 }
+float mapForm(vec3 p) { return smin(mapSheet(p), formD(p), FORMSOFT); }
 
-vec3 calcNormal(vec3 p, float t) {
+float normalEps(float t) {
   // a picture relief comes in 8-bit steps: look a little wider so the steps don't read as noise
-  float h = (0.0006 * max(1.0, t) + (MEDIA > 0.0 ? 0.006 * MEDIAS : 0.0)) * 1.732;
-  if (FIG > 0.001 && gFigNear) h = max(h, 0.007 * FIGS);        // a relief is sampled from a grid: look across a texel or so
+  return (0.0006 * max(1.0, t) + (MEDIA > 0.0 ? 0.006 * MEDIAS : 0.0)) * 1.732;
+}
+vec3 normalDir(int i) { return 0.5773 * (2.0 * vec3(float(((i + 3) >> 1) & 1), float((i >> 1) & 1), float(i & 1)) - 1.0); }
+vec3 calcNormal(vec3 p, float t) {
+  float h = normalEps(t);
   vec3 n = vec3(0.0);
-  int m = 4 + int(min(uStepK, 0.0));        // a loop the compiler can't unroll: map() is compiled in once here, not four times
-  for (int i = 0; i < m; i++) {
-    vec3 e = 0.5773 * (2.0 * vec3(float(((i + 3) >> 1) & 1), float((i >> 1) & 1), float(i & 1)) - 1.0);
-    n += e * map(p + e * h);
-  }
+  int m = 4 + int(min(uStepK, 0.0));        // a loop the compiler can't unroll: the sheet's compiled in once here, not four times
+  for (int i = 0; i < m; i++) { vec3 e = normalDir(i); n += e * mapSheet(p + e * h); }
+  return normalize(n);
+}
+vec3 calcNormalForm(vec3 p, float t) {
+  float h = normalEps(t);
+  if (FORMBAKED > 0.0) h = max(h, 0.008 * FORMS);               // a baked solid is sampled from a grid: look across a cell or so
+  vec3 n = vec3(0.0);
+  int m = 4 + int(min(uStepK, 0.0));
+  for (int i = 0; i < m; i++) { vec3 e = normalDir(i); n += e * mapForm(p + e * h); }
   return normalize(n);
 }
 
@@ -832,27 +837,57 @@ void main() {
     ro.z = max(ro.z, floorZ);
   }
   if (BALL > 0.001) gBallH = heightField(vec2(BALLX, BALLY));
-  if (FIG > 0.001) gFigNear = figNear(ro, rd);
 
   float t = 0.0, d = 1.0;
   float far = dist * 3.0 + 14.0;
   bool hit = false;
   float tLast = 0.0;
-  for (int i = 0; i < 140; i++) {
-    vec3 p = ro + rd * t;
-    d = map(p);
-    if (d < 0.0005 * t + 0.0003) {
-      hit = true;
-      if (d < -0.002) {                                      // it stepped through: go back and find where
-        float a = tLast, b = t;
-        for (int j = 0; j < 5; j++) { float c = 0.5 * (a + b); if (map(ro + rd * c) < 0.0) b = c; else a = c; }
-        t = b;
-      }
-      break;
+  // Rays that pass nowhere near the form get a loop without it in. Code in a loop costs every step, whether it
+  // runs or not, so this is what keeps the pattern as quick as if nothing were there.
+  bool nearForm = false;
+  if (FORMON > 0.001) {
+    if (FORMFIELD > 0.0) nearForm = true;
+    else {
+      vec3 oc = vec3(FORMX, FORMY, FORMZ) - ro;
+      nearForm = length(oc - rd * max(dot(oc, rd), 0.0)) < (FORMBOUND + 0.15) * FORMS + 1.8 * FORMSOFT;
     }
-    tLast = t;
-    t += d;
-    if (t > far) break;
+  }
+  if (nearForm) {
+    for (int i = 0; i < 140; i++) {
+      d = mapForm(ro + rd * t);
+      if (i == 0 && d < 0.0) { nearForm = false; break; }     // the camera's inside it: look out through it, rather than at a screen of one color
+      if (d < 0.0005 * t + 0.0003) {
+        hit = true;
+        if (d < -0.002) {                                    // it stepped through: go back and find where
+          float a = tLast, b = t;
+          for (int j = 0; j < 5; j++) { float c = 0.5 * (a + b); if (mapForm(ro + rd * c) < 0.0) b = c; else a = c; }
+          t = b;
+        }
+        // right onto the surface: a form's own stripes would show every place the march stopped a little short
+        for (int j = 0; j < 2; j++) t += mapForm(ro + rd * t);
+        break;
+      }
+      tLast = t;
+      t += d;
+      if (t > far) break;
+    }
+  }
+  if (!nearForm) {
+    for (int i = 0; i < 140; i++) {
+      d = mapSheet(ro + rd * t);
+      if (d < 0.0005 * t + 0.0003) {
+        hit = true;
+        if (d < -0.002) {
+          float a = tLast, b = t;
+          for (int j = 0; j < 5; j++) { float c = 0.5 * (a + b); if (mapSheet(ro + rd * c) < 0.0) b = c; else a = c; }
+          t = b;
+        }
+        break;
+      }
+      tLast = t;
+      t += d;
+      if (t > far) break;
+    }
   }
   if (!hit && t < far) hit = true;   // ran out of steps grazing a surface: close enough
 
@@ -862,14 +897,16 @@ void main() {
   vec3 col = fog;
   if (hit) {
     vec3 p = ro + rd * t;
-    vec3 n = calcNormal(p, t);
+    vec3 n = nearForm ? calcNormalForm(p, t) : calcNormal(p, t);
     bool onBall = BALL > 0.001 && ballSDF(p) < 0.004 + 0.001 * t;
     if (MEDIACALM > 0.0) gCalm = 1.0 - MEDIACALM * mediaMaskSoft(p.xy, 1.5);
     if (AURA > 0.0) gAura = AURA * 2.0 * mediaMaskSoft(p.xy, log2(float(textureSize(uMedia, 0).y) / 22.0));
-    // what's under the sheet at this point: where its pattern was drawn from, and how shut-in it is
-    vec4 rel = FIG > 0.001 && gFigNear ? reliefAt(p.xy) : vec4(0.0);
-    float formK = smoothstep(0.0, 0.04, rel.w);               // on a form: drawn the same way whether it's a figure or a hand
-    if (UP(HAND_BASE) + UP(HAND_BASE + 8) + UP(HAND_BASE + 16) > 0.0) formK = max(formK, 1.0 - smoothstep(0.004, 0.03 * FRAME, hands(p)));
+    // on a form: the same pattern runs straight across it, its outline cutting against what's behind
+    float dForm = 1e3;
+    if (FORMON > 0.001 && (nearForm || FORMAURA > 0.0)) { gFormFull = true; dForm = formD(p); gFormFull = false; }
+    float dSolid = min(dForm, UP(HAND_BASE) + UP(HAND_BASE + 8) > 0.0 ? hands(p) : 1e3);
+    float formK = 1.0 - smoothstep(0.004, 0.03 * FRAME, dSolid);
+    float formHard = 1.0 - smoothstep(0.0015 * FRAME, 0.006 * FRAME, dForm);
     float rr = 1.0;
     vec2 qw = p.xy;
     float v = 0.0;
@@ -881,7 +918,7 @@ void main() {
       rr = 1.0;
     } else {
       // over a form the lines also bend the way the surface leans, like lines seen through thick glass
-      vec2 sq0 = p.xy + rel.xy * FIGPULL + n.xy * FRAME * 0.12 * FIGLENS * formK, nn = n.xy * REFRACT;
+      vec2 sq0 = p.xy + n.xy * FRAME * 0.12 * FORMLENS * formK, nn = n.xy * REFRACT;
       // seen from straight above, a shape under the sheet would hardly show: lean the pattern over it by its
       // height, the way lines lie over a form on a tilted page (a low camera does this by itself)
       if (RELIEF > 0.0) sq0 -= rot(YAW) * vec2(0.62, 0.78) * p.z * RELIEF;
@@ -894,7 +931,13 @@ void main() {
       }
       if (PINS > 0.0) sq0 = mix(sq0, (floor(sq0 * PINF) + 0.5) / PINF, PINS * 0.0);
       sq0 = ballFlow(sq0 + nn * 0.12);
-      if (FIG > 0.001) sq0 = figFlow(sq0);
+      if (FORMAURA > 0.0) {                                           // the outline goes out across the sheet, ring after ring
+        vec2 o = p.xy - vec2(FORMX, FORMY);
+        if (FORMFIELD > 0.0) o -= FORMFIELD * FORMS * floor(o / (FORMFIELD * FORMS) + 0.5);
+        float ds = max(dForm, 0.0) / FORMS;
+        sq0 += o / max(length(o), 1e-3) * FORMAURA * FRAME * 0.16 * (1.0 - formK) * sin(ds * 7.0 - FORMAURAT) * exp(-ds * 0.55);
+      }
+      if (FORMFINE != 1.0) sq0 = mix(sq0, vec2(FORMX, FORMY) + (sq0 - vec2(FORMX, FORMY)) * FORMFINE, formHard);
       if (WRAP < 0.999) {                                // lines bend over the relief
         float confK = SWK(SW_CONF);
         bool fade = confK > 0.001 && confK < 0.999;
@@ -933,24 +976,23 @@ void main() {
     if (!onBall) v -= (diff - 0.6) * ENGRAVE * 1.4;          // light thins the ink: form drawn with lines
     if (PINS > 0.0) v += PINS * (1.0 - n.z) * 3.0;            // the sides of a pin go dark
     v -= THICK;
-    if (formK > 0.0 || rel.z != 0.0) {
-      // the hollows go dark and the crests pale: the ink itself thickens, line by line, whatever the pattern
+    if (formK > 0.0) {
+      // light thins the ink: a light that goes where you go, and a little to one side, so you never look at a
+      // form's unlit half, and it only goes black where the surface turns away from you
       float inkDark = dot(ink1, vec3(1.0)) < dot(paper, vec3(1.0)) ? 1.0 : -1.0;
-      float on = formK;
-      // a light that goes where you go, and a little to one side: you never look at a form's unlit half, and
-      // it only goes black where the surface turns away from you
+      float sideK = inkDark * (1.0 - 2.0 * step(0.5, INVERT));
       vec3 Lf = normalize(gBack + vec3(-0.62, 0.5, 0.15));
       float lit = dot(n, Lf) - Lf.z, edge = 1.0 - max(dot(n, -rd), 0.0);             // lit: against the flat sheet, so only its slopes change
-      v += inkDark * (1.0 - 2.0 * step(0.5, INVERT)) * (1.0 - 0.5 * CHECK) * (rel.z * FIGSHADE + on * (edge * FIGRIM - lit * FIGLIT));
-      if (FIGBURST > 0.0) {
-        // high enough, it has come through: no pattern on it, just the thing itself, cut like a woodblock
-        vec2 fo = (p.xy - vec2(FIGX, FIGY)) / FIGS;
-        float tear = FIGTOP * (1.0 - FIGBURST) + 0.012 * sin(fo.x * 37.0 + 2.0 * sin(fo.y * 23.0)) + 0.008 * sin(fo.y * 61.0 - fo.x * 13.0);
-        float b = smoothstep(tear - 0.0025, tear + 0.0025, rel.w);
-        float cut = rel.z * 1.6 + edge * 0.9 - lit * 3.0 - 0.28;
-        float lip = smoothstep(tear - 0.022, tear - 0.004, rel.w);                   // the sheet's torn edge, dark against what's coming through
-        v = mix(mix(v, inkDark * (1.0 - 2.0 * step(0.5, INVERT)), lip * 0.9), inkDark * (1.0 - 2.0 * step(0.5, INVERT)) * cut, b);
+      v += sideK * (1.0 - 0.5 * CHECK) * formK * (edge * FORMRIM - lit * FORMLIT);
+      if (FORMCONTOUR > 0.0) {                                                       // its own stripes: a stack of planes cutting through it, so every curve of it shows
+        vec3 rel = (p - vec3(FORMX, FORMY, FORMZ)) / FORMS;
+        rel.xy = rot(-FORMYAW) * rel.xy;
+        rel.yz = rot(-FORMLEAN) * rel.yz;
+        float soft = 1.0 - smoothstep(0.0, 0.16 * FORMS, dForm);                     // the sheet's pattern draws out into them as it climbs
+        v = mix(v, sideK * (sin(dot(rel, vec3(0.0, sin(FORMSTRIPEA), cos(FORMSTRIPEA))) * FORMSTRIPEF + FORMRINGT * 40.0) + FORMSTRIPEW) * 1.2, FORMCONTOUR * soft * soft);
       }
+      if (FORMNEG > 0.0) v = mix(v, -v, FORMNEG * formHard);                         // the pattern's negative, so its outline's everywhere the lines cross it
+      if (FORMFILL != 0.0) v = mix(v, sideK * sign(FORMFILL), abs(FORMFILL) * formHard);   // just the silhouette
     }
     float w = fwidth(v) * 0.8 + 1e-3;
     float k = smoothstep(-w, w, v);

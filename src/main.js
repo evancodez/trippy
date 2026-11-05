@@ -8,8 +8,8 @@ import { LOOKS, GROUPS, NEUTRAL, look, PALETTES, COLOR_KEYS, camKind } from './e
 import { PARAM_BY_NAME, hexToRgb, rgbToHex, isColorParam, DEFAULTS } from './engine/params.js';
 import { applyFeel, defaultFeel, breed } from './engine/feel.js';
 import { Ink } from './ink.js';
-import { ADDS, defaultAdds, Ball, Figures, CursorHand, applyHands, applyFace, applyOrbs } from './adds.js';
-import { FIGURES, FIGURE_INDEX, loadRelief } from './engine/figures.js';
+import { ADDS, defaultAdds, Ball, Form, applyHands, applyFace, applyOrbs } from './adds.js';
+import { FORMS, FORM_INDEX, BASES, BAKED, SHIFT_DEFAULTS, SHIFT_CONTROLS, SHIFT_AXES, surpriseShift, loadSolid } from './engine/forms.js';
 import { rayOnSheet, rayAt, noSheet, camDist } from './engine/camera.js';
 import { Director } from './director.js';
 import { AudioEngine } from './audio.js';
@@ -88,7 +88,6 @@ let ui = null;
 
 // everything that moves every frame
 const rt = {
-  figW: new Float32Array(4),
   crys: new Float32Array(7), drops: new Float32Array(32 * 4), dropN: 0, rings: new Float32Array(16), ringsOn: 0,
   realTime: 0, stepK: 0.6,
   ripples: new Float32Array(MAX_RIPPLES * 4),
@@ -409,14 +408,15 @@ function goToScene(i, glide) {
   const A = app.adds.figures;
   if (S.figure) {
     A.size = 1;
-    A.melt = Math.max(3, S.glide * 0.7);
-    A.repeat = !!S.crowd;
-    app.figures.home = S.home;
-    app.figures.parked = null;
-    if (S.home) { app.hand.u = S.home[0]; app.hand.w = S.home[1]; }
+    A.morph = Math.max(2.5, S.glide * 0.6);
+    A.drift = 0.5;
+    if (S.home) { app.form.u = S.home[0]; app.form.w = S.home[1]; }
     A.follow = false;
+    app.film.putUp = true;
     app.pickFigure(S.figure, { drive: false });
-  } else if (A.on) {
+    if (S.crowd) { A.shift.field = 1; }
+  } else if (app.film.putUp) {             // only what the film itself put up: what you picked is yours
+    app.film.putUp = false;
     A.on = false;
   }
   ui?.lookChanged();
@@ -571,20 +571,34 @@ navigator.mediaDevices?.addEventListener?.('devicechange', () => app.refreshDevi
 app.stopAudio = () => app.audio.stop();
 
 // ------------------------------------------------------------------ add-ons
-const pres = { hands: 0, face: 0, orbs: 0, figures: 0 };
-app.figures = new Figures();
+const pres = { hands: 0, face: 0, orbs: 0 };
+app.form = new Form();
 app.ink = new Ink();
-const reliefs = new Map();
-app.hand = new CursorHand();
-// pick a figure: the one showing goes under, then this one comes up, and your mouse has it
-app.pickFigure = (id, { drive = true } = {}) => {
-  app.adds.figures.pick = id;
-  app.adds.figures.on = true;
-  if (id !== 'hand' && camKind(app.lookId) === 'fly' && drive) ui?.toast('There’s no sheet in here for it to press through. Pick a pattern and it comes up.');
-  if (drive) { app.tool = 'figure'; app.adds.figures.follow = true; app.adds.figures.size = 1; app.figures.home = null; app.figures.parked = null; updateRing(); }
+const solids = new Map();
+// a baked solid is fetched the first time it's asked for; until it's in, the form stays as it is
+const solid = id => {
+  let r = solids.get(id);
+  if (!r) { r = { tex: null }; solids.set(id, r); loadSolid(id).then(d => { r.tex = renderer.solidTexture(d); }).catch(e => console.error(e)); }
+  return r.tex;
+};
+const baseReady = i => { const b = BAKED[BASES[i]]; return !b || !!solid(b); };
+// pick a form: if one's up, it melts across into this one
+app.pickFigure = (id, { drive = true, keep = false } = {}) => {
+  const A = app.adds.figures, f = FORMS[FORM_INDEX[id]];
+  A.pick = id;
+  A.on = true;
+  if (!keep) A.shift = { ...SHIFT_DEFAULTS, ...(f?.shift || {}) };
+  if (drive) { app.tool = 'figure'; A.follow = true; updateRing(); }
   ui?.renderDock();
   ui?.addsChanged();
 };
+app.shiftAxes = [...SHIFT_AXES];
+const shiftBy = (key, amount) => {
+  const c = SHIFT_CONTROLS[key], S = app.adds.figures.shift;
+  S[key] = clamp(S[key] + amount * (c[3] - c[2]), c[2], c[3]);
+};
+app.surpriseForm = () => { const A = app.adds.figures; if (!A.on) app.pickFigure('hand', { drive: false }); A.shift = surpriseShift(A.pick); ui.addsChanged(); };
+app.resetForm = () => { const A = app.adds.figures; A.shift = { ...SHIFT_DEFAULTS, ...(FORMS[FORM_INDEX[A.pick]]?.shift || {}) }; ui.addsChanged(); };
 app.setAdd = async (id, on) => {
   const A = app.adds[id];
   A.on = on;
@@ -791,61 +805,24 @@ function applyAdds(v, m, dt) {
   v.pitch = clamp(v.pitch + V.pitch, -0.35, 1.42);
   // tilted back, a long lens would push the camera miles away: widen it as it tilts
   if (v.focal > 2) v.focal = 2 + (v.focal - 2) * (1 - clamp((v.pitch - 0.12) / 0.7, 0, 1));
-  // the figure on screen. Its relief is fetched the first time; it comes up once that's in. If one's already
-  // up, it melts into the next: the same sheet, slowly becoming something else.
-  const F = app.figures, pickHand = A.figures.pick === 'hand';
-  const relief = id => {
-    let r = reliefs.get(id);
-    if (!r) { r = { data: null }; reliefs.set(id, r); loadRelief(id).then(d => { r.data = d; r.tex = renderer.reliefTextures(d); }).catch(e => console.error(e)); }
-    return r.tex ? r : null;
-  };
-  const wantI = pickHand ? F.a : FIGURE_INDEX[A.figures.pick] ?? F.a;
-  const shown = !pickHand && A.figures.on && !!relief(FIGURES[wantI].id);
-  if (F.b == null && wantI !== F.a && relief(FIGURES[wantI].id)) {
-    if (pres.figures < 0.02) { F.a = wantI; F.placed = F.placed && !!F.parked; }
-    else { F.b = wantI; F.mix = 0; F.mixDur = A.figures.melt ?? 3.5; }
-  }
-  if (pres.figures < 0.02 && !shown && !F.parked) F.placed = false;
-  if (F.b != null) {
-    F.mix += dt / F.mixDur;
-    if (F.mix >= 1) { F.a = F.b; F.b = null; F.mix = 0; F.w.fill(0); }
-  }
-  for (const k of ['hands', 'face', 'orbs', 'figures']) {
-    const on = k === 'figures' ? shown : A[k].on;
-    pres[k] = ease(pres[k], on ? 1 : 0, k === 'figures' ? (on ? 1.1 : 2.2) : 3, dt);
-  }
+  for (const k of ['hands', 'face', 'orbs']) pres[k] = ease(pres[k], A[k].on ? 1 : 0, 3, dt);
   const copying = A.hands.copy && tracker.on && tracker.hands.length;
   if (!copying) { rt.handMirror[0] = 1; rt.handMirror[1] = -1; rt.fingers.fill(0); }
   applyHands(v, A.hands, copying ? 0 : pres.hands, m, app.sound);
   applyFace(v, A.face, A.face.copy && tracker.face ? 0 : pres.face);
   applyOrbs(v, A.orbs, pres.orbs, m, app.sound);
-  const driving = app.tool === 'figure' && pointer.inside && A.figures.follow;
-  const reach = 4 * camDist(v);
-  if (A.figures.on || pres.figures > 0.01) {
-    F.pointer = pointer.inside ? [...rayOnSheet(v, pointer.x, pointer.y, 0, reach)] : null;
-    if (driving) { F.parked = [pointer.x, pointer.y]; }
-    // under your cursor, or (the cursor's gone) still where you left it on the screen, whatever the camera does
-    const aim = F.parked ? z => rayOnSheet(v, F.parked[0], F.parked[1], z, reach) : null;
-    const home = F.home ? rayOnSheet(v, F.home[0], F.home[1], 0, reach) : rayOnSheet(v, 0, -0.2 * Math.sin(Math.max(v.pitch, 0)), 0, reach);
-    if (F.step(dt, A.figures, m, aim, home, pointer.down && app.tool === 'figure', v)) ui.addsChanged();
-    const ra = relief(FIGURES[F.a].id), rb = F.b != null ? relief(FIGURES[F.b].id) : null;
-    F.apply(v, A.figures, pres.figures, m, ra?.data && { meta: ra.data.meta, shapes: ra.tex.shapes }, rb?.data && { meta: rb.data.meta });
-    rt.reliefA = ra?.tex; rt.reliefB = rb?.tex; rt.figW = F.w;
-  }
   app.ink.step(dt, m, v, rt);
-  stepRings(dt, m, v, shown || pres.figures > 0.3 ? F.x : v.tx, shown || pres.figures > 0.3 ? F.y : v.ty);
+  const Fm = app.form;
+  const shows = Fm.step(dt, A.figures, m, v, app.tool === 'figure' && pointer.inside && A.figures.follow ? [pointer.x, pointer.y] : null, A.figures.on, pointer.down && app.tool === 'figure', rt.fingers, baseReady);
+  if (shows) Fm.apply(v, A.figures, m);
+  const bakedId = Fm.bakedNow;
+  rt.solid = bakedId ? solid(bakedId) : null;
+  stepRings(dt, m, v, shows && Fm.on > 0.3 ? Fm.x : v.tx, shows && Fm.on > 0.3 ? Fm.y : v.ty);
   app.ball.apply(v, A.ball);
-  // the hand: your cursor is its wrist, wherever the camera is
-  const wantHand = A.figures.on && pickHand;
-  const onHand = app.tool === 'figure' && pickHand;
-  if (app.hand.step(dt, A.figures, m, v, onHand && pointer.inside && A.figures.follow ? [pointer.x, pointer.y] : null, wantHand, pointer.down && onHand, rt.fingers)) {
-    app.hand.apply(v);
-  }
   // seen from above, a shape would hardly show: the lines lean over it by its height
-  const shapes = Math.max(pres.figures, app.hand.on);
-  v.relief = shapes * (pickHand ? 0.6 : 0.4) * (1 - clamp((v.pitch - 0.08) / 0.75, 0, 1));
+  v.relief = Fm.on * 0.6 * (1 - clamp((v.pitch - 0.08) / 0.75, 0, 1));
   // and they crowd in, so a form under them is drawn in enough lines to be seen
-  if (shapes > 0) v.freq += Math.max(Math.min(17 / v.frame, v.freq * (v.vortex > 1 || v.conf > 0.5 ? 1.25 : pickHand ? 1.5 : 2.4)) - v.freq, 0) * shapes;
+  if (Fm.on > 0) v.freq += Math.max(Math.min(17 / v.frame, v.freq * (v.vortex > 1 || v.conf > 0.5 ? 1.25 : 1.5)) - v.freq, 0) * Fm.on * (1 - Fm.val.contour);   // (in its own stripes it doesn't need them)
   applyInputs(v, m);
   // never a screen of one solid color, whatever the music, the ties or the cinematic camera do:
   // keep at least a few lines in view however far it zooms in, and never let the ink flood the frame
@@ -980,7 +957,7 @@ function toUV(e) {
 }
 function updateRing(e) {
   if (e) { ring.style.left = `${e.clientX}px`; ring.style.top = `${e.clientY}px`; }
-  const show = app.perf.ring && !['camera', 'figure'].includes(app.tool) && !matchMedia('(pointer: coarse)').matches;
+  const show = app.perf.ring && !['camera', 'figure', 'shift', 'turn'].includes(app.tool) && !matchMedia('(pointer: coarse)').matches;
   ring.classList.toggle('show', show && pointer.inside && !pointer.move);
   const d = app.brush.size * 2 * canvas.getBoundingClientRect().height * (app.tool === 'ripple' ? 0.6 : 1);
   ring.style.width = ring.style.height = `${d}px`;
@@ -1028,6 +1005,13 @@ canvas.addEventListener('pointermove', e => {
     }
     ui.viewChanged();
   }
+  if (pointer.down && !pointer.move && (app.tool === 'shift' || app.tool === 'turn')) {
+    const dx = x - pointer.x, dy = y - pointer.y;
+    if (app.tool === 'shift') { shiftBy(app.shiftAxes[0], dx * 0.8); shiftBy(app.shiftAxes[1], dy * 0.8); }
+    else { const S = app.adds.figures.shift; S.turn += dx * 3.2; S.lean = clamp(S.lean - dy * 2.4, -1.4, 1.4); }
+    pointer.shifted = true;
+    ui.syncFigures();
+  }
   pointer.x = x; pointer.y = y;
   if (pointer.down && !pointer.move && app.tool === 'ripple' && rt.realTime - pointer.lastRipple > 0.08 && Math.hypot(x - pointer.lastX, y - pointer.lastY) > 0.03) {
     spawnRipple(x, y, app.brush.strength * 1.1);
@@ -1037,6 +1021,7 @@ canvas.addEventListener('pointermove', e => {
   updateRing(e);
 });
 const release = () => {
+  if (pointer.shifted) { pointer.shifted = false; ui.addsChanged(); }
   pointer.down = false;
   pointer.move = false;
   if (twistCur) twistCur.held = false;
@@ -1049,6 +1034,11 @@ canvas.addEventListener('pointerleave', () => { pointer.inside = false; updateRi
 canvas.addEventListener('dblclick', () => app.resetView());
 canvas.addEventListener('wheel', e => {
   e.preventDefault();
+  if (['figure', 'shift', 'turn'].includes(app.tool) && app.adds.figures.on) {
+    app.adds.figures.size = clamp(app.adds.figures.size * Math.exp(-e.deltaY * 0.0015), 0.3, 3);
+    ui.syncFigures();
+    return;
+  }
   app.view.zoom = clamp(app.view.zoom * Math.exp(e.deltaY * 0.0015), 0.15, 5);
   ui.viewChanged();
 }, { passive: false });
@@ -1076,6 +1066,7 @@ function updateTools(dt) {
 }
 
 // ------------------------------------------------------------------ keyboard
+const formTool = () => ['figure', 'shift', 'turn'].includes(app.tool) && app.adds.figures.on;
 addEventListener('keydown', e => {
   if (e.target.closest('textarea, input[type="text"], input[type="color"], select') || e.metaKey || e.ctrlKey) return;
   const k = e.key.toLowerCase();
@@ -1084,8 +1075,10 @@ addEventListener('keydown', e => {
     c: () => app.setCinema(!app.cine.on),
     p: () => ui.openTab('patterns'), g: () => ui.openTab('figures'), m: () => ui.openTab('sound'), t: () => ui.openTab('tweak'),
     arrowright: () => app.stepLook(1), arrowleft: () => app.stepLook(-1),
-    '[': () => { app.brush.size = Math.max(0.04, app.brush.size * 0.85); ui.renderDock(); updateRing(); },
-    ']': () => { app.brush.size = Math.min(0.5, app.brush.size * 1.18); ui.renderDock(); updateRing(); },
+    x: () => app.surpriseForm(),
+    z: () => app.resetForm(),
+    '[': () => { if (formTool()) { const S = app.adds.figures.shift; S.fold = Math.max(1, Math.round(S.fold) - 1); ui.addsChanged(); return; } app.brush.size = Math.max(0.04, app.brush.size * 0.85); ui.renderDock(); updateRing(); },
+    ']': () => { if (formTool()) { const S = app.adds.figures.shift; S.fold = Math.min(12, Math.round(S.fold) + 1); ui.addsChanged(); return; } app.brush.size = Math.min(0.5, app.brush.size * 1.18); ui.renderDock(); updateRing(); },
     escape: () => (app.explore.open ? app.exploreClose() : ui.tab && ui.openTab(ui.tab)),
   }[k];
   if (act) {
@@ -1101,8 +1094,9 @@ addEventListener('keydown', e => {
 // the figure tool with nothing up brings the hand; leaving it, the hand goes, and anything else stays where you left it
 app.setTool = id => {
   const A = app.adds.figures;
-  if (id === 'figure' && !A.on) return app.pickFigure('hand');
-  if (app.tool === 'figure' && id !== 'figure' && A.pick === 'hand' && A.on) { A.on = false; ui.addsChanged(); }
+  const forms = ['figure', 'shift', 'turn'];
+  if (forms.includes(id) && !A.on) app.pickFigure('hand');
+  if (forms.includes(app.tool) && !forms.includes(id) && A.pick === 'hand' && A.on) { A.on = false; ui.addsChanged(); }
   app.tool = id;
   updateRing();
   ui.renderDock();
@@ -1115,26 +1109,13 @@ const WANDER_AFTER = 18;
 const touched = { any: 0, used: 0 };
 addEventListener('pointermove', () => { touched.any = performance.now() / 1000; }, { passive: true });
 for (const ev of ['pointerdown', 'wheel', 'keydown']) addEventListener(ev, () => { touched.any = touched.used = performance.now() / 1000; }, { passive: true, capture: true });
-const F_home = () => { const F = app.figures; F.parked = null; F.home = [(Math.random() < 0.5 ? -1 : 1) * (0.04 + Math.random() * 0.18), -0.06 + Math.random() * 0.1]; };
 function wander() {
   const C = app.cine, W = app.wandering, now = performance.now() / 1000;
   const shaping = app.tool === 'figure' && pointer.inside && app.adds.figures.on && now - touched.any < 1;
   if (W) {
     if (touched.used > W || shaping || app.film.driving || !app.perf.wander) {
       app.wandering = 0; C.on = false; C.keep = true; C.kind = null; ui.cinemaChanged();
-      if (app.wanderFigure) { app.wanderFigure = false; app.adds.figures.on = false; ui.addsChanged(); }
       return;
-    }
-    // and now and then something comes up under the sheet, stays a while, and goes back down or turns into something else
-    const A = app.adds.figures;
-    if (now > (app.nextFigure || 0) && (!A.on || app.wanderFigure)) {
-      app.nextFigure = now + 20 + Math.random() * 16;
-      if (camKind(app.lookId) !== 'fly' && Math.random() < 0.65) {
-        const cast = FIGURES.filter(f => !f.special && f.id !== A.pick);
-        app.wanderFigure = true;
-        A.repeat = false; A.follow = false; A.melt = 6; A.size = 1;
-        F_home(); app.pickFigure(cast[Math.floor(Math.random() * cast.length)].id, { drive: false });
-      } else if (app.wanderFigure) { app.wanderFigure = false; A.on = false; ui.addsChanged(); }
     }
     return;
   }

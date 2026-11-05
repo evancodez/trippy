@@ -70,11 +70,11 @@ export function surpriseShift(base, rand = Math.random) {
 
 export const FORMS = [
   { id: 'hand', name: 'Hand', base: 'hand', shift: { melt: 0.57 }, blurb: 'your cursor is the wrist. Hold: it makes a fist' },
-  { id: 'face', name: 'The Face', base: 'face', shift: { rise: -0.12, aura: 0.5 }, blurb: 'on its back, coming up through the sheet. Hold: the mouth opens' },
+  { id: 'face', name: 'The Face', base: 'face', shift: { aura: 0.5 }, blurb: 'a face pressing up through the sheet, like a ghost in the shell. Hold: the mouth opens' },
   { id: 'wheel', name: 'Hand Wheel', base: 'hand', shift: { fold: 6, spread: 0.16, melt: 0.57 }, blurb: 'one hand folded round itself. Hold: every fist at once' },
   { id: 'handtree', name: 'Hand Tree', base: 'hand', shift: { echo: 2, echoTurn: 0.9, echoSize: 0.72, melt: 0.57 }, blurb: 'each hand grows two smaller hands' },
   { id: 'masks', name: 'Ring of Faces', base: 'face', shift: { fold: 5, spread: 0.36 }, blurb: 'the same face, looking every way' },
-  { id: 'plates', name: 'Cut Face', base: 'face', shift: { rise: -0.12, slice: 0.55, layers: 15, sliceTilt: 1.57 }, blurb: 'cut into plates you can see between' },
+  { id: 'plates', name: 'Cut Face', base: 'face', shift: { slice: 0.55, layers: 15, sliceTilt: 1.57 }, blurb: 'cut into plates you can see between' },
   { id: 'coral', name: 'Coral', base: 'coral', blurb: 'each branch splits in two, six times over. Hold: it closes up' },
   { id: 'rope', name: 'Rope', base: 'rope', blurb: 'a rope made of ropes, always twisting. Hold: it loosens' },
   { id: 'knot', name: 'Knot', base: 'knot', blurb: 'the same rope, tied. Hold: it loosens' },
@@ -213,7 +213,7 @@ float formBase(int k, vec3 q, float open) {
 // where a smaller copy grows from
 vec3 echoFrom(int k) {
   if (k == 0) return vec3(0.0, 0.37, 0.03);
-  if (k == 1) return vec3(0.0, 0.42, 0.16);
+  if (k == 1) return vec3(0.0, 0.42, 0.1);
   if (k == 2) return vec3(0.0, 0.1, 0.34);
   return vec3(0.0, 0.2, 0.22);
 }

@@ -141,7 +141,7 @@ export class Form {
     this.on = 0; this.press = 0; this.t = 0; this.sing = 0; this.syll = 0;
     this.x = 0; this.y = 0; this.z = 0; this.s = 1; this.facing = 0;
     this.u = 0; this.w = -0.24;                  // where on screen it is (it stays there if the cursor leaves)
-    this.across = 0;
+    this.lookUp = 0;
     this.placed = false;
     this.a = 0; this.b = null; this.mix = 0;     // which solid it is, and the one it's melting into
     this.fa = 1; this.fb = 1; this.ea = 0; this.eb = 0;
@@ -181,17 +181,19 @@ export class Form {
     const s = this.s = 1.25 * sp * (cfg.size || 1) * baseK;
     if (!this.placed) {
       this.facing = Math.atan2(Math.sin(v.yaw + v.roll), Math.cos(v.yaw + v.roll));
-      // a face looked at from above lies straight; seen along the ground it lies across the view, so its outline is its profile
-      const t = clamp((v.pitch - 0.25) / 0.5, 0, 1);
-      this.across = 1.57 * t * t * (3 - 2 * t);
+      // a face comes up looking at you, whichever way the camera was when it came
+      this.lookUp = clamp(v.pitch, 0, 1.2) * 0.8;
     }
     // the hand's wrist is on the cursor; anything else, its middle
     const handK = (this.a === 0 ? 1 - this.mix : 0) + (this.b === 0 ? this.mix : 0);
-    const a = this.facing + val.turn + handK * HAND_TURN;   // (the wrist's offset is the hand's own, so across doesn't come into it)
+    const a = this.facing + val.turn + handK * HAND_TURN;
     const ox = -Math.sin(a) * WRIST_BACK[0] * s * handK, oy = Math.cos(a) * WRIST_BACK[0] * s * handK, oz = WRIST_BACK[1] * s * handK;
     const fly = noSheet(v);
-    let z = 0.04 * sp + val.rise * s * 0.5 + Math.min(0.32 * sp, 0.22 * camHeight(v)) * this.press * (handK * 0.7 + 0.3);
-    const at = fly ? rayAt(v, this.u, this.w, 0.95 * s) : rayOnSheet(v, this.u, this.w, z + oz, 4 * camDist(v));
+    // where it stands comes from the cursor at rest; holding only lifts it straight up from there. (Keeping it on
+    // the cursor's line of sight as it rose would slide it toward the camera.)
+    const rest = 0.04 * sp + val.rise * s * 0.5;
+    let z = rest + Math.min(0.32 * sp, 0.22 * camHeight(v)) * this.press * (handK * 0.7 + 0.3);
+    const at = fly ? rayAt(v, this.u, this.w, 0.95 * s) : rayOnSheet(v, this.u, this.w, rest + oz, 4 * camDist(v));
     if (fly) z = at[2] - oz;
     const tx = at[0] - ox, ty = at[1] - oy;
     if (!this.placed) { this.x = tx; this.y = ty; this.z = z; this.placed = true; }
@@ -214,11 +216,12 @@ export class Form {
     return true;
   }
 
-  yawOf(A, B) {
-    const of = (n, fold) => (n === 'hand' ? HAND_TURN : n === 'face' && fold <= 1 ? this.across : 0);
+  blend(A, B, of) {
     const m = this.b != null ? this.mix * this.mix * (3 - 2 * this.mix) : 0;
     return of(A, this.fa) * (1 - m) + of(B, this.b != null ? this.fb : this.fa) * m;
   }
+  yawOf(A, B) { return this.blend(A, B, n => (n === 'hand' ? HAND_TURN : 0)); }
+  leanOf(A, B) { return this.blend(A, B, (n, fold) => (n === 'face' && fold <= 1 ? this.lookUp : 0)); }
 
   // the hand has the fine outline to carry heavier ink; anything else keeps the pattern as sharp as it is on the sheet
   drawn(V) {
@@ -246,7 +249,7 @@ export class Form {
     const field = V.field > 0.01 ? (bound * 1.35 + 0.08) * (2.1 - V.field) : 0;
     Object.assign(v, {
       formOn: this.on, formX: this.x, formY: this.y, formZ: this.z, formS: this.s,
-      formYaw: this.facing + V.turn + this.yawOf(A, B), formLean: V.lean,
+      formYaw: this.facing + V.turn + this.yawOf(A, B), formLean: V.lean + this.leanOf(A, B),
       formA: this.a, formB: this.b ?? this.a, formMix: this.b != null ? this.mix * this.mix * (3 - 2 * this.mix) : 0,
       formFA: this.fa, formFB: this.b != null ? this.fb : this.fa, formEA: this.ea, formEB: this.b != null ? this.eb : this.ea,
       formOpen: open, formSoft: (V.blocks > 0.02 ? 0.012 : 0.015 + V.melt * V.melt * 0.42) * v.frame / 0.6, formBound: bound,

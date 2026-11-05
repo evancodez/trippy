@@ -219,7 +219,7 @@ float handSDF(vec3 p, float curl, float spread, int hb) {
     d = smin(d, sdCapsule(p, a, b, r), 0.018);
     a = b; r *= 0.85;
   }
-  return smin(d, sdCapsule(p, vec3(0.0, -0.1, -0.01), vec3(0.0, -0.32, -0.42), 0.058), 0.05);
+  return smin(d, sdCapsule(p, vec3(0.0, -0.1, -0.01), vec3(0.0, -0.17, -0.5), 0.058), 0.05);   // a short wrist, going almost straight down into the sheet
 }
 
 float hands(vec3 p) {

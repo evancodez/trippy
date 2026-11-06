@@ -155,7 +155,7 @@ export class Form {
 
   // cfg: the settings; m: the music; v: this frame's values; cursor: [u, w] or null; want: it should be showing;
   // held: mouse down; fingers: the shader's finger curls, of which it has 10..14
-  step(dt, cfg, m, v, cursor, want, held, fingers, ready) {
+  step(dt, cfg, m, v, cursor, want, held, fingers, ready, zoom = 1) {
     const form = FORMS[FORM_INDEX[cfg.pick]] || FORMS[0];
     const wantBase = BASES.indexOf(form.base), S = cfg.shift;
     // another solid, another count of copies: melts across, once what it needs has arrived
@@ -176,7 +176,7 @@ export class Form {
     this.t += dt;
     for (const k of eased) this.val[k] += (S[k] - this.val[k]) * (1 - Math.exp(-dt * 2.2));
     if (cursor) { this.u = cursor[0]; this.w = cursor[1]; }
-    const val = this.val, sp = v.frame / 0.6;
+    const val = this.val, sp = this.sp = v.frame / zoom / 0.6;     // its size goes with the look, not your zoom: zooming takes you nearer to it, as it does the sheet
     const mixK = this.b != null ? this.mix : 0, baseK = BASE_SCALE[BASES[this.a]] * (1 - mixK) + (this.b != null ? BASE_SCALE[BASES[this.b]] * mixK : 0);
     const s = this.s = 1.25 * sp * (cfg.size || 1) * baseK;
     if (!this.placed) {
@@ -192,7 +192,7 @@ export class Form {
     // where it stands comes from the cursor at rest; holding only lifts it straight up from there. (Keeping it on
     // the cursor's line of sight as it rose would slide it toward the camera.)
     const rest = 0.04 * sp + val.rise * s * 0.5;
-    let z = rest + Math.min(0.32 * sp, 0.22 * camHeight(v)) * this.press * (handK * 0.7 + 0.3);
+    let z = rest + Math.min(0.17 * sp, 0.22 * camHeight(v)) * this.press;
     const at = fly ? rayAt(v, this.u, this.w, 0.95 * s) : rayOnSheet(v, this.u, this.w, rest + oz, 4 * camDist(v));
     if (fly) z = at[2] - oz;
     const tx = at[0] - ox, ty = at[1] - oy;
@@ -227,7 +227,7 @@ export class Form {
   drawn(V) {
     const k = (this.a === 0 ? 1 - this.mix : 0) + (this.b === 0 ? this.mix : 0);
     const m = this.b != null ? this.mix : 0, warp = BASE_WARP[BASES[this.a]] * (1 - m) + (this.b != null ? BASE_WARP[BASES[this.b]] * m : 0);
-    return { formLit: 1.5 * k, formRim: 0.35 * k, formLens: V.warp * warp, formShade: V.shade * (1 - k) };
+    return { formLit: 0.7 * k, formRim: 0.15 * k, formLens: V.warp * warp, formShade: V.shade };
   }
 
   apply(v, cfg, m) {
@@ -252,7 +252,7 @@ export class Form {
       formYaw: this.facing + V.turn + this.yawOf(A, B), formLean: V.lean + this.leanOf(A, B),
       formA: this.a, formB: this.b ?? this.a, formMix: this.b != null ? this.mix * this.mix * (3 - 2 * this.mix) : 0,
       formFA: this.fa, formFB: this.b != null ? this.fb : this.fa, formEA: this.ea, formEB: this.b != null ? this.eb : this.ea,
-      formOpen: open, formSoft: (V.blocks > 0.02 ? 0.012 : 0.015 + V.melt * V.melt * 0.42) * v.frame / 0.6, formBound: bound,
+      formOpen: open, formSoft: (V.blocks > 0.02 ? 0.012 : 0.015 + V.melt * V.melt * 0.42) * this.sp, formBound: bound,
       formSpread: V.spread, formSpin: V.spin + this.spinT * (fold > 1 ? 1 : 0), formEchoS: V.echoSize, formEchoT: V.echoTurn + w(0.17, 2) * 0.25,
       formField: field, formTwist: twist, formBend: bend, formWave: waveA > 0.004 ? waveA : 0, formWaveT: this.wave, formRopeT: this.rope,
       formSlice: V.slice, formSliceF: V.layers, formSliceA: V.sliceTilt + w(0.11, 0.7) * 0.5, formSliceP: this.sliceT, formRings: V.rings, formRingT: this.ring,

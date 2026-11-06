@@ -813,7 +813,7 @@ function applyAdds(v, m, dt) {
   applyOrbs(v, A.orbs, pres.orbs, m, app.sound);
   app.ink.step(dt, m, v, rt);
   const Fm = app.form;
-  const shows = Fm.step(dt, A.figures, m, v, app.tool === 'figure' && pointer.inside && A.figures.follow ? [pointer.x, pointer.y] : null, A.figures.on, pointer.down && app.tool === 'figure', rt.fingers, baseReady);
+  const shows = Fm.step(dt, A.figures, m, v, app.tool === 'figure' && pointer.inside && A.figures.follow ? [pointer.x, pointer.y] : null, A.figures.on, pointer.down && app.tool === 'figure', rt.fingers, baseReady, app.view.zoom);
   if (shows) Fm.apply(v, A.figures, m);
   const bakedId = Fm.bakedNow;
   rt.solid = bakedId ? solid(bakedId) : null;
@@ -821,9 +821,10 @@ function applyAdds(v, m, dt) {
   app.ball.apply(v, A.ball);
   // seen from above, a shape would hardly show: the lines lean over it by its height
   const flat = 1 - clamp((v.pitch - 0.08) / 0.75, 0, 1), handK = (Fm.a === 0 ? 1 - Fm.mix : 0) + (Fm.b === 0 ? Fm.mix : 0);
-  v.relief = Fm.on * (v.formThrow ?? 1) * (0.6 * flat * handK + (0.8 + 1.2 * flat) * (1 - handK));
+  v.relief = Fm.on * (v.formThrow ?? 1) * (0.6 * flat * handK + (0.15 + 0.3 * flat) * (1 - handK));
   // and they crowd in, so a form under them is drawn in enough lines to be seen
-  if (Fm.on > 0) v.freq += Math.max(Math.min(17 / v.frame, v.freq * (v.vortex > 1 || v.conf > 0.5 ? 1.25 : 1.5)) - v.freq, 0) * Fm.on * (1 - Fm.val.contour);   // (in its own stripes it doesn't need them)
+  // a hand is fine detail: a few more lines to draw it with. The same at any zoom, so zooming only ever moves you
+  if (Fm.on > 0) v.freq *= 1 + (v.vortex > 1 || v.conf > 0.5 ? 0.25 : 0.5) * Fm.on * handK * (1 - Fm.val.contour);
   applyInputs(v, m);
   // never a screen of one solid color, whatever the music, the ties or the cinematic camera do:
   // keep at least a few lines in view however far it zooms in, and never let the ink flood the frame
@@ -1067,7 +1068,7 @@ canvas.addEventListener('pointerleave', () => { pointer.inside = false; updateRi
 canvas.addEventListener('dblclick', () => app.resetView());
 canvas.addEventListener('wheel', e => {
   e.preventDefault();
-  if (['figure', 'shift', 'turn'].includes(app.tool) && app.adds.figures.on) {
+  if (e.altKey && app.adds.figures.on) {
     app.adds.figures.size = clamp(app.adds.figures.size * Math.exp(-e.deltaY * 0.0015), 0.3, 3);
     ui.syncFigures();
     return;

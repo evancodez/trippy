@@ -219,7 +219,7 @@ float handSDF(vec3 p, float curl, float spread, int hb) {
     d = smin(d, sdCapsule(p, a, b, r), 0.018);
     a = b; r *= 0.85;
   }
-  return smin(d, sdCapsule(p, vec3(0.0, -0.1, -0.01), vec3(0.0, -0.17, -0.5), 0.058), 0.05);   // a short wrist, going almost straight down into the sheet
+  return smin(d, sdCapsule(p, vec3(0.0, -0.1, -0.01), vec3(0.0, -0.3, -0.42), 0.058), 0.05);   // the forearm, sloping down into the sheet
 }
 
 float hands(vec3 p) {
@@ -944,7 +944,7 @@ void main() {
         sq0 += o / r * g.w * FRAME * 0.06 * exp(-e * e);
       }
       if (PINS > 0.0) sq0 = mix(sq0, (floor(sq0 * PINF) + 0.5) / PINF, PINS * 0.0);
-      sq0 = ballFlow(sq0 + nn * 0.12);
+      sq0 = ballFlow(sq0 + nn * 0.12 * (1.0 - formK));   // (a look's own refraction would turn a form's steep sides to liquid metal)
       if (FORMAURA > 0.0) {                                           // the outline goes out across the sheet, ring after ring
         vec2 o = p.xy - vec2(FORMX, FORMY);
         if (FORMFIELD > 0.0) o -= FORMFIELD * FORMS * floor(o / (FORMFIELD * FORMS) + 0.5);
@@ -987,7 +987,7 @@ void main() {
     vec3 L = normalize(vec3(-0.45, 0.55, 0.75));
     float diff = max(dot(n, L), 0.0);
     float amb = 0.5 + 0.5 * n.z;
-    if (!onBall) v -= (diff - 0.6) * ENGRAVE * 1.4;          // light thins the ink: form drawn with lines
+    if (!onBall) v -= (diff - 0.6) * ENGRAVE * 1.4 * (1.0 - formK);          // light thins the ink: form drawn with lines
     if (PINS > 0.0) v += PINS * (1.0 - n.z) * 3.0;            // the sides of a pin go dark
     v -= THICK;
     if (formK > 0.0) {
@@ -1019,17 +1019,14 @@ void main() {
     k = mix(k, 1.0 - k, flip);
     col = mix(paper, ink, k);
     if (FORMSHADE > 0.0 && (formK > 0.0 || shutIn < 1.0)) {    // the shape itself: the pattern stays as sharp as it was, and goes into shadow
-      vec3 Ls = normalize(gBack + vec3(-0.62, 0.5, 0.15));
-      float lift = clamp(0.8 + 0.9 * (dot(n, Ls) - Ls.z), 0.0, 1.0);
-      float rim = 1.0 - max(dot(n, -rd), 0.0);
-      col *= 1.0 - FORMSHADE * (1.0 - shutIn * (1.0 - formK * (0.5 * (1.0 - lift) + 0.75 * rim * rim * rim)));   // hollows and round its foot; its sides, more toward the outline
+      col *= 1.0 - FORMSHADE * (1.0 - shutIn);                 // only in hollows and round its foot: gray gradients over sharp ink read as chrome
     }
     float spec = pow(max(dot(reflect(-L, n), -rd), 0.0), 40.0);
     if (onBall) {
       float fres = pow(1.0 - max(dot(n, -rd), 0.0), 2.0);
       col = col * (0.55 + 0.45 * diff) * (1.0 - 0.55 * fres) + pow(max(dot(reflect(-L, n), -rd), 0.0), 60.0) * 0.9;
     } else {
-      col = mix(col, col * (0.25 + 0.55 * amb + 0.55 * diff) + spec * 0.3, LIGHT);
+      col = mix(col, col * (0.25 + 0.55 * amb + 0.55 * diff) + spec * 0.3 * (1.0 - formK), LIGHT * (1.0 - 0.7 * formK));
     }
     if (MEDIAPHOTO > 0.0) {                                    // shown as a photo: a duotone in the palette, or true color
       bool pd = dot(paper, vec3(1.0)) < dot(ink1, vec3(1.0));

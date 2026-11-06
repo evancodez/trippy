@@ -11,7 +11,7 @@ export const BAKED = { face: 'face' };
 // how big each comes up for the same size setting, how far it reaches from its middle in the hand's units (rays
 // further off than that never read it), and how far its surface bends the pattern (thin parts less, or the
 // pattern gets squeezed to gray)
-export const BASE_WARP = { hand: 0.6, face: 0.85, coral: 0.3, rope: 0.22, knot: 0.25, bloom: 0.4, star: 0.55, egg: 0.45 };
+export const BASE_WARP = { hand: 0.3, face: 0.1, coral: 0.14, rope: 0.1, knot: 0.1, bloom: 0.14, star: 0.2, egg: 0.16 };
 export const BASE_SCALE = { hand: 1, face: 0.62, coral: 0.6, rope: 0.72, knot: 0.72, bloom: 0.7, star: 0.62, egg: 0.62 };
 export const BASE_REACH = { hand: 0.56, face: 0.72, coral: 0.82, rope: 0.46, knot: 0.46, bloom: 0.56, star: 0.56, egg: 0.5 };
 
@@ -24,7 +24,7 @@ export const SHIFT_DEFAULTS = {
   rings: 0,                                        // cut into shells inside each other
   holes: 0, bumps: 0, blocks: 0, swell: 0,
   rise: 0, turn: 0, lean: 0, melt: 0.3,            // how it sits
-  warp: 1, throw: 1, shade: 0.75, neg: 0, fill: 0, fine: 1, contour: 0, stripes: 130, stripeTilt: 0.9, stripeInk: 0, aura: 0,   // how it's drawn
+  warp: 1, throw: 1, shade: 0.45, neg: 0, fill: 0, fine: 1, contour: 0, stripes: 130, stripeTilt: 0.9, stripeInk: 0, aura: 0,   // how it's drawn
 };
 
 // the controls for all that: [key, label, min, max, step], grouped. The Shift tool can put any of them on your mouse.
@@ -33,7 +33,7 @@ export const SHIFT_GROUPS = [
   ['Bend it', [['twist', 'Twist', -8, 8, 0.01], ['bend', 'Bend', -3.5, 3.5, 0.01], ['wave', 'Sway', 0, 2, 0.01], ['swell', 'Thin ↔ fat', -0.05, 0.1, 0.001]]],
   ['Cut it', [['slice', 'Plates', 0, 1, 0.01], ['layers', 'How many plates', 4, 40, 0.5], ['sliceTilt', 'Which way they’re cut', -1.57, 1.57, 0.01], ['rings', 'Shells inside shells', 0, 1, 0.01], ['holes', 'Eaten through', 0, 1, 0.01], ['blocks', 'Made of cubes', 0, 1, 0.01], ['bumps', 'Bumps', 0, 1, 0.01]]],
   ['How it sits', [['rise', 'Sunk ↔ out of the sheet', -0.7, 0.9, 0.01], ['turn', 'Turn it', -3.14, 3.14, 0.01], ['lean', 'Lean it', -1.4, 1.4, 0.01], ['melt', 'Cut out ↔ melted in', 0, 1, 0.01]]],
-  ['How the pattern lies on it', [['warp', 'How far the shape bends the pattern', 0, 3, 0.01], ['throw', 'How far it’s thrown across', 0, 4, 0.01], ['fine', 'The pattern on it: bigger ↔ finer', 0.3, 3, 0.01], ['shade', 'Flat ↔ shadowed', 0, 1, 0.01], ['aura', 'Its outline ripples out', 0, 2, 0.01]]],
+  ['How the pattern lies on it', [['warp', 'Bends the pattern: flat ↔ like glass', 0, 6, 0.01], ['throw', 'How far it’s thrown across', 0, 4, 0.01], ['fine', 'The pattern on it: bigger ↔ finer', 0.3, 3, 0.01], ['shade', 'Flat ↔ shadowed', 0, 1, 0.01], ['aura', 'Its outline ripples out', 0, 2, 0.01]]],
   ['Instead of the pattern', [['neg', 'The pattern’s negative', 0, 1, 0.01], ['fill', 'White ↔ black', -1, 1, 0.01], ['contour', 'Its own stripes', 0, 1, 0.01], ['stripes', 'How many stripes', 15, 320, 1], ['stripeTilt', 'Which way they run', -1.57, 1.57, 0.01], ['stripeInk', 'Stripes: pale ↔ dark', -1, 1, 0.01]]],
 ];
 export const SHIFT_CONTROLS = Object.fromEntries(SHIFT_GROUPS.flatMap(([, c]) => c.map(x => [x[0], x])));

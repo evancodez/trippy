@@ -16,7 +16,7 @@ export const TOOLS = [
   { id: 'bulge', icon: 'bulge', name: 'Bulge', tip: 'Bulge: hold to puff it up' },
   { id: 'pinch', icon: 'pinch', name: 'Pinch', tip: 'Pinch: hold to suck it in' },
   { id: 'smear', icon: 'smear', name: 'Smear', tip: 'Smear: drag like wet paint' },
-  { id: 'figure', icon: 'hand', name: 'Figure', tip: 'Your cursor has the figure: hold and it reacts, scroll to size it' },
+  { id: 'figure', icon: 'hand', name: 'Figure', tip: 'Your cursor has the figure: hold and it reacts. Alt + scroll sizes it' },
   { id: 'shift', icon: 'shift', name: 'Shift', tip: 'Shift the figure: drag sideways and up and down. Click again to choose what each does' },
   { id: 'turn', icon: 'turn', name: 'Turn', tip: 'Turn the figure: drag sideways to spin it, up and down to lean it' },
   { id: 'camera', icon: 'orbit', name: 'Camera', tip: 'Camera: drag to turn and tilt, scroll to zoom (right-drag works with any tool)' },

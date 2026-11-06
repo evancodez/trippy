@@ -838,16 +838,42 @@ function download(blob, name) {
   a.href = URL.createObjectURL(blob);
   a.download = name;
   a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  setTimeout(() => URL.revokeObjectURL(a.href), 120000);   // (a long clip is a big file: give the save time to finish)
 }
 let afterRender = [];   // things that need the canvas right after a frame is drawn
 app.snapshot = () => {
   afterRender.push(() => canvas.toBlob(b => { download(b, `trippi-${stamp()}.png`); ui.toast('Picture saved'); }, 'image/png'));
 };
+// A clip keeps one size from start to finish. The drawing canvas doesn't: resolution drops whenever the GPU
+// falls behind, and a video file can't change size partway (everything after the change won't play). So what's
+// recorded is a copy of each frame, drawn into a canvas of its own whose size never moves.
+const CLIP_LONG = 2560;   // longest side of a clip, in pixels
+let copyToClip = null;    // set while recording: runs right after each frame is drawn
+function clipCopier() {
+  const k = Math.min(1, CLIP_LONG / Math.max(innerWidth, innerHeight));
+  const even = x => Math.max(2, Math.round(x * k / 2) * 2);   // (video encoders want even sizes)
+  const clip = document.createElement('canvas');
+  clip.width = even(innerWidth);
+  clip.height = even(innerHeight);
+  const g = clip.getContext('2d', { alpha: false });
+  const draw = () => {
+    const w = canvas.width, h = canvas.height;
+    const s = Math.min(w / clip.width, h / clip.height);        // if the window changes size, crop rather than stretch
+    const sw = clip.width * s, sh = clip.height * s;
+    g.drawImage(canvas, (w - sw) / 2, (h - sh) / 2, sw, sh, 0, 0, clip.width, clip.height);
+  };
+  draw();
+  return { clip, draw };
+}
 app.toggleRecord = () => {
-  if (app.recording) { app.recording.stop(); return; }
+  if (app.recording) {
+    if (app.recording.state !== 'inactive') app.recording.stop();
+    return;
+  }
   if (!window.MediaRecorder || !canvas.captureStream) return ui.toast('Recording is not supported in this browser');
-  const stream = canvas.captureStream(60);
+  const { clip, draw } = clipCopier();
+  const stream = clip.captureStream(60);
+  const picture = stream.getVideoTracks();
   const withAudio = app.audio.mode === 'file' && app.audio.recDest;
   if (withAudio) app.audio.recDest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
   const types = withAudio
@@ -856,15 +882,21 @@ app.toggleRecord = () => {
   const mimeType = types.find(t => MediaRecorder.isTypeSupported(t));
   const rec = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 16e6 });
   const chunks = [];
+  let failed = false;
   rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+  rec.onerror = e => { failed = true; console.warn('recording stopped', e.error || e); };
   rec.onstop = () => {
-    const type = rec.mimeType || mimeType || 'video/webm';
-    download(new Blob(chunks, { type }), `trippi-${stamp()}.${type.includes('mp4') ? 'mp4' : 'webm'}`);
+    copyToClip = null;
+    picture.forEach(t => t.stop());   // (only the picture: the sound's track is the song's, and the next clip needs it)
     app.recording = null;
     ui.refreshTop();
-    ui.toast('Clip saved');
+    if (!chunks.length) return ui.toast('Nothing was recorded — try again');
+    const type = rec.mimeType || mimeType || 'video/webm';
+    download(new Blob(chunks, { type }), `trippi-${stamp()}.${type.includes('mp4') ? 'mp4' : 'webm'}`);
+    ui.toast(failed ? 'Recording cut short — saved what there was' : 'Clip saved');
   };
-  rec.start(250);
+  rec.start(1000);
+  copyToClip = draw;
   app.recording = rec;
   app.recordStart = performance.now();
   ui.refreshTop();
@@ -1196,6 +1228,7 @@ function frame(now) {
   renderer.updateDisp(rt.brush);
   rt.sw = app.world.sw; rt.morph = app.world.k;
   renderer.render(P, rt, post);
+  if (copyToClip) copyToClip();
   if (afterRender.length) { const fns = afterRender; afterRender = []; fns.forEach(f => f()); }
   ui.tick(dt);
   adapt(dt);
